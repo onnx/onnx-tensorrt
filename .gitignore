@@ -1,0 +1,24 @@
+onnx2trt
+
+# Compiled files
+*.so
+*.o*
+*.lo
+*.la
+*.a
+.deps/
+
+# Backup files
+*~
+*.bak*
+
+# Log files
+*.log
+*.prof
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Build
+build

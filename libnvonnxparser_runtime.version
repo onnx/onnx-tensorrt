@@ -1,0 +1,9 @@
+{
+  global:
+    createNvOnnxParserPluginFactory_INTERNAL;
+    extern "C++" {
+      vtable*nvonnxparser::*;
+    };
+  local:
+    *;
+};

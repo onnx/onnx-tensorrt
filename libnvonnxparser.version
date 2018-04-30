@@ -1,0 +1,10 @@
+{
+  global:
+    createNvOnnxParser_INTERNAL;
+    getNvOnnxParserVersion;
+    extern "C++" {
+      vtable*nvonnxparser::*;
+    };
+  local:
+    *;
+};
