@@ -39,8 +39,9 @@ namespace {
 
 static bool registerBuiltinPlugin(const char* plugin_type,
                                   plugin_deserializer func) {
-  assert(getBuiltinPluginMap().insert({plugin_type, func}).second);
-  return true;
+  bool inserted = getBuiltinPluginMap().insert({plugin_type, func}).second;
+  assert(inserted);
+  return inserted;
 }
 
 #define IGNORE_UNUSED_GLOBAL(x) \

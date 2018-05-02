@@ -159,7 +159,7 @@ bool registerBuiltinOpImporter(std::string op,
                                NodeImporter const& importer) {
   bool inserted = getBuiltinOpImporterMap().insert({op, importer}).second;
   assert(inserted);
-  return true;
+  return inserted;
 }
 
 #define DECLARE_BUILTIN_OP_IMPORTER(op) \
