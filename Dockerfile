@@ -1,5 +1,8 @@
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 
+RUN rm -f /usr/lib/x86_64-linux-gnu/libnccl_static.a \
+          /usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
+
 # Install package dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf \
@@ -26,7 +29,6 @@ RUN cd /usr/local/src && \
     pip2 install --upgrade pip && \
     python3 get-pip.py && \
     pip3 install --upgrade pip && \
-    cd ../ && \
     rm -f get-pip.py
 
 # Build and install onnx
@@ -49,6 +51,7 @@ COPY TensorRT-${TENSORRT_VERSION}.*.tar.gz .
 RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     cd TensorRT-${TENSORRT_VERSION}.* && \
     cp lib/* /usr/lib/x86_64-linux-gnu/ && \
+    rm /usr/lib/x86_64-linux-gnu/libnv*.a && \
     cp include/* /usr/include/x86_64-linux-gnu/ && \
     cp bin/* /usr/bin/ && \
     mkdir /usr/share/doc/tensorrt && \
@@ -60,7 +63,8 @@ RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     pip2 install uff/uff-*-py2.py3-none-any.whl && \
     pip3 install uff/uff-*-py2.py3-none-any.whl && \
     cd ../ && \
-    rm TensorRT-${TENSORRT_VERSION}.*.tar.gz
+    rm -rf TensorRT-${TENSORRT_VERSION}.*
+
 # Build the library
 
 ENV ONNX2TRT_VERSION 0.1.0
