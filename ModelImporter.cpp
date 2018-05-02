@@ -233,6 +233,7 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);
+      // Note: This condition is to allow ONNX outputs to be ignored
       if( output ) {
         ASSERT(!tensors.count(node_output_name), ErrorCode::kINVALID_GRAPH);
 

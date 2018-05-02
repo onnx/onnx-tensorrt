@@ -25,7 +25,7 @@
 #include <NvInferPlugin.h>
 
 namespace onnx2trt {
-  
+
   void IOwnable::destroy() {
     delete this;
   }
@@ -33,7 +33,7 @@ namespace onnx2trt {
   }
 
 // ========================= Plugin =====================
-  
+
   void Plugin::serializeBase(void*& buffer)  {
     const char* plugin_type = getPluginType();
     serialize_value(&buffer, (const char*)REGISTERABLE_PLUGIN_MAGIC_STRING);
@@ -43,14 +43,14 @@ namespace onnx2trt {
     serialize_value(&buffer, _data_type);
     serialize_value(&buffer, _data_format);
   }
-  
+
   void Plugin::deserializeBase(void const*& serialData, size_t& serialLength) {
     deserialize_value(&serialData, &serialLength, &_input_dims);
     deserialize_value(&serialData, &serialLength, &_max_batch_size);
     deserialize_value(&serialData, &serialLength, &_data_type);
     deserialize_value(&serialData, &serialLength, &_data_format);
   }
-  
+
   size_t Plugin::getBaseSerializationSize()  {
     const char* plugin_type = getPluginType();
     return (sizeof(REGISTERABLE_PLUGIN_MAGIC_STRING) + 1 +
@@ -66,7 +66,7 @@ namespace onnx2trt {
     return ((type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kHALF)  &&
             (format == nvinfer1::PluginFormat::kNCHW));
   }
-  
+
   void Plugin::configureWithFormat(const nvinfer1::Dims* inputDims, int nbInputs,
                                    const nvinfer1::Dims* outputDims, int nbOutputs,
                                    nvinfer1::DataType type,
@@ -77,12 +77,12 @@ namespace onnx2trt {
     _input_dims.assign(inputDims, inputDims + nbInputs);
     _max_batch_size = maxBatchSize;
   }
-  
+
   Plugin::~Plugin() {
   }
 
 // ========================= PluginAdapter =====================
-  
+
   int PluginAdapter::getNbOutputs() const {
     return _plugin->getNbOutputs();
   }
@@ -102,11 +102,14 @@ namespace onnx2trt {
     if (_ext)
       return _ext->supportsFormat(type, format);
     else
-      return type == DataType::kFLOAT && format == PluginFormat::kNCHW;
+      return (type == nvinfer1::DataType::kFLOAT &&
+              format == nvinfer1::PluginFormat::kNCHW);
   }
   void PluginAdapter::configureWithFormat(const nvinfer1::Dims *inputDims, int nbInputs,
                                           const nvinfer1::Dims *outputDims, int nbOutputs,
-                                          DataType type, PluginFormat format, int maxBatchSize) {
+                                          nvinfer1::DataType type,
+                                          nvinfer1::PluginFormat format,
+                                          int maxBatchSize) {
     if (_ext)
       return _ext->configureWithFormat(inputDims, nbInputs,
                                        outputDims, nbOutputs,
@@ -120,13 +123,13 @@ namespace onnx2trt {
     return _plugin->getWorkspaceSize(maxBatchSize);
   }
   int PluginAdapter::initialize() { return _plugin->initialize(); }
-  
+
   void PluginAdapter::terminate() {
     if (_plugin) {
       _plugin->terminate();
     }
   }
-  
+
   int PluginAdapter::enqueue(int batchSize,
                              const void *const *inputs, void **outputs,
                              void *workspace, cudaStream_t stream) {
@@ -134,7 +137,7 @@ namespace onnx2trt {
   }
 
 // ========================= NvPlugin =====================
-  
+
   const char* NvPlugin::getPluginType() const {
     using namespace nvinfer1;
     switch( _plugin->getPluginType() ) {
@@ -159,7 +162,4 @@ namespace onnx2trt {
     delete this;
   }
 
-
-
-  
 } // namespace onnx2trt

@@ -371,6 +371,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Constant) {
+  // TODO: This silently fails if the dtype is not supported
   OnnxAttrs attrs(node);
   return {{attrs.get<ShapedWeights>("value")}};
 }

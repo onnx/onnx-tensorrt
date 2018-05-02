@@ -61,27 +61,6 @@ namespace nvinfer1 {
 
 namespace onnx2trt {
 
-  using nvinfer1::DataType;
-  using nvinfer1::PluginFormat;
-  using nvinfer1::IPlugin;
-  using nvinfer1::IPluginExt;
-
-  struct InferDeleter {
-    template<typename T>
-    void operator()(T* obj) const {
-      if( obj ) {
-        obj->destroy();
-      }
-    }
-  };
-  template<typename T>
-  inline std::shared_ptr<T> infer_object(T* obj) {
-    if( !obj ) {
-      throw std::runtime_error("Failed to create object");
-    }
-  return std::shared_ptr<T>(obj, InferDeleter());
-}
-
 struct IOwnable {
   virtual void destroy();
 protected:
@@ -93,7 +72,7 @@ struct OwnableDeleter {
     obj->destroy();
   }
 };
-  
+
 using UniqueOwnable = std::unique_ptr<IOwnable, OwnableDeleter>;
 class Plugin;
 

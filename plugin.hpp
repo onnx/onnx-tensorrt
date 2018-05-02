@@ -38,10 +38,9 @@ namespace onnx2trt {
 // Adapts a plugin so that its type is automatically serialized, enabling it
 // to be identified when deserializing.
 class Plugin : public nvinfer1::IPluginExt, public IOwnable {
-  
 public:
   virtual const char* getPluginType() const = 0;
-  
+
   nvinfer1::Dims const&  getInputDims(int index) const { return _input_dims.at(index); }
   size_t                 getMaxBatchSize()       const { return _max_batch_size; }
   nvinfer1::DataType     getDataType()           const { return _data_type; }
@@ -51,11 +50,10 @@ public:
 
   int         initialize()           override { return 0;}
   void        terminate()            override {}
-  
-  
+
   bool supportsFormat(nvinfer1::DataType type,
                       nvinfer1::PluginFormat format) const override;
-  
+
   void configureWithFormat(const nvinfer1::Dims* inputDims, int nbInputs,
                            const nvinfer1::Dims* outputDims, int nbOutputs,
                            nvinfer1::DataType type,
@@ -75,25 +73,27 @@ protected:
 
 class PluginAdapter : public Plugin {
 protected:
-  IPlugin*     _plugin;
-  IPluginExt*  _ext;
+  nvinfer1::IPlugin*     _plugin;
+  nvinfer1::IPluginExt*  _ext;
 public:
-  PluginAdapter(IPlugin* plugin) :
+  PluginAdapter(nvinfer1::IPlugin* plugin) :
     _plugin(plugin), _ext(dynamic_cast<IPluginExt*>(plugin)) {}
   virtual int getNbOutputs() const override;
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputDims,
                                              int nbInputs) override ;
-  virtual void serialize(void* buffer) override ;
-  virtual size_t getSerializationSize() override ;
+  virtual void serialize(void* buffer) override;
+  virtual size_t getSerializationSize() override;
 
   virtual int  initialize() override;
   virtual void terminate() override;
-  
+
   virtual bool supportsFormat(nvinfer1::DataType type, nvinfer1::PluginFormat format) const override;
   virtual void configureWithFormat(const nvinfer1::Dims *inputDims, int nbInputs,
                                    const nvinfer1::Dims *outputDims, int nbOutputs,
-                                   DataType type, PluginFormat format, int maxBatchSize) override;
+                                   nvinfer1::DataType type,
+                                   nvinfer1::PluginFormat format,
+                                   int maxBatchSize);
   virtual size_t getWorkspaceSize(int maxBatchSize) const override;
   virtual int enqueue(int batchSize,
                       const void *const *inputs, void **outputs,
