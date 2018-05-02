@@ -162,7 +162,7 @@ if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
 endif()
 list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC --expt-extended-lambda")
 CUDA_INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR})
-CUDA_ADD_LIBRARY(nvonnxparser_plugin ${PLUGIN_SOURCES})
+CUDA_ADD_LIBRARY(nvonnxparser_plugin STATIC ${PLUGIN_SOURCES})
 target_include_directories(nvonnxparser_plugin PUBLIC ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
 target_link_libraries(nvonnxparser_plugin ${TENSORRT_LIBRARY})
 
