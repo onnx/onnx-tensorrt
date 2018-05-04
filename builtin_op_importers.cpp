@@ -446,7 +446,6 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   }
   OnnxAttrs attrs(node);
   nvinfer1::DimsHW input_shape  = get_DimsHW_from_CHW(tensor.getDimensions());
-  // TODO: Check that output_shape is supposed to be just the spatial dims and not all of the dims
   nvinfer1::DimsHW output_shape;
   if( attrs.count("output_shape") ) {
     output_shape = attrs.get<nvinfer1::DimsHW>("output_shape");
@@ -471,7 +470,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   nvinfer1::Dims dims = tensor.getDimensions();
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   int nchan = dims.d[0];
-  int noutput = kernel_weights.shape.d[1]; // Note: Weights order is CKRS
+  int ngroup = attrs.get("group", 1);
+  int noutput = kernel_weights.shape.d[1] * ngroup; // Note: Weights order is CKRS
   nvinfer1::IDeconvolutionLayer* deconv_layer = ctx->network()->addDeconvolution(
     tensor, noutput, kernel_size, kernel_weights, bias_weights);
   nvinfer1::ILayer* layer = deconv_layer;
@@ -484,9 +484,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
                                        -beg_padding, -end_padding);
   }
   ASSERT(dilations.h() == 1 && dilations.w() == 1, ErrorCode::kUNSUPPORTED_NODE);
-  // Note: The ONNX docs don't actually mention a "group" attribute for ConvTranspose yet
-  int ngroup = attrs.get("group", 1);
-  assert(kernel_weights.shape.d[0] * ngroup == nchan);
+  ASSERT(kernel_weights.shape.d[0] == nchan, ErrorCode::kINVALID_NODE);
   deconv_layer->setNbGroups(ngroup);
   RETURN_FIRST_OUTPUT(layer);
 }
