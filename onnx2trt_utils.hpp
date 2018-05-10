@@ -88,6 +88,27 @@ inline int get_dtype_size(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype) {
   }
 }
 
+inline const char* get_dtype_name(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype) {
+  switch( onnx_dtype ) {
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT:      return "FLOAT";
+  case ::ONNX_NAMESPACE::TensorProto::UINT8:      return "UINT8";
+  case ::ONNX_NAMESPACE::TensorProto::INT8:       return "INT8";
+  case ::ONNX_NAMESPACE::TensorProto::UINT16:     return "UINT16";
+  case ::ONNX_NAMESPACE::TensorProto::INT16:      return "INT16";
+  case ::ONNX_NAMESPACE::TensorProto::INT32:      return "INT32";
+  case ::ONNX_NAMESPACE::TensorProto::INT64:      return "INT64";
+  case ::ONNX_NAMESPACE::TensorProto::STRING:     return "STRING";
+  case ::ONNX_NAMESPACE::TensorProto::BOOL:       return "BOOL";
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT16:    return "FLOAT16";
+  case ::ONNX_NAMESPACE::TensorProto::DOUBLE:     return "DOUBLE";
+  case ::ONNX_NAMESPACE::TensorProto::UINT32:     return "UINT32";
+  case ::ONNX_NAMESPACE::TensorProto::UINT64:     return "UINT64";
+  case ::ONNX_NAMESPACE::TensorProto::COMPLEX64:  return "COMPLEX64";
+  case ::ONNX_NAMESPACE::TensorProto::COMPLEX128: return "COMPLEX128";
+  default: return "<UNKNOWN>";
+  }
+}
+
 inline bool convert_dtype(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype,
                           nvinfer1::DataType* trt_dtype) {
   switch( onnx_dtype ) {
@@ -95,7 +116,8 @@ inline bool convert_dtype(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype,
   case ::ONNX_NAMESPACE::TensorProto::INT8:    *trt_dtype = nvinfer1::DataType::kINT8;  break;
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
   default:
-    cerr << "Unsupported ONNX data type: " + std::to_string(onnx_dtype) << endl;
+    cerr << "Unsupported ONNX data type: " << get_dtype_name(onnx_dtype)
+         << " (" << std::to_string(onnx_dtype) << ")" << endl;
     return false;
   }
   return true;
