@@ -269,18 +269,20 @@ int main(int argc, char* argv[]) {
       int nerror = trt_parser->getNbErrors();
       for( int i=0; i<nerror; ++i ) {
         nvonnxparser::IParserError const* error = trt_parser->getError(i);
-        ::ONNX_NAMESPACE::NodeProto const& node =
+        if( error->node() != -1 ) {
+          ::ONNX_NAMESPACE::NodeProto const& node =
             onnx_model.graph().node(error->node());
-        cerr << "While parsing node number " << error->node()
-             << " [" << node.op_type();
-        if( node.output().size() ) {
-          cerr << " -> \"" << node.output(0) << "\"";
-        }
-        cerr << "]:" << endl;
-        if( verbosity >= (int)nvinfer1::ILogger::Severity::kINFO ) {
-          cerr << "--- Begin node ---" << endl;
-          cerr << node << endl;
-          cerr << "--- End node ---" << endl;
+          cerr << "While parsing node number " << error->node()
+               << " [" << node.op_type();
+          if( node.output().size() ) {
+            cerr << " -> \"" << node.output(0) << "\"";
+          }
+          cerr << "]:" << endl;
+          if( verbosity >= (int)nvinfer1::ILogger::Severity::kINFO ) {
+            cerr << "--- Begin node ---" << endl;
+            cerr << node << endl;
+            cerr << "--- End node ---" << endl;
+          }
         }
         cerr << "ERROR: "
              << error->file() << ":" << error->line()
