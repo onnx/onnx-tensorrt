@@ -104,8 +104,8 @@ move_tensor_dimension(IImporterContext* ctx,
                       nvinfer1::ITensor& tensor,
                       int from, int to) {
   int ndim = tensor.getDimensions().nbDims;
-  assert(0 <= from && from < ndim);
-  assert(0 <= to   && to   < ndim);
+  if( !(0 <= from && from < ndim) ) { return nullptr; }
+  if( !(0 <= to   && to   < ndim) ) { return nullptr; }
   std::vector<int> vperm;
   vperm.reserve(ndim);
   for( int i=0; i<ndim; ++i ) {
@@ -245,6 +245,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Add) {
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   // TODO: Check ONNX defaults for these
   nvinfer1::DimsHW kernel_size(1, 1), strides(1, 1), beg_padding(0, 0), end_padding(0, 0);
   get_kernel_params(node, get_DimsHW_from_CHW(tensor.getDimensions()),
@@ -267,8 +268,9 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
       beg_padding.d[d] += strides.d[d];
       pre_crop.d[d] = 1;
     } else {
-      throw std::invalid_argument(
-        "Unsupported form of asymmetric padding for AveragePool op");
+      bool supported_form_of_asymmetric_padding_for_AveragePool = false;
+      ASSERT(supported_form_of_asymmetric_padding_for_AveragePool,
+             ErrorCode::kUNSUPPORTED_NODE);
     }
   }
   pooling_layer->setPadding(beg_padding);
@@ -399,6 +401,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv) {
   nvinfer1::DimsHW strides(1, 1);
   nvinfer1::DimsHW beg_padding(0, 0), end_padding(0, 0);
   nvinfer1::DimsHW dilations(1, 1);
+  ASSERT(tensor_ptr->getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   get_kernel_params(node, get_DimsHW_from_CHW(tensor_ptr->getDimensions()),
                     &kernel_size, &strides,
                     &beg_padding, &end_padding, &dilations);
@@ -439,12 +442,14 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
     ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     auto shaped_bias_weights = inputs.at(2).weights();
     ASSERT(shaped_bias_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-    ASSERT(shaped_bias_weights.shape.d[0] == kernel_weights.shape.d[1], ErrorCode::kINVALID_NODE);
+    ASSERT(shaped_bias_weights.shape.d[0] == kernel_weights.shape.d[1],
+           ErrorCode::kINVALID_NODE);
     bias_weights = shaped_bias_weights;
   } else {
     bias_weights = ShapedWeights::empty(kernel_weights.type);
   }
   OnnxAttrs attrs(node);
+  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::DimsHW input_shape  = get_DimsHW_from_CHW(tensor.getDimensions());
   nvinfer1::DimsHW output_shape;
   if( attrs.count("output_shape") ) {
@@ -706,6 +711,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   // TODO: Check ONNX defaults for these
   nvinfer1::DimsHW kernel_size(1, 1), strides(1, 1), beg_padding(0, 0), end_padding(0, 0);
+  ASSERT(tensor_ptr->getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   get_kernel_params(node, get_DimsHW_from_CHW(tensor_ptr->getDimensions()),
                     &kernel_size, &strides, &beg_padding, &end_padding);
   if( beg_padding != end_padding ) {
