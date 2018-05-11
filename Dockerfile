@@ -35,11 +35,13 @@ RUN cd /usr/local/src && \
 RUN cd /usr/local/src && \
     git clone --recurse-submodules https://github.com/onnx/onnx.git && \
     cd onnx && \
-    git checkout 8bcecad && \
+    git checkout dee6d89 && \
+    pip2 install  pybind11 && \ 
+    pip2 install  protobuf && \ 
+    pip2 install numpy && \
     python setup.py build && \
     python setup.py install && \
-    cd ../ && \
-    rm -rf onnx/
+    cd ../ 
 
 RUN pip2 install numpy && \
     pip3 install numpy
@@ -57,7 +59,7 @@ RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     mkdir /usr/share/doc/tensorrt && \
     cp -r doc/* /usr/share/doc/tensorrt/ && \
     mkdir /usr/src/tensorrt && \
-    cp -r samples /usr/src/tensorrt/ && \
+    cp -r samples /usr/src/tensorrt/  && \
     pip2 install python/tensorrt-${TENSORRT_VERSION}.*-cp27-cp27mu-linux_x86_64.whl && \
     pip3 install python/tensorrt-${TENSORRT_VERSION}.*-cp35-cp35m-linux_x86_64.whl && \
     pip2 install uff/uff-*-py2.py3-none-any.whl && \
