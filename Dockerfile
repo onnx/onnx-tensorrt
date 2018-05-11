@@ -39,12 +39,11 @@ RUN cd /usr/local/src && \
     pip2 install  pybind11 && \ 
     pip2 install  protobuf && \ 
     pip2 install numpy && \
+    pip3 install numpy && \
     python setup.py build && \
     python setup.py install && \
-    cd ../ 
-
-RUN pip2 install numpy && \
-    pip3 install numpy
+    cd ../ && \
+    rm -rf onnx/ 
 
 # Install TensorRT
 WORKDIR /usr/local/src
