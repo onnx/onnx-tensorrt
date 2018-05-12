@@ -42,6 +42,10 @@ template<> std::vector<int> OnnxAttrs::get<std::vector<int>>(std::string key) co
   auto attr = this->at(key)->ints();
   return std::vector<int>(attr.begin(), attr.end());
 }
+template<> std::vector<float> OnnxAttrs::get<std::vector<float>>(std::string key) const {
+  auto attr = this->at(key)->floats();
+  return std::vector<float>(attr.begin(), attr.end());
+}
 template<> nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(std::string key) const {
   auto values = this->get<std::vector<int>>(key);
   nvinfer1::Dims dims;
