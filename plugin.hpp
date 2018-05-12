@@ -59,6 +59,7 @@ public:
                            nvinfer1::DataType type,
                            nvinfer1::PluginFormat format,
                            int maxBatchSize) override;
+  void destroy() override { delete this; }
 protected:
   void   deserializeBase(void const*& serialData, size_t& serialLength);
   size_t getBaseSerializationSize();
@@ -68,7 +69,7 @@ protected:
   size_t                      _max_batch_size;
   nvinfer1::DataType          _data_type;
   nvinfer1::PluginFormat      _data_format;
-  virtual ~Plugin();
+  virtual ~Plugin() {}
 };
 
 class PluginAdapter : public Plugin {
@@ -100,7 +101,34 @@ public:
                       void *workspace, cudaStream_t stream) override;
 };
 
-// Adapts nvinfer1::plugin::INvPlugin into onnx2trt::IPlugin
+// This makes a plugin compatible with onnx2trt::PluginFactory by serializing
+// its plugin type.
+class TypeSerializingPlugin : public PluginAdapter {
+  UniqueOwnable _owned_plugin;
+  Plugin* _plugin;
+public:
+  TypeSerializingPlugin(Plugin* plugin)
+    : PluginAdapter(plugin), _owned_plugin(plugin), _plugin(plugin) {}
+  void serialize(void* buffer) override {
+    const char* plugin_type = _plugin->getPluginType();
+    serialize_value(&buffer, (const char*)REGISTERABLE_PLUGIN_MAGIC_STRING);
+    serialize_value(&buffer, plugin_type);
+    return _plugin->serialize(buffer);
+  }
+  size_t getSerializationSize() override {
+    const char* plugin_type = _plugin->getPluginType();
+    // Note: +1 for NULL-terminated string
+    return (sizeof(REGISTERABLE_PLUGIN_MAGIC_STRING) + 1 +
+            strlen(plugin_type) +
+            _plugin->getSerializationSize());
+  }
+  const char* getPluginType() const override {
+    return _plugin->getPluginType();
+  }
+  void destroy() override { delete this; }
+};
+
+// Adapts nvinfer1::plugin::INvPlugin into onnx2trt::Plugin
 // (This enables existing NV plugins to be used in this plugin infrastructure)
 class NvPlugin : public PluginAdapter {
   nvinfer1::plugin::INvPlugin*  _plugin;
@@ -110,5 +138,5 @@ public:
   virtual const char* getPluginType() const override;
   virtual void destroy() override;
 };
-  
+
 } // namespace onnx2trt
