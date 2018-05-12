@@ -364,6 +364,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
     // Support negative indexing
     axis += inputs.at(0).shape().nbDims;
   }
+  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE);
   if( axis == 1 ) {
     RETURN_FIRST_OUTPUT(
       ctx->network()->addConcatenation(tensors.data(), tensors.size()));
