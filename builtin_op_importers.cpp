@@ -178,9 +178,11 @@ bool registerBuiltinOpImporter(std::string op,
                               ::ONNX_NAMESPACE::NodeProto const& node, \
                               std::vector<TensorOrWeights>& inputs)
 
-#define RETURN_FIRST_OUTPUT(layer) \
-  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE); \
-  return {{layer->getOutput(0)}}
+#define RETURN_FIRST_OUTPUT(layer) do { \
+  nvinfer1::ILayer* layer_ptr = layer; \
+  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); \
+  return {{layer_ptr->getOutput(0)}}; \
+} while(0)
 
 #define RETURN_IDENTITY(input) do { \
   TensorOrWeights output = identity(ctx, input); \
