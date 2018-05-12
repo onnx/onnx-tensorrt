@@ -1017,10 +1017,11 @@ DEFINE_BUILTIN_OP_IMPORTER(SpatialBN) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Split) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(inputs.size() == 1, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims dims = inputs.at(0).shape();
   OnnxAttrs attrs(node);
-  int axis = attrs.get<int>("axis");
-  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE);
+  int axis = attrs.get<int>("axis", 0);
+  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE); // Can't split the batch dim
   if( axis < 0 ) {
     axis += dims.nbDims;
     // HACK TODO: This is a (bad) WAR for the fact that the input dims may
