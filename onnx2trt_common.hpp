@@ -62,9 +62,9 @@ namespace nvinfer1 {
 namespace onnx2trt {
 
 struct IOwnable {
-  virtual void destroy();
+  virtual void destroy() = 0;
 protected:
-  virtual ~IOwnable();
+  virtual ~IOwnable() {}
 };
 
 struct OwnableDeleter {

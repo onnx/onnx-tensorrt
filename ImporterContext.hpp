@@ -52,11 +52,14 @@ public:
   }
   virtual nvinfer1::IPluginLayer* addPlugin(Plugin* plugin,
                                             std::vector<nvinfer1::ITensor*> const& inputs) override {
-    _owned_plugin_instances.emplace_back(plugin);
+    // Note: Plugins are wrapped here to make them work with
+    // onnx2trt::PluginFactory.
+    auto* wrapped_plugin = new TypeSerializingPlugin(plugin);
+    _owned_plugin_instances.emplace_back(wrapped_plugin);
 #if NV_TENSORRT_MAJOR < 4
-    return _network->addPlugin(inputs.data(), inputs.size(), *plugin);
+    return _network->addPlugin(inputs.data(), inputs.size(), *wrapped_plugin);
 #else
-    return _network->addPluginExt(inputs.data(), inputs.size(), *plugin);
+    return _network->addPluginExt(inputs.data(), inputs.size(), *wrapped_plugin);
 #endif
   }
   bool setUserInput(const char* name, nvinfer1::ITensor* input) {
