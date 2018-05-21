@@ -70,6 +70,9 @@ set(RUNTIME_SOURCES
   PluginFactory.cpp
   builtin_plugins.cpp
 )
+
+set(ONNXIFY_SOURCES onnx_trt_backend.cpp)
+
 set(EXECUTABLE_SOURCES
   main.cpp
 )
@@ -205,6 +208,13 @@ set_target_properties(nvonnxparser_runtime PROPERTIES
 add_library(nvonnxparser_runtime_static STATIC ${RUNTIME_SOURCES})
 target_include_directories(nvonnxparser_runtime_static PUBLIC ${CUDA_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
 target_link_libraries(nvonnxparser_runtime_static PUBLIC nvonnxparser_plugin ${CUDNN_LIBRARY} ${TENSORRT_LIBRARY})
+
+# --------------------------------
+# Onnxify library
+# --------------------------------
+add_library(trt_onnxify SHARED ${ONNXIFY_SOURCES})
+target_include_directories(trt_onnxify PUBLIC ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
+target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} -lrt -lpthread)
 
 # --------------------------------
 # Converter executable
