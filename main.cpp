@@ -250,6 +250,7 @@ int main(int argc, char* argv[]) {
   //if( print_layer_info ) {
   //  parser->setLayerInfoStream(&std::cout);
   //}
+  (void)print_layer_info;
 
   if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {
     cout << "Parsing model" << endl;
