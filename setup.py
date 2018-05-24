@@ -87,5 +87,6 @@ setup(name='onnx_tensorrt',
       ext_modules=[nv_onnx_parser_module, nv_onnx_runtime_module],
       install_requires=[
           "numpy>=1.8.1",
-          "onnx>=1.0.1"
+          "tensorrt>=3.0.0",
+          "onnx>=1.0.1",
       ])
