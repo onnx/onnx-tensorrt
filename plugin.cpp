@@ -29,7 +29,6 @@ namespace onnx2trt {
 // ========================= Plugin =====================
 
   void Plugin::serializeBase(void*& buffer)  {
-    const char* plugin_type = getPluginType();
     serialize_value(&buffer, _input_dims);
     serialize_value(&buffer, _max_batch_size);
     serialize_value(&buffer, _data_type);
@@ -44,7 +43,6 @@ namespace onnx2trt {
   }
 
   size_t Plugin::getBaseSerializationSize()  {
-    const char* plugin_type = getPluginType();
     return (serialized_size(_input_dims) +
             serialized_size(_max_batch_size) +
             serialized_size(_data_type) +

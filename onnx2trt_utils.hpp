@@ -175,6 +175,7 @@ inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tenso
     return false;
   }
   onnx2trt::ShapedWeights trt_weights(dtype, data_ptr, shape);
+  (void)nbytes;
   assert(trt_weights.size_bytes() == nbytes);
   *weights = trt_weights;
   return true;

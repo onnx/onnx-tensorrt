@@ -60,6 +60,7 @@ ShapedWeights::operator bool() const {
 ShapedWeights::operator nvinfer1::Weights() const {
   nvinfer1::Weights w;
   bool supported_type = convert_dtype(this->type, &w.type);
+  (void)supported_type;
   assert(supported_type);
   w.values = this->values;
   w.count = this->count();

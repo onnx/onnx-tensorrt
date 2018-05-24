@@ -162,6 +162,12 @@ bool registerBuiltinOpImporter(std::string op,
   return inserted;
 }
 
+#define IGNORE_UNUSED_GLOBAL(x) \
+  static void _ignore_unused2_##x(); \
+  static void _ignore_unused1_##x() { (void)_ignore_unused2_##x; (void)x; } \
+  static void _ignore_unused2_##x() { (void)_ignore_unused1_##x; } \
+  struct SwallowSemicolon##x {}
+
 #define DECLARE_BUILTIN_OP_IMPORTER(op) \
   NodeImportResult import##op(IImporterContext* ctx, \
                               ::ONNX_NAMESPACE::NodeProto const& node, \
@@ -173,7 +179,7 @@ bool registerBuiltinOpImporter(std::string op,
                           std::vector<TensorOrWeights>& inputs); \
   static const bool op##_registered_builtin_op = \
       registerBuiltinOpImporter(#op, import##op); \
-  const void* op##_registered_builtin_op_ptr = &op##_registered_builtin_op; \
+  IGNORE_UNUSED_GLOBAL(op##_registered_builtin_op); \
   NodeImportResult import##op(IImporterContext* ctx, \
                               ::ONNX_NAMESPACE::NodeProto const& node, \
                               std::vector<TensorOrWeights>& inputs)

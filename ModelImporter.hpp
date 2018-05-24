@@ -58,7 +58,7 @@ public:
   //virtual Status const& setOutput(const char* name, nvinfer1::ITensor** output) override;
   int getNbErrors() const override { return _errors.size(); }
   nvonnxparser::IParserError const* getError(int index) const override {
-    assert(0 <= index && index < _errors.size());
+    assert(0 <= index && index < (int)_errors.size());
     return &_errors[index];
   }
   void clearErrors() override { _errors.clear(); }

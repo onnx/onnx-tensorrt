@@ -94,6 +94,7 @@ int InstanceNormalizationPlugin::initialize() {
     return 0;
   }
   nvinfer1::Dims input_dims = this->getInputDims(0);
+  (void)input_dims;
   assert(is_CHW(input_dims));
   assert(input_dims.d[0] == _nchan);
   int nbatch = this->getMaxBatchSize();
