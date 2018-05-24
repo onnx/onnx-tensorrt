@@ -37,12 +37,8 @@ class InstanceNormalizationPlugin final : public onnx2trt::Plugin {
   float* _d_scale;
   float* _d_bias;
   bool _initialized;
-  
-  half_type* _x_fp16_buf;
-  half_type* _y_fp16_buf;
   cudnnHandle_t _cudnn_handle;
   cudnnTensorDescriptor_t _x_desc, _y_desc, _b_desc;
-  cudnnTensorDescriptor_t _x_fp16_desc, _y_fp16_desc;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
@@ -72,6 +68,8 @@ public:
     this->deserialize(serialData, serialLength);
   }
   const char* getPluginType() const override { return "InstanceNormalization"; }
+  bool supportsFormat(nvinfer1::DataType type,
+                      nvinfer1::PluginFormat format) const override;
   int getNbOutputs() const override { return 1; }
   nvinfer1::Dims getOutputDimensions(int index,
                                      const nvinfer1::Dims *inputDims,

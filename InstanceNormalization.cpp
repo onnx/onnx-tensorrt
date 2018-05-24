@@ -90,9 +90,9 @@ InstanceNormalizationPlugin::InstanceNormalizationPlugin(float epsilon,
 }
 
 int InstanceNormalizationPlugin::initialize() {
-  if (_initialized)
+  if (_initialized) {
     return 0;
-  
+  }
   nvinfer1::Dims input_dims = this->getInputDims(0);
   assert(is_CHW(input_dims));
   assert(input_dims.d[0] == _nchan);
@@ -107,108 +107,78 @@ int InstanceNormalizationPlugin::initialize() {
     CHECK_CUDA(cudaMemcpy(_d_bias  + i * _nchan,  _h_bias.data(), nchan_bytes, cudaMemcpyHostToDevice));
   }
   CHECK_CUDNN(cudnnCreate(&_cudnn_handle));
+  CHECK_CUDNN(cudnnCreateTensorDescriptor(&_b_desc));
   CHECK_CUDNN(cudnnCreateTensorDescriptor(&_x_desc));
   CHECK_CUDNN(cudnnCreateTensorDescriptor(&_y_desc));
-  CHECK_CUDNN(cudnnCreateTensorDescriptor(&_b_desc));
-
-  int c = _nchan;
-  int h = input_dims.d[1];
-  int w = input_dims.d[2];
-  if (getDataType() == nvinfer1::DataType::kFLOAT) {   
-    CHECK_CUDA(cudaMalloc((void**)&_x_fp16_buf, nbatch * c * h * w * sizeof(half_type)));
-    CHECK_CUDA(cudaMalloc((void**)&_y_fp16_buf, nbatch * c * h * w * sizeof(half_type)));
-  }
-  
-  CHECK_CUDNN(cudnnCreateTensorDescriptor(&_x_fp16_desc));
-  CHECK_CUDNN(cudnnCreateTensorDescriptor(&_y_fp16_desc));
   _initialized = true;
   return 0;
 }
 
 void InstanceNormalizationPlugin::terminate() {
-  if (!_initialized)
+  if (!_initialized) {
     return;
-  
-  cudnnDestroyTensorDescriptor(_y_fp16_desc);
-  cudnnDestroyTensorDescriptor(_x_fp16_desc);
-  if (getDataType() == nvinfer1::DataType::kFLOAT) {  
-    cudaFree(_y_fp16_buf);
-    cudaFree(_x_fp16_buf);
   }
-  cudnnDestroyTensorDescriptor(_b_desc);
   cudnnDestroyTensorDescriptor(_y_desc);
   cudnnDestroyTensorDescriptor(_x_desc);
+  cudnnDestroyTensorDescriptor(_b_desc);
   cudaFree(_d_bias);
   cudaFree(_d_scale);
   cudnnDestroy(_cudnn_handle);
   _initialized = false;
 }
 
-InstanceNormalizationPlugin::~InstanceNormalizationPlugin()
- {
-   terminate();
- }
+InstanceNormalizationPlugin::~InstanceNormalizationPlugin() {
+  terminate();
+}
+
+bool InstanceNormalizationPlugin::supportsFormat(nvinfer1::DataType type,
+                                                 nvinfer1::PluginFormat format) const {
+  return ((type == nvinfer1::DataType::kFLOAT ||
+           type == nvinfer1::DataType::kHALF) &&
+          format == nvinfer1::PluginFormat::kNCHW);
+}
+
+cudnnStatus_t convert_trt2cudnn_dtype(nvinfer1::DataType trt_dtype,
+                                      cudnnDataType_t* cudnn_dtype) {
+  switch( trt_dtype ) {
+  case nvinfer1::DataType::kFLOAT: *cudnn_dtype = CUDNN_DATA_FLOAT; break;
+  case nvinfer1::DataType::kHALF:  *cudnn_dtype = CUDNN_DATA_HALF;  break;
+  default: return CUDNN_STATUS_BAD_PARAM;
+  }
+  return CUDNN_STATUS_SUCCESS;
+}
 
 int InstanceNormalizationPlugin::enqueue(int batchSize,
-                                   const void *const *inputs, void **outputs,
-                                   void *workspace, cudaStream_t stream) {
+                                         const void *const *inputs, void **outputs,
+                                         void *workspace, cudaStream_t stream) {
   assert(_initialized);
   nvinfer1::Dims input_dims = this->getInputDims(0);
   int n = batchSize;
   int c = input_dims.d[0];
   int h = input_dims.d[1];
   int w = input_dims.d[2];
-  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_x_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, n*c, h, w));
-  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_y_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, n*c, h, w));
   CHECK_CUDNN(cudnnSetTensor4dDescriptor(_b_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, n*c, 1, 1));
-  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_x_fp16_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_HALF, 1, n*c, h, w));
-  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_y_fp16_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_HALF, 1, n*c, h, w));
-
+  cudnnDataType_t cudnn_dtype;
+  CHECK_CUDNN(convert_trt2cudnn_dtype(this->getDataType(), &cudnn_dtype));
+  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_x_desc, CUDNN_TENSOR_NCHW, cudnn_dtype, 1, n*c, h, w));
+  CHECK_CUDNN(cudnnSetTensor4dDescriptor(_y_desc, CUDNN_TENSOR_NCHW, cudnn_dtype, 1, n*c, h, w));
   float alpha = 1;
   float beta  = 0;
-  float const* x_ptr = static_cast<float const*>(inputs[0]);
-  float*       y_ptr = static_cast<float*      >(outputs[0]);
-  
+  void const* x_ptr = inputs[0];
+  void*       y_ptr = outputs[0];
   CHECK_CUDNN(cudnnSetStream(_cudnn_handle, stream));
-
-  if (getDataType()==nvinfer1::DataType::kFLOAT) {
-    CHECK_CUDNN(cudnnTransformTensor(_cudnn_handle,
-                                     &alpha, _x_desc, x_ptr,
-                                     &beta, _x_fp16_desc, _x_fp16_buf));
-  } else {
-    _x_fp16_buf = const_cast<half_type*>(reinterpret_cast<const half_type*>(x_ptr));
-    _y_fp16_buf = reinterpret_cast<half_type*>(y_ptr);
-  }
-    // TODO: Need to check for failure if using the persistent algo?
-  CHECK_CUDNN(cudnnBatchNormalizationForwardTraining(
-                _cudnn_handle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, &alpha, &beta,
-                _x_fp16_desc, _x_fp16_buf, _y_fp16_desc, _y_fp16_buf, _b_desc, _d_scale, _d_bias,
-                1., nullptr, nullptr, _epsilon, nullptr, nullptr));
-  
-  if (getDataType()==nvinfer1::DataType::kFLOAT) {
-    CHECK_CUDNN(cudnnTransformTensor(_cudnn_handle,
-                                     &alpha, _y_fp16_desc, _y_fp16_buf,
-                                     &beta, _y_desc, y_ptr));
-  }
-  
+  // Note: Use of CUDNN_BATCHNORM_SPATIAL_PERSISTENT can cause numerical
+  //       overflows (NaNs) for fp32 data in some circumstances. The lower-
+  //       performance CUDNN_BATCHNORM_SPATIAL should be used if this is not
+  //       acceptable.
+  CHECK_CUDNN(
+      cudnnBatchNormalizationForwardTraining(
+          _cudnn_handle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, &alpha, &beta,
+          _x_desc, x_ptr, _y_desc, y_ptr, _b_desc, _d_scale, _d_bias,
+          1., nullptr, nullptr, _epsilon, nullptr, nullptr));
   return 0;
 }
 
-size_t InstanceNormalizationPlugin::getWorkspaceSize(int maxBatchSize) const 
-{
-  int nbatch = this->getMaxBatchSize();
-  int typesize = sizeof(float);
-  
-  nvinfer1::Dims input_dims = this->getInputDims(0);
-  size_t ws =  _nchan * sizeof(float) *  nbatch * 2 ; // scale and
-                                                      // bias
-  #if NV_TENSORRT_MAJOR >= 4
-  typesize = (getDataType()==nvinfer1::DataType::kFLOAT?sizeof(float): sizeof(half_type));
-  int c = _nchan;
-  int h = input_dims.d[1];
-  int w = input_dims.d[2];
-  ws += (nbatch * c * h * w * typesize)*2; // in/out
-  # endif
-  return ws;
+size_t InstanceNormalizationPlugin::getWorkspaceSize(int maxBatchSize) const {
+  return 0;
 }
-
