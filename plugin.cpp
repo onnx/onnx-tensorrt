@@ -141,7 +141,9 @@ namespace onnx2trt {
 
   void NvPlugin::destroy() {
     if (_plugin) {
+#if NV_TENSORRT_MAJOR >= 4 // WAR for double-free issue with NvPlugins in TRT 3
       _plugin->destroy();
+#endif // NV_TENSORRT_MAJOR >= 4
       _plugin = 0;
     }
     delete this;
