@@ -948,29 +948,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
 //  //       Return {{output 0, output 1}}, but take care of outputs being optional (i.e., check how many outputs there are, as well as output_sequence)
 //}
 
-DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
-  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-  OnnxAttrs attrs(node);
-  float height_scale, width_scale;
-  if( !attrs.count("scales") ) {
-    height_scale = attrs.get<float>("height_scale");
-    width_scale  = attrs.get<float>("width_scale");
-  } else {
-    auto scales = attrs.get<std::vector<float>>("scales");
-    ASSERT(scales.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
-    ASSERT(scales[0] == 1 && scales[1] == 1, ErrorCode::kUNSUPPORTED_NODE);
-    height_scale = scales[2];
-    width_scale  = scales[3];
-  }
-  auto scale = {height_scale, width_scale};
-  auto mode = attrs.get<std::string>("mode", "nearest");
-  ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPlugin(new ResizeNearestPlugin(scale),
-                                     {&inputs.at(0).tensor()}));
-}
-
 DEFINE_BUILTIN_OP_IMPORTER(Selu) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
@@ -1129,6 +1106,29 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
     weights = new_weights;
     return {{weights}};
   }
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  float height_scale, width_scale;
+  if( !attrs.count("scales") ) {
+    height_scale = attrs.get<float>("height_scale");
+    width_scale  = attrs.get<float>("width_scale");
+  } else {
+    auto scales = attrs.get<std::vector<float>>("scales");
+    ASSERT(scales.size() == 4, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(scales[0] == 1 && scales[1] == 1, ErrorCode::kUNSUPPORTED_NODE);
+    height_scale = scales[2];
+    width_scale  = scales[3];
+  }
+  auto scale = {height_scale, width_scale};
+  auto mode = attrs.get<std::string>("mode", "nearest");
+  ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
+  RETURN_FIRST_OUTPUT(ctx->addPlugin(new ResizeNearestPlugin(scale),
+                                     {&inputs.at(0).tensor()}));
 }
 
 } // namespace
