@@ -36,14 +36,14 @@ RUN cd /usr/local/src && \
     git clone --recurse-submodules https://github.com/onnx/onnx.git && \
     cd onnx && \
     git checkout dee6d89 && \
-    pip2 install  pybind11 && \ 
-    pip2 install  protobuf && \ 
+    pip2 install pybind11 && \
+    pip2 install protobuf && \
     pip2 install numpy && \
     pip3 install numpy && \
     python setup.py build && \
     python setup.py install && \
     cd ../ && \
-    rm -rf onnx/ 
+    rm -rf onnx/
 
 # Install TensorRT
 WORKDIR /usr/local/src
