@@ -954,7 +954,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
   ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
   float height_scale, width_scale;
-  if( ctx->getOpsetVersion() < 7 ) {
+  if( !attrs.count("scales") ) {
     height_scale = attrs.get<float>("height_scale");
     width_scale  = attrs.get<float>("width_scale");
   } else {
