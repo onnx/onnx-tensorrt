@@ -1024,6 +1024,33 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   return {{tensor_ptr}};
 }
 
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(Mean) {
+  auto sum_result = combineTensorsElementwise(
+    ctx, inputs, nvinfer1::ElementWiseOperation::kSUM);
+  if( sum_result.is_error() ) {
+    return sum_result;
+  }
+  auto& sum_input = sum_result.value().at(0);
+  ASSERT(sum_input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& sum_tensor = sum_input.tensor();
+
+  int ndim = sum_tensor.getDimensions().nbDims;
+  float scale_value = 1.f / inputs.size();
+  auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+  auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
+  auto scale_weights = ctx->createTempWeights(scale_dtype, scale_shape);
+  static_cast<float*>(scale_weights.values)[0] = scale_value;
+  auto* constant_layer = ctx->network()->addConstant(
+      scale_weights.shape, scale_weights);
+  ASSERT(constant_layer, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& scale_constant = *constant_layer->getOutput(0);
+  RETURN_FIRST_OUTPUT(
+      ctx->network()->addElementWise(
+          sum_tensor, scale_constant, nvinfer1::ElementWiseOperation::kPROD));
+}
+#endif // NV_TENSORRT_MAJOR >= 4
+
 DEFINE_BUILTIN_OP_IMPORTER(Min) {
   return combineTensorsElementwise(
     ctx, inputs, nvinfer1::ElementWiseOperation::kMIN);
