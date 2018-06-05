@@ -65,6 +65,7 @@ Status importInput(ImporterContext* importer_ctx,
     *tensor = user_input;
     return Status::success();
   }
+#if NV_TENSORRT_MAJOR < 4
   // WAR for TRT not supporting < 3 input dims
   for( int i=trt_dims.nbDims; i<3; ++i ) {
     // Pad with unitary dims
@@ -75,6 +76,7 @@ Status importInput(ImporterContext* importer_ctx,
                         nvinfer1::DimensionType::kSPATIAL);
   }
   ASSERT(trt_dims.nbDims <= 3, ErrorCode::kUNSUPPORTED_NODE);
+#endif // NV_TENSORRT_MAJOR < 4
   ASSERT(*tensor = importer_ctx->network()->addInput(
            input.name().c_str(), trt_dtype, trt_dims),
          ErrorCode::kUNSUPPORTED_NODE);

@@ -41,9 +41,11 @@ class Binding(object):
         dtype_map = {trt.infer.DataType_kFLOAT: np.float32,
                      trt.infer.DataType_kHALF:  np.float16,
                      trt.infer.DataType_kINT8:  np.int8}
+        if hasattr(trt.infer, 'DataType_kINT32'):
+            dtype_map[trt.infer.DataType_kINT32] = np.int32
         self.dtype = dtype_map[dtype]
-        shape = engine.get_binding_dimensions(self.index).to_DimsCHW()
-        self.shape = [max_batch_size, shape.C(), shape.H(), shape.W()]
+        shape = engine.get_binding_dimensions(self.index).shape()
+        self.shape = (max_batch_size,) + shape
         self._host_buf   = None
         self._device_buf = None
     @property
@@ -69,20 +71,19 @@ def squeeze_hw(x):
         x = x.reshape(x.shape[:-1])
     return x
 
+def _tensorrt_version():
+    return [int(n) for n in trt.__version__.split('.')]
+
 class Engine(object):
     def __init__(self, trt_engine):
         self.engine = trt_engine
         self.max_batch_size = self.engine.get_max_batch_size()
         nbinding = self.engine.get_nb_bindings()
         bindings = [Binding(self.engine, i, self.max_batch_size)
-                              for i in range(nbinding)]
+                    for i in range(nbinding)]
         self.binding_addrs = [b.device_buffer.ptr for b in bindings]
         self.inputs  = [b for b in bindings if     b.is_input]
         self.outputs = [b for b in bindings if not b.is_input]
-        # Note: This imposes a fixed order on the bindings, which are otherwise
-        #         not guaranteed to be in any particular order.
-        self.inputs.sort( key=lambda b: b.name)
-        self.outputs.sort(key=lambda b: b.name)
         for binding in self.inputs + self.outputs:
             _ = binding.device_buffer # Force buffer allocation
         for binding in self.outputs:
@@ -102,9 +103,13 @@ class Engine(object):
         for i, (input_array, input_binding) in enumerate(zip(inputs, self.inputs)):
             if input_array.shape[0] != batch_size:
                 raise ValueError("All inputs must have same batch size")
-            if input_array.ndim < 4:
-                # WAR for TRT not supporting < 4D (NCHW) input
-                new_shape = input_array.shape + (1,) * (4 - input_array.ndim)
+            # WAR for TRT requiring at least 2 dims (NC)
+            min_dims = 2
+            if _tensorrt_version()[0] < 4:
+                min_dims = 4
+            if input_array.ndim < min_dims:
+                new_shape = (input_array.shape +
+                             (1,) * (min_dims - input_array.ndim))
                 input_array = input_array.reshape(new_shape)
             expected_shape = tuple(input_binding.shape[1:])
             given_shape    = tuple(input_array.shape[1:])
@@ -121,7 +126,6 @@ class Engine(object):
         results = [output.get_async(batch_size, self.stream)
                    for output in self.outputs]
         self.stream.synchronize()
-        results = {b.name: result for b, result in zip(self.outputs, results)}
         return results
     def run_no_dma(self, batch_size):
         self.context.enqueue(
