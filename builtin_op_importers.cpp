@@ -1335,6 +1335,41 @@ DEFINE_BUILTIN_OP_IMPORTER(Sqrt) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kSQRT);
 }
 
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(Squeeze) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::Dims old_shape = tensor.getDimensions();
+  int ndim_in = old_shape.nbDims;
+  OnnxAttrs attrs(node);
+  auto axes = attrs.get<std::vector<int>>("axes");
+  // Note: Can't handle batch dim as it is implicit in TRT
+  for( auto& axis : axes ) {
+    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+    --axis;
+  }
+  std::set<int> axes_set(axes.begin(), axes.end());
+  int ndim_out = ndim_in - axes_set.size();
+  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS,
+         ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::Dims new_shape;
+  new_shape.nbDims = ndim_out;
+  for( int i=0,j=0; i<old_shape.nbDims; ++i ) {
+    if( !axes_set.count(i) ) {
+      new_shape.d[j++] = old_shape.d[i];
+    } else {
+      ASSERT(old_shape.d[i] == 1, ErrorCode::kINVALID_NODE);
+    }
+  }
+  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  layer->setReshapeDimensions(new_shape);
+  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
+         get_shape_size(old_shape), ErrorCode::kUNSUPPORTED_NODE);
+  RETURN_FIRST_OUTPUT(layer);
+}
+#endif // NV_TENSORRT_MAJOR >= 4
+
 DEFINE_BUILTIN_OP_IMPORTER(Sub) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
@@ -1391,6 +1426,41 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
     return {{weights}};
   }
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::Dims old_shape = tensor.getDimensions();
+  int ndim_in = old_shape.nbDims;
+  OnnxAttrs attrs(node);
+  auto axes = attrs.get<std::vector<int>>("axes");
+  // Note: Can't handle batch dim as it is implicit in TRT
+  for( auto& axis : axes ) {
+    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+    --axis;
+  }
+  std::set<int> axes_set(axes.begin(), axes.end());
+  int ndim_out = ndim_in + axes_set.size();
+  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS,
+         ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::Dims new_shape;
+  new_shape.nbDims = ndim_out;
+  for( int i=0,j=0; j<new_shape.nbDims; ++j ) {
+    if( !axes_set.count(j) ) {
+      new_shape.d[j] = old_shape.d[i++];
+    } else {
+      new_shape.d[j] = 1;
+    }
+  }
+  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  layer->setReshapeDimensions(new_shape);
+  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
+         get_shape_size(old_shape), ErrorCode::kUNSUPPORTED_NODE);
+  RETURN_FIRST_OUTPUT(layer);
+}
+#endif // NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
