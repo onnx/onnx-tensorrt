@@ -1481,6 +1481,31 @@ DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu) {
          {&inputs.at(0).tensor()}));
 }
 
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(TopK) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  ASSERT(tensor.getType() != nvinfer1::DataType::kINT32,
+         ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  ASSERT(attrs.count("k"), ErrorCode::kINVALID_NODE);
+  int k    = attrs.get<int>("k");
+  int axis = attrs.get("axis", -1);
+  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+  if( axis < 0 ) {
+    nvinfer1::Dims dims = tensor.getDimensions();
+    axis += dims.nbDims;
+  } else {
+    --axis; // Don't include batch dim
+  }
+  uint32_t axis_mask = 1 << axis;
+  auto* layer = ctx->network()->addTopK(
+      tensor, nvinfer1::TopKOperation::kMAX, k, axis_mask);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  return {{layer->getOutput(0), layer->getOutput(1)}};
+}
+#endif // NV_TENSORRT_MAJOR >= 4
+
 DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
   TensorOrWeights input = inputs.at(0);
   OnnxAttrs attrs(node);
