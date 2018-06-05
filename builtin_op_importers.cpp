@@ -703,35 +703,23 @@ DEFINE_BUILTIN_OP_IMPORTER(Exp) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
-  //nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   OnnxAttrs attrs(node);
   int axis = attrs.get("axis", 1);
-  // Note: Flattening to shape=[batch, n] is currently the only sensible operation
+  // Note: Flattening to shape=[batch, n] is currently the only sensible
+  //       operation, because we can't remove or merge into the batch dim.
   ASSERT(axis == 1, ErrorCode::kUNSUPPORTED_NODE);
-  // Note: TRT implicitly flattens the input to FC layers, and in fact
-  //       requires that it still has 4D shape, so in this case we
-  //       simply ignore the reshape.
   nvinfer1::Dims dims = inputs.at(0).shape();
-  // Note: Batch dim is implicit in TRT
-  ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-  //return {{inputs.at(0)}};
-  // Note: This identity layer is added instead of just skipping the node so
-  //       that the output(s) of the network don't get messed up (e.g.,
-  //       connected directly to an input, which is not allowed in TRT).
-//RETURN_IDENTITY(inputs.at(0));
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor* tensor_ptr = flatten_tensor(ctx, inputs.at(0).tensor());
+  nvinfer1::ITensor* tensor_ptr;
+#if NV_TENSORRT_MAJOR < 4
+  // Note: TRT3 requires that the shape remain 3D (CHW)
+  tensor_ptr = flatten_tensor(ctx, inputs.at(0).tensor());
+#else // NV_TENSORRT_MAJOR >= 4
+  nvinfer1::Dims new_shape{1, {(int)get_shape_size(dims)}};
+  tensor_ptr = reshape_tensor(ctx, inputs.at(0).tensor(), new_shape);
+#endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{tensor_ptr}};
-  // TODO: Use this once reshape issues are solved in TRT
-  //nvinfer1::Dims new_shape;
-  //new_shape.nbDims = 1;
-  //new_shape.d[0] = get_shape_size(dims);
-  //new_shape.type[0] = nvinfer1::DimensionType::kCHANNEL;
-  //auto* layer = ctx->network()->addShuffle(inputs.at(0).tensor());
-  //ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-  //layer->setReshapeDimensions(new_shape);
-  //RETURN_FIRST_OUTPUT(layer);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
@@ -1077,6 +1065,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
   auto input = inputs.at(0);
   nvinfer1::Dims new_shape;
   if( ctx->getOpsetVersion() >= 5 ) {
+    ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
     auto new_shape_input = inputs.at(1);
     ASSERT(new_shape_input.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights new_shape_weights = new_shape_input.weights();
@@ -1098,16 +1087,17 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     weights.shape = new_shape;
     return {{weights}};
   } else {
-    enum { BATCH_DIM = 0 };
     nvinfer1::ITensor& tensor = input.tensor();
     new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
+    ASSERT(get_shape_size(new_shape) == get_shape_size(tensor.getDimensions()),
+           ErrorCode::kUNSUPPORTED_NODE);
+#if NV_TENSORRT_MAJOR < 4
     if( new_shape.nbDims == 1 ) {
       // Note: TRT implicitly flattens the input to FC layers, and in fact
       //       requires that it still has 4D shape, so in this case we
       //       simply ignore the reshape.
       RETURN_IDENTITY(inputs.at(0));
     } else {
-      // TODO: May be supportable in future TRT releases
       ASSERT(new_shape.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
       nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
       ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
@@ -1116,6 +1106,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
              get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
       RETURN_FIRST_OUTPUT(layer);
     }
+#else // NV_TENSORRT_MAJOR >= 4
+    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+    layer->setReshapeDimensions(new_shape);
+    ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
+           get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
+    RETURN_FIRST_OUTPUT(layer);
+#endif // NV_TENSORRT_MAJOR >= 4
   }
 }
 
