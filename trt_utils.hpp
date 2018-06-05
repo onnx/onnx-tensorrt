@@ -56,6 +56,22 @@ inline int64_t get_shape_size(nvinfer1::Dims shape) {
   return count;
 }
 
+inline nvinfer1::Dims insert_dim(nvinfer1::Dims const& dims, int idx, int value) {
+  assert(idx < dims.nbDims + 1);
+  nvinfer1::Dims new_dims;
+  new_dims.nbDims = dims.nbDims + 1;
+  for( int i=0; i<idx; ++i ) {
+    new_dims.d[i]    = dims.d[i];
+    new_dims.type[i] = dims.type[i];
+  }
+  new_dims.d[idx] = value;
+  for( int i=idx+1; i<new_dims.nbDims; ++i ) {
+    new_dims.d[i]    = dims.d[i - 1];
+    new_dims.type[i] = dims.type[i - 1];
+  }
+  return new_dims;
+}
+
 inline nvinfer1::Dims remove_dim(nvinfer1::Dims const& dims, int idx) {
   assert(idx < dims.nbDims);
   nvinfer1::Dims new_dims;

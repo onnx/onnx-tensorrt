@@ -984,11 +984,42 @@ DEFINE_BUILTIN_OP_IMPORTER(Selu) {
           {&inputs.at(0).tensor()}));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Shape) {
+  auto shape = inputs.at(0).shape();
+  if( inputs.at(0).is_tensor() ) {
+    shape = insert_dim(shape, BATCH_DIM, -1);
+  }
+  nvinfer1::Dims weight_dims;
+  weight_dims.nbDims = 1;
+  weight_dims.d[0] = shape.nbDims;
+  // Note: Should technically be int64, but int32 allows for TRT compatibility
+  auto weights = ctx->createTempWeights(
+      ::ONNX_NAMESPACE::TensorProto::INT32, weight_dims);
+  std::copy(&shape.d[0], &shape.d[0] + shape.nbDims,
+            static_cast<int32_t*>(const_cast<void*>(weights.values)));
+  return {{weights}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Sigmoid) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(
     ctx->network()->addActivation(
       inputs.at(0).tensor(), nvinfer1::ActivationType::kSIGMOID));
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Size) {
+  // Can't support tensors because we don't know the batch dim until runtime
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  auto shape = inputs.at(0).shape();
+  nvinfer1::Dims weight_dims;
+  weight_dims.nbDims = 1;
+  weight_dims.d[0] = 1;
+  // Note: Should technically be int64, but int32 allows for TRT compatibility
+  auto weights = ctx->createTempWeights(
+      ::ONNX_NAMESPACE::TensorProto::INT32, weight_dims);
+  int32_t size = get_shape_size(shape);
+  *static_cast<int32_t*>(const_cast<void*>(weights.values)) = size;
+  return {{weights}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
