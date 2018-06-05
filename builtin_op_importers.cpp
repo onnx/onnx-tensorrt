@@ -620,6 +620,19 @@ DEFINE_BUILTIN_OP_IMPORTER(GlobalAveragePool) {
       tensor, nvinfer1::PoolingType::kAVERAGE, kernel_size));
 }
 
+// TODO: GlobalLpPool: pow(reduce_mean(pow(abs(x), p)), 1./p)
+
+DEFINE_BUILTIN_OP_IMPORTER(GlobalMaxPool) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::Dims dims = tensor.getDimensions();
+  ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::DimsHW kernel_size(dims.d[1], dims.d[2]);
+  RETURN_FIRST_OUTPUT(
+    ctx->network()->addPooling(
+      tensor, nvinfer1::PoolingType::kMAX, kernel_size));
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
