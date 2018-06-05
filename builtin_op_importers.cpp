@@ -680,6 +680,47 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   return {{tensor_ptr}};
 }
 
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
+  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(*tensor_ptr);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  int block_size = attrs.get<int>("blocksize");
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+  int ndim_spatial = dims.nbDims - 1;
+  nvinfer1::Dims new_shape1;
+  new_shape1.nbDims = dims.nbDims + ndim_spatial;
+  new_shape1.d[ndim_spatial] = dims.d[0];
+  for( int i=0; i<ndim_spatial; ++i ) {
+    ASSERT(new_shape1.d[ndim_spatial] % block_size == 0, ErrorCode::kINVALID_NODE);
+    new_shape1.d[ndim_spatial] /= block_size;
+    new_shape1.d[i] = block_size;
+    new_shape1.d[ndim_spatial + 1 + i] = dims.d[1 + i];
+  }
+  layer->setReshapeDimensions(new_shape1);
+  nvinfer1::Permutation perm;
+  perm.order[0] = ndim_spatial;
+  for( int i=0; i<ndim_spatial; ++i ) {
+    perm.order[1 + 2*i + 0] = ndim_spatial + 1 + i;
+    perm.order[1 + 2*i + 1] = i;
+  }
+  layer->setSecondTranspose(perm);
+  tensor_ptr = layer->getOutput(0);
+  dims = tensor_ptr->getDimensions();
+  nvinfer1::Dims new_shape2;
+  new_shape2.nbDims = dims.nbDims - ndim_spatial;
+  new_shape2.d[0] = dims.d[0];
+  for( int i=0; i<ndim_spatial; ++i ) {
+    new_shape2.d[1 + i] = dims.d[1 + 2*i + 0] * dims.d[1 + 2*i + 1];
+  }
+  tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape2);
+  ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  return {{tensor_ptr}};
+}
+#endif // NV_TENSORRT_MAJOR >= 4
+
 DEFINE_BUILTIN_OP_IMPORTER(Div) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
@@ -1285,6 +1326,48 @@ DEFINE_BUILTIN_OP_IMPORTER(Softsign) {
       ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::SOFTSIGN),
                      {&inputs.at(0).tensor()}));
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(SpaceToDepth) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
+  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(*tensor_ptr);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  int block_size = attrs.get<int>("blocksize");
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+  int ndim_spatial = dims.nbDims - 1;
+  nvinfer1::Dims new_shape1;
+  new_shape1.nbDims = dims.nbDims + ndim_spatial;
+  new_shape1.d[0] = dims.d[0];
+  for( int i=0; i<ndim_spatial; ++i ) {
+    ASSERT(dims.d[1 + i] % block_size == 0, ErrorCode::kINVALID_NODE);
+    new_shape1.d[1 + 2*i + 0] = dims.d[1 + i] / block_size;
+    new_shape1.d[1 + 2*i + 1] = block_size;
+  }
+  layer->setReshapeDimensions(new_shape1);
+  nvinfer1::Permutation perm;
+  perm.order[ndim_spatial] = 0;
+  for( int i=0; i<ndim_spatial; ++i ) {
+    perm.order[ndim_spatial + 1 + i] = 1 + 2*i + 0;
+    perm.order[i] = 1 + 2*i + 1;
+  }
+  layer->setSecondTranspose(perm);
+  tensor_ptr = layer->getOutput(0);
+  dims = tensor_ptr->getDimensions();
+  nvinfer1::Dims new_shape2;
+  new_shape2.nbDims = dims.nbDims - ndim_spatial;
+  new_shape2.d[0] = dims.d[ndim_spatial];
+  for( int i=0; i<ndim_spatial; ++i ) {
+    new_shape2.d[0] *= dims.d[i];
+    new_shape2.d[1 + i] = dims.d[ndim_spatial + 1 + i];
+  }
+  tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape2);
+  ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  dims = tensor_ptr->getDimensions();
+  return {{tensor_ptr}};
+}
+#endif // NV_TENSORRT_MAJOR >= 4
 
 // TODO: Legacy op for pre-1.0 ONNX spec; can be removed at some point
 DEFINE_BUILTIN_OP_IMPORTER(SpatialBN) {
