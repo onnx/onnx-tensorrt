@@ -744,16 +744,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
   bool trans_b = attrs.get("transB", false);
   ASSERT(weights.shape.nbDims == 2, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims dims = tensor_ptr->getDimensions();
-  // TODO: Once TRT supports arbitrary reshape, this will be needed (also in MatMul)
-  //if( dims.nbDims == 1 ) {
-  //  // TensorRT requires CHW input for FullyConnected layers
-  //  nvinfer1::DimsCHW new_shape(dims.d[0], 1, 1);
-  //  auto* layer = ctx->network()->addShuffle(tensor);
-  //  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-  //  layer->setReshapeDimensions(new_shape);
-  //  tensor_ptr = layer->getOutput(0);
-  //  dims = tensor_ptr->getDimensions();
-  //}
+#if NV_TENSORRT_MAJOR >= 4
+  // Note: TRT requires 3D input for FC layers, so we expand the dims
+  bool need_to_expand_dims = (dims.nbDims == 1);
+  if( need_to_expand_dims ) {
+    nvinfer1::DimsCHW new_shape(dims.d[0], 1, 1);
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+    dims = tensor_ptr->getDimensions();
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   int ninput = dims.d[0] * dims.d[1] * dims.d[2];
   ASSERT(!trans_a, ErrorCode::kUNSUPPORTED_NODE);
@@ -770,8 +770,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
   ASSERT(biases.shape.nbDims == 1, ErrorCode::kUNSUPPORTED_NODE);
   int nrow = biases.shape.d[0];
   ASSERT(weights.shape.d[0] == nrow, ErrorCode::kINVALID_NODE);
-  RETURN_FIRST_OUTPUT(
-    ctx->network()->addFullyConnected(*tensor_ptr, nrow, weights, biases));
+  auto* layer = ctx->network()->addFullyConnected(
+      *tensor_ptr, nrow, weights, biases);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  tensor_ptr = layer->getOutput(0);
+  dims = tensor_ptr->getDimensions();
+#if NV_TENSORRT_MAJOR >= 4
+  // Un-expand the dims back to the original shape
+  if( need_to_expand_dims ) {
+    nvinfer1::Dims new_shape{1, {dims.d[0]}};
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
+  return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(GlobalAveragePool) {
@@ -867,15 +879,34 @@ DEFINE_BUILTIN_OP_IMPORTER(LRN) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
+#if NV_TENSORRT_MAJOR >= 4
+  if( inputs.at(0).is_tensor() && inputs.at(1).is_tensor() &&
+      inputs.at(0).shape().nbDims >= 2 && inputs.at(1).shape().nbDims >= 2) {
+    nvinfer1::ITensor& tensor_a = inputs.at(0).tensor();
+    nvinfer1::ITensor& tensor_b = inputs.at(1).tensor();
+    RETURN_FIRST_OUTPUT(
+        ctx->network()->addMatrixMultiply(tensor_a, false, tensor_b, false));
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
   // Note: Currently this only supports A=tensor, B=weights
-  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   auto weights = inputs.at(1).weights();
   auto biases  = ShapedWeights::empty(weights.type);
   OnnxAttrs attrs(node);
   ASSERT(weights.shape.nbDims == 2, ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::Dims dims = tensor.getDimensions();
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+#if NV_TENSORRT_MAJOR >= 4
+  // Note: TRT requires 3D input for FC layers, so we expand the dims
+  bool need_to_expand_dims = (dims.nbDims == 1);
+  if( need_to_expand_dims ) {
+    nvinfer1::DimsCHW new_shape(dims.d[0], 1, 1);
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+    dims = tensor_ptr->getDimensions();
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   //if( !trans_b ) {
   {
@@ -884,12 +915,23 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
            ErrorCode::kUNSUPPORTED_NODE);
     weights = new_weights;
   }
-    //}
   int ninput = dims.d[0] * dims.d[1] * dims.d[2];
   ASSERT(weights.shape.d[1] == ninput, ErrorCode::kINVALID_NODE);
   int nrow = weights.shape.d[0];
-  RETURN_FIRST_OUTPUT(
-    ctx->network()->addFullyConnected(tensor, nrow, weights, biases));
+  auto* layer = ctx->network()->addFullyConnected(
+      *tensor_ptr, nrow, weights, biases);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  tensor_ptr = layer->getOutput(0);
+  dims = tensor_ptr->getDimensions();
+#if NV_TENSORRT_MAJOR >= 4
+  // Un-expand the dims back to the original shape
+  if( need_to_expand_dims ) {
+    nvinfer1::Dims new_shape{1, {dims.d[0]}};
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
+  return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Max) {
