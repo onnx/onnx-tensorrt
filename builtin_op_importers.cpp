@@ -631,6 +631,10 @@ DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid) {
           {&inputs.at(0).tensor()}));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Identity) {
+  RETURN_IDENTITY(inputs.at(0));
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
