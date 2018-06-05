@@ -51,6 +51,9 @@ inline std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& 
   case nvinfer1::DataType::kFLOAT: return stream << "float32";
   case nvinfer1::DataType::kHALF:  return stream << "float16";
   case nvinfer1::DataType::kINT8:  return stream << "int8";
+#if NV_TENSORRT_MAJOR >= 4
+  case nvinfer1::DataType::kINT32: return stream << "int32";
+#endif
   default: throw std::runtime_error("Unknown dtype");
   }
 }
@@ -115,6 +118,9 @@ inline bool convert_dtype(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype,
   case ::ONNX_NAMESPACE::TensorProto::FLOAT:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
   case ::ONNX_NAMESPACE::TensorProto::INT8:    *trt_dtype = nvinfer1::DataType::kINT8;  break;
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
+#if NV_TENSORRT_MAJOR >= 4
+  case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+#endif
   default:
     cerr << "Unsupported ONNX data type: " << get_dtype_name(onnx_dtype)
          << " (" << std::to_string(onnx_dtype) << ")" << endl;

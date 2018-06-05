@@ -37,6 +37,9 @@ inline int get_dtype_size(nvinfer1::DataType trt_dtype) {
   case nvinfer1::DataType::kFLOAT: return 4;
   case nvinfer1::DataType::kINT8:  return 1;
   case nvinfer1::DataType::kHALF:  return 2;
+#if NV_TENSORRT_MAJOR >= 4
+  case nvinfer1::DataType::kINT32: return 4;
+#endif
     // TODO: Some sort of error handling
   default: return -1;
     //throw std::invalid_argument("Unsupported TRT data type: " +
