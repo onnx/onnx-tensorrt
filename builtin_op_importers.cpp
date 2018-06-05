@@ -300,53 +300,46 @@ DEFINE_BUILTIN_OP_IMPORTER(Abs) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Add) {
-  // TODO: Check "broadcast" and "axis" attributes (also needed for Mul etc.)
-  nvinfer1::ILayer* layer;
   if( inputs.at(0).is_tensor() && inputs.at(1).is_tensor() ) {
-    layer = ctx->network()->addElementWise(
-      inputs.at(0).tensor(), inputs.at(1).tensor(),
-      nvinfer1::ElementWiseOperation::kSUM);
+    // TODO: Check "broadcast" and "axis" attributes
+    return combineTensorsElementwise(
+        ctx, inputs, nvinfer1::ElementWiseOperation::kSUM);
   } else if( inputs.at(0).is_weights() && inputs.at(1).is_weights() ) {
     // TODO: Add weights together (i.e., constant fold)
-    //return Error(ONNX2TRT_UNSUPPORTED_NODE, "Both inputs are weights");
     return MAKE_ERROR("Both inputs are weights",
                       ErrorCode::kUNSUPPORTED_NODE);
   } else {
-    auto& tensor = (inputs.at(0).is_tensor() ?
-                    inputs.at(0).tensor() :
-                    inputs.at(1).tensor());
+    auto* tensor_ptr = (inputs.at(0).is_tensor() ?
+                        &inputs.at(0).tensor() :
+                        &inputs.at(1).tensor());
     auto shift_weights = (inputs.at(0).is_weights() ?
                           inputs.at(0).weights() :
                           inputs.at(1).weights());
-    auto scale_weights = ShapedWeights::empty(shift_weights.type);
-    auto power_weights = ShapedWeights::empty(shift_weights.type);
+    nvinfer1::Dims dims = tensor_ptr->getDimensions();
     nvinfer1::ScaleMode mode = get_scale_mode(shift_weights.shape);
     if( mode == nvinfer1::ScaleMode::kELEMENTWISE ) {
       // TODO: TRT doesn't support including the batch dim in elementwise,
       //       but we can't do a more specific assertion here yet because
       //       the input tensor's shape may have been padded to WAR TRT's
       //       shape issues.
-      ASSERT(get_shape_size(shift_weights.shape) ==
-             get_shape_size(tensor.getDimensions()),
+      ASSERT(get_shape_size(shift_weights.shape) == get_shape_size(dims),
              ErrorCode::kUNSUPPORTED_NODE);
     } else if( mode == nvinfer1::ScaleMode::kCHANNEL ) {
-      // TRT does not currently support full broadcasting
       OnnxAttrs attrs(node);
+      // TRT does not currently support full broadcasting
       ASSERT(attrs.count("broadcast"), ErrorCode::kUNSUPPORTED_NODE);
       bool broadcast = attrs.get<int>("broadcast");
       ASSERT(broadcast, ErrorCode::kINVALID_NODE);
       int axis = attrs.get<int>("axis", -1);
       if( axis < 0 ) {
-        axis += tensor.getDimensions().nbDims; // Support negative indexing
+        axis += dims.nbDims; // Support negative indexing
       }
       ASSERT(axis == 1, ErrorCode::kUNSUPPORTED_NODE);
-      ASSERT(shift_weights.shape.d[0] == tensor.getDimensions().d[0],
+      ASSERT(shift_weights.shape.d[0] == dims.d[0],
              ErrorCode::kUNSUPPORTED_NODE);
     }
-    layer = ctx->network()->addScale(
-      tensor, mode, shift_weights, scale_weights, power_weights);
+    return addScale(ctx, *tensor_ptr, mode, shift_weights, {}, {});
   }
-  RETURN_FIRST_OUTPUT(layer);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
@@ -864,50 +857,46 @@ DEFINE_BUILTIN_OP_IMPORTER(Min) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Mul) {
-  nvinfer1::ILayer* layer;
   if( inputs.at(0).is_tensor() && inputs.at(1).is_tensor() ) {
-    layer = ctx->network()->addElementWise(
-      inputs.at(0).tensor(), inputs.at(1).tensor(),
-      nvinfer1::ElementWiseOperation::kPROD);
+    // TODO: Check "broadcast" and "axis" attributes
+    return combineTensorsElementwise(
+        ctx, inputs, nvinfer1::ElementWiseOperation::kPROD);
   } else if( inputs.at(0).is_weights() && inputs.at(1).is_weights() ) {
     // TODO: Add weights together (i.e., constant fold)
-    //         Implement a general binary op function supporting Add/Mul/etc. with all paths including const folding
-    ASSERT(false, ErrorCode::kUNSUPPORTED_NODE);
+    return MAKE_ERROR("Both inputs are weights",
+                      ErrorCode::kUNSUPPORTED_NODE);
   } else {
-    auto& tensor = (inputs.at(0).is_tensor() ?
-                    inputs.at(0).tensor() :
-                    inputs.at(1).tensor());
+    auto* tensor_ptr = (inputs.at(0).is_tensor() ?
+                        &inputs.at(0).tensor() :
+                        &inputs.at(1).tensor());
     auto scale_weights = (inputs.at(0).is_weights() ?
                           inputs.at(0).weights() :
                           inputs.at(1).weights());
-    auto shift_weights = ShapedWeights::empty(scale_weights.type);
-    auto power_weights = ShapedWeights::empty(scale_weights.type);
+    nvinfer1::Dims dims = tensor_ptr->getDimensions();
     nvinfer1::ScaleMode mode = get_scale_mode(scale_weights.shape);
     if( mode == nvinfer1::ScaleMode::kELEMENTWISE ) {
       // TODO: TRT doesn't support including the batch dim in elementwise,
       //       but we can't do a more specific assertion here yet because
       //       the input tensor's shape may have been padded to WAR TRT's
       //       shape issues.
-      ASSERT(get_shape_size(scale_weights.shape) == get_shape_size(tensor.getDimensions()),
+      ASSERT(get_shape_size(scale_weights.shape) == get_shape_size(dims),
              ErrorCode::kUNSUPPORTED_NODE);
     } else if( mode == nvinfer1::ScaleMode::kCHANNEL ) {
-      // TRT does not currently support full broadcasting
       OnnxAttrs attrs(node);
+      // TRT does not currently support full broadcasting
       ASSERT(attrs.count("broadcast"), ErrorCode::kUNSUPPORTED_NODE);
       bool broadcast = attrs.get<int>("broadcast");
       ASSERT(broadcast, ErrorCode::kINVALID_NODE);
       int axis = attrs.get<int>("axis", -1);
       if( axis < 0 ) {
-        axis += tensor.getDimensions().nbDims; // Support negative indexing
+        axis += dims.nbDims; // Support negative indexing
       }
       ASSERT(axis == 1, ErrorCode::kUNSUPPORTED_NODE);
-      ASSERT(scale_weights.shape.d[0] == tensor.getDimensions().d[0],
+      ASSERT(scale_weights.shape.d[0] == dims.d[0],
              ErrorCode::kUNSUPPORTED_NODE);
     }
-    layer = ctx->network()->addScale(
-      tensor, mode, shift_weights, scale_weights, power_weights);
+    return addScale(ctx, *tensor_ptr, mode, {}, scale_weights, {});
   }
-  RETURN_FIRST_OUTPUT(layer);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Neg) {
