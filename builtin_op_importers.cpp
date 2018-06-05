@@ -1252,7 +1252,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
   int axis = attrs.get("axis", 1);
-  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE); // Don't support axis = the batch dim
+  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
   int ndim = inputs.at(0).shape().nbDims;
   if( axis < 0 ) {
     axis += ndim; // Negative indexing
@@ -1297,13 +1297,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Split) {
   nvinfer1::Dims dims = inputs.at(0).shape();
   OnnxAttrs attrs(node);
   int axis = attrs.get<int>("axis", 0);
-  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE); // Can't split the batch dim
+  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
   if( axis < 0 ) {
     axis += dims.nbDims;
+#if NV_TENSORRT_MAJOR < 4
     // HACK TODO: This is a (bad) WAR for the fact that the input dims may
     // have been padded to 4D and we no longer know how many dims there were
     // originally.
     axis = 0;
+#endif // NV_TENSORRT_MAJOR < 4
   } else {
     --axis; // Don't include batch dim
   }
@@ -1373,7 +1375,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
   nvinfer1::Permutation perm = attrs.get("perm", default_perm);
   if( input.is_tensor() ) {
     // TRT doesn't support moving the batch dim
-    ASSERT(perm.order[0] == 0, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(perm.order[BATCH_DIM] == BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
     perm = remove_first_dim(perm);
     // Note: Dimension types kept unchanged in order to avoid TRT complaining about CHW order
     nvinfer1::ITensor* output_tensor =
