@@ -28,6 +28,8 @@
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
 
+#include <numeric> // For std::iota
+
 namespace onnx2trt {
 
 namespace {
@@ -1163,6 +1165,100 @@ DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
 DEFINE_BUILTIN_OP_IMPORTER(Reciprocal) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kRECIP);
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+NodeImportResult reduceTensor(IImporterContext* ctx,
+                              ::ONNX_NAMESPACE::NodeProto const& node,
+                              TensorOrWeights input,
+                              nvinfer1::ReduceOperation operation) {
+  ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = input.tensor();
+  OnnxAttrs attrs(node);
+  bool keepdims = attrs.get("keepdims", 1);
+  int ndim = tensor.getDimensions().nbDims;
+  std::vector<int> axes;
+  if( attrs.count("axes") ) {
+    axes = attrs.get<std::vector<int>>("axes");
+  } else {
+    axes.resize(ndim);
+    std::iota(axes.begin(), axes.end(), 0);
+  }
+  uint32_t axis_mask = 0;
+  for( int axis : axes ) {
+    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+    if( axis < 0 ) {
+      axis += ndim; // Support negative indexing
+    } else {
+      --axis; // Don't include batch dim
+    }
+    axis_mask |= 1 << axis;
+  }
+  RETURN_FIRST_OUTPUT(
+      ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceL1) {
+  NodeImportResult abs_result = apply_unary_function(
+      ctx, inputs.at(0), nvinfer1::UnaryOperation::kABS);
+  if( abs_result.is_error() ) {
+    return abs_result;
+  }
+  TensorOrWeights abs_input = abs_result.value().at(0);
+  return reduceTensor(ctx, node, abs_input, nvinfer1::ReduceOperation::kSUM);
+}
+DECLARE_BUILTIN_OP_IMPORTER(ReduceSum);
+DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSum) {
+  auto sum_result = importReduceSum(ctx, node, inputs);
+  if( sum_result.is_error() ) {
+    return sum_result;
+  }
+  TensorOrWeights sum_input = sum_result.value().at(0);
+  return apply_unary_function(ctx, sum_input, nvinfer1::UnaryOperation::kLOG);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSumExp) {
+  // TODO: Abstract this sequence with a function or macro
+  auto exp_result = apply_unary_function(
+      ctx, inputs.at(0), nvinfer1::UnaryOperation::kEXP);
+  if( exp_result.is_error() ) {
+    return exp_result;
+  }
+  auto exp_inputs = exp_result.value();
+  return importReduceLogSum(ctx, node, exp_inputs);
+}
+DECLARE_BUILTIN_OP_IMPORTER(ReduceSumSquare);
+DEFINE_BUILTIN_OP_IMPORTER(ReduceL2) {
+  auto sum_sqr_result = importReduceSumSquare(ctx, node, inputs);
+  if( sum_sqr_result.is_error() ) {
+    return sum_sqr_result;
+  }
+  TensorOrWeights sum_sqr = sum_sqr_result.value().at(0);
+  return apply_unary_function(ctx, sum_sqr, nvinfer1::UnaryOperation::kSQRT);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceMax) {
+  return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kMAX);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceMean) {
+  return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kAVG);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceMin) {
+  return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kMIN);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceProd) {
+  return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kPROD);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceSum) {
+  return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kSUM);
+}
+DEFINE_BUILTIN_OP_IMPORTER(ReduceSumSquare) {
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  auto* sqr_layer = ctx->network()->addElementWise(
+      tensor, tensor, nvinfer1::ElementWiseOperation::kPROD);
+  ASSERT(sqr_layer, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor* sqr_tensor_ptr = sqr_layer->getOutput(0);
+  return reduceTensor(
+      ctx, node, sqr_tensor_ptr, nvinfer1::ReduceOperation::kSUM);
+}
+
+#endif // NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(Relu) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
