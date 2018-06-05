@@ -96,6 +96,20 @@ inline nvinfer1::Dims remove_dim(nvinfer1::Dims const& dims, int idx) {
   return new_dims;
 }
 
+inline nvinfer1::Dims expand_dims(nvinfer1::Dims const& dims, int ndim_new) {
+  assert(dims.nbDims <= ndim_new);
+  nvinfer1::Dims new_dims;
+  new_dims.nbDims = ndim_new;
+  int j = 0;
+  for( ; j<ndim_new - dims.nbDims; ++j ) {
+    new_dims.d[j] = 1;
+  }
+  for( int i=0; i<dims.nbDims; ++i, ++j ) {
+    new_dims.d[j] = dims.d[i];
+  }
+  return new_dims;
+}
+
 inline nvinfer1::Permutation
 remove_first_dim(nvinfer1::Permutation const& perm) {
   assert(perm.order[0] == 0);
