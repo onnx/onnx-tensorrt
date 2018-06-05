@@ -470,6 +470,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
   std::vector<nvinfer1::ITensor*> tensors;
   for( auto& input : inputs ) {
     ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+#if NV_TENSORRT_MAJOR >= 4
+    ASSERT(input.tensor().getType() != nvinfer1::DataType::kINT32,
+           ErrorCode::kUNSUPPORTED_NODE);
+#endif // NV_TENSORRT_MAJOR >= 4
     tensors.push_back(&input.tensor());
   }
   OnnxAttrs attrs(node);
@@ -477,16 +481,27 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
   if( axis < 0 ) {
     // Support negative indexing
     axis += inputs.at(0).shape().nbDims;
+  } else {
+    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+    axis -= 1; // Remove batch dim
   }
-  ASSERT(axis != 0, ErrorCode::kUNSUPPORTED_NODE);
-  if( axis == 1 ) {
+#if NV_TENSORRT_MAJOR >= 4
+  auto* layer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  layer->setAxis(axis);
+  RETURN_FIRST_OUTPUT(layer);
+#else // NV_TENSORRT_MAJOR < 4
+  if( axis == 0 ) {
     RETURN_FIRST_OUTPUT(
       ctx->network()->addConcatenation(tensors.data(), tensors.size()));
   } else {
+    ASSERT(inputs.at(0).shape().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
     using namespace nvinfer1::plugin;
     RETURN_FIRST_OUTPUT(
-        ctx->addPlugin(new NvPlugin(createConcatPlugin(axis, false)), tensors));
+        ctx->addPlugin(
+            new NvPlugin(createConcatPlugin(1 + axis, false)), tensors));
   }
+#endif // NV_TENSORRT_MAJOR < 4
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Constant) {
