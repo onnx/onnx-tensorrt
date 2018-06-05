@@ -31,7 +31,8 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
                        nvinfer1::DimsHW* beg_padding,
                        nvinfer1::DimsHW* end_padding,
                        nvinfer1::DimsHW* dilations,
-                       nvinfer1::DimsHW const* output_shape) {
+                       nvinfer1::DimsHW const* output_shape,
+                       bool enable_padding_trick) {
   // TODO: Generalize this function to support 3D spatial data
   OnnxAttrs attrs(onnx_node);
   if( attrs.count("kernel_shape") ) {
@@ -106,6 +107,9 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
       throw std::invalid_argument("Unexpected auto_pad value: " +
                                   onnx_auto_pad);
     }
+  }
+  if( !enable_padding_trick ) {
+    return;
   }
   // Check if asymmetric padding can be converted to symmetric padding such
   // that CUDNN/TRT will still produce the correct result. This is only

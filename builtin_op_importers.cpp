@@ -461,16 +461,18 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::DimsHW input_shape  = get_DimsHW_from_CHW(tensor.getDimensions());
   nvinfer1::DimsHW output_shape;
+  bool enable_padding_trick = true;
   if( attrs.count("output_shape") ) {
     output_shape = attrs.get<nvinfer1::DimsHW>("output_shape");
-  } else { // TODO: Add support for the new "output_padding" attribute
+  } else {
     ASSERT(attrs.get("auto_pad", std::string("VALID")) == "VALID",
            ErrorCode::kINVALID_NODE);
+    // Can't use asym->sym padding trick if no output shape provided
+    enable_padding_trick = false;
   }
   nvinfer1::DimsHW kernel_size;
   kernel_size.h() = kernel_weights.shape.d[2];
   kernel_size.w() = kernel_weights.shape.d[3];
-  // TODO: Check ONNX defaults for these
   nvinfer1::DimsHW strides(1, 1);
   nvinfer1::DimsHW beg_padding(0, 0), end_padding(0, 0);
   nvinfer1::DimsHW dilations(1, 1);
@@ -478,7 +480,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   //       calculations operate as if it were a regular forward convolution.
   get_kernel_params(node, output_shape,
                     &kernel_size, &strides,
-                    &beg_padding, &end_padding, &dilations, &input_shape);
+                    &beg_padding, &end_padding, &dilations, &input_shape,
+                    enable_padding_trick);
   ASSERT(kernel_size.h() == kernel_weights.shape.d[2], ErrorCode::kINVALID_NODE);
   ASSERT(kernel_size.w() == kernel_weights.shape.d[3], ErrorCode::kINVALID_NODE);
   nvinfer1::Dims dims = tensor.getDimensions();
@@ -491,6 +494,11 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   nvinfer1::ILayer* layer = deconv_layer;
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   deconv_layer->setStride(strides);
+  if( !attrs.count("output_shape") && attrs.count("output_padding") ) {
+    auto output_padding = attrs.get<nvinfer1::DimsHW>("output_padding");
+    end_padding.h() -= output_padding.h();
+    end_padding.w() -= output_padding.w();
+  }
   if( beg_padding == end_padding ) {
     deconv_layer->setPadding(beg_padding);
   } else {

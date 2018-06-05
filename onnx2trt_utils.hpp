@@ -201,7 +201,8 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
                        nvinfer1::DimsHW* beg_padding,
                        nvinfer1::DimsHW* end_padding,
                        nvinfer1::DimsHW* dilations=nullptr,
-                       nvinfer1::DimsHW const* output_shape=nullptr);
+                       nvinfer1::DimsHW const* output_shape=nullptr,
+                       bool enable_padding_trick=true);
 
 inline nvinfer1::ScaleMode get_scale_mode(nvinfer1::Dims const& weights_shape) {
   if( weights_shape.nbDims == 1 ) {
