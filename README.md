@@ -64,7 +64,7 @@ Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt
 
     mkdir build
     cd build
-    cmake .. -DTENSORT_ROOT=/opt/tensorrt
+    cmake .. -DTENSORRT_ROOT=/opt/tensorrt
     make -j8
     sudo make install
 
