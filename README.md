@@ -53,13 +53,18 @@ libnvonnxparser_runtime.so, which has a C++ API declared in this header:
  - [Protobuf](https://github.com/google/protobuf/releases)
  - [TensorRT 3+](https://developer.nvidia.com/tensorrt)
 
+### Download the code
+Clone the code from GitHub. 
+
+    git clone --recursive https://github.com/onnx/onnx-tensorrt.git
+
 ### Executable and libraries
 
-Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake:
+Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake:
 
     mkdir build
     cd build
-    cmake ..
+    cmake .. -DTENSORRT_ROOT=/opt/tensorrt
     make -j8
     sudo make install
 
