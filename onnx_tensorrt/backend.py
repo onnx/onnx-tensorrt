@@ -48,6 +48,9 @@ def count_trailing_ones(vals):
         count += 1
     return count
 
+def _tensorrt_version():
+    return [int(n) for n in trt.__version__.split('.')]
+
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device, max_batch_size=32,
                  max_workspace_size=None, serialize_engine=True, **kwargs):
@@ -104,26 +107,35 @@ class TensorRTBackendRep(BackendRep):
         if isinstance(inputs, np.ndarray):
             inputs = [inputs]
         outputs = self.engine.run(inputs)
-        # WAR for TRT only supporting 4D (NCHW) output shapes
-        for name, array in outputs.items():
+        output_names = [output.name for output in self.engine.outputs]
+        for i, (name, array) in enumerate(zip(output_names, outputs)):
             output_shape = self._output_shapes[name]
             # HACK WAR for unknown output shape in run_node
             if output_shape == (-99,):
-                # HACK WAR for TRT only supporting 4D tensors
-                npadding_dims = count_trailing_ones(array.shape)
-                if npadding_dims > 0:
-                    outputs[name] = array.reshape(array.shape[:-npadding_dims])
+                # WAR for TRT requiring at least 2 dims (NC)
+                min_dims = 2
+                if _tensorrt_version()[0] < 4:
+                    # WAR for TRT only supporting 4D (NCHW) tensors
+                    min_dims = 4
+                if array.ndim == min_dims:
+                    npadding_dims = count_trailing_ones(array.shape)
+                    if npadding_dims > 0:
+                        outputs[i] = array.reshape(
+                            array.shape[:-npadding_dims])
             else:
                 # HACK WAR replace fixed batch dim with variable
                 output_shape = (-1,) + output_shape[1:]
-                outputs[name] = array.reshape(output_shape)
-        return namedtupledict('Outputs', outputs.keys())(*outputs.values())
+                outputs[i] = array.reshape(output_shape)
+        outputs_tuple = namedtupledict('Outputs', output_names)(*outputs)
+        return namedtupledict('Outputs', output_names)(*outputs)
 
 def np2onnx_dtype(np_dtype):
     if np_dtype == np.dtype('float32'):
         return onnx.TensorProto.FLOAT
     elif np_dtype == np.dtype('float16'):
         return onnx.TensorProto.FLOAT16
+    elif np_dtype == np.dtype('int64'):
+        return onnx.TensorProto.INT64
     elif np_dtype == np.dtype('int32'):
         return onnx.TensorProto.INT32
     elif np_dtype == np.dtype('int8'):
