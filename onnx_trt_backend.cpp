@@ -66,7 +66,7 @@ onnxStatus CheckShape(const nvinfer1::Dims &dims,
 
 size_t GetTensorFootprint(const onnxTensorDescriptor &input) {
   size_t acc = 1;
-  for (int i = 0; i < input.dimensions; ++i) {
+  for (unsigned i = 0; i < input.dimensions; ++i) {
     acc *= input.shape[i];
   }
   size_t multiplier = 1;
@@ -102,7 +102,37 @@ size_t GetTensorFootprint(const onnxTensorDescriptor &input) {
 }
 
 struct OnnxTensorRTBackendID {
+  OnnxTensorRTBackendID(int i) : device_id(i) {}
   int device_id{0};
+};
+
+class OnnxTensorRTEvent {
+  public:
+  OnnxTensorRTEvent(cudaStream_t s):stream_(s) {
+    if(cudaEventCreateWithFlags(&event_, cudaEventBlockingSync) != cudaSuccess) {
+      throw std::runtime_error("Cannot create cudaEvent");
+    }
+  }
+
+  ~OnnxTensorRTEvent() {
+    cudaEventDestroy(event_);
+  }
+
+  onnxStatus Signal() {
+    return (cudaEventRecord(event_, stream_) == cudaSuccess)
+               ? ONNXIFI_STATUS_SUCCESS
+               : ONNXIFI_STATUS_INTERNAL_ERROR;
+  }
+
+  onnxStatus Wait() {
+    return (cudaEventSynchronize(event_) == cudaSuccess)
+               ? ONNXIFI_STATUS_SUCCESS
+               : ONNXIFI_STATUS_INTERNAL_ERROR;
+  }
+
+  private:
+  cudaStream_t stream_;
+  cudaEvent_t event_;
 };
 
 class OnnxTensorRTBackendRep {
@@ -112,7 +142,14 @@ public:
     trt_network_ = infer_object(trt_builder_->createNetwork());
     parser_ =
         infer_object(nvonnxparser::createParser(*trt_network_, trt_logger_));
+    if (cudaStreamCreate(&stream_) != cudaSuccess) {
+      throw std::runtime_error("Cannot create cudaStream");
+    }
   }
+
+  ~OnnxTensorRTBackendRep() { cudaStreamDestroy(stream_); }
+
+  cudaStream_t stream() const { return stream_; }
 
   onnxStatus ImportModel(void const *serialized_onnx_model,
                          size_t serialized_onnx_model_size) {
@@ -139,32 +176,34 @@ public:
           return ONNXIFI_STATUS_INTERNAL_ERROR;
         }
       }
-    } else {
-      return ONNXIFI_STATUS_SUCCESS;
     }
+
+    return ONNXIFI_STATUS_SUCCESS;
   }
 
   nvinfer1::ICudaEngine *buildCudaEngine() {
     return trt_builder_->buildCudaEngine(*trt_network_);
   }
 
-  size_t batch_size() const { return batch_size_; }
+  size_t max_batch_size() const { return max_batch_size_; }
 
 private:
   TRT_Logger trt_logger_;
+  cudaStream_t stream_;
   std::shared_ptr<nvinfer1::IBuilder> trt_builder_{nullptr};
   std::shared_ptr<nvinfer1::INetworkDefinition> trt_network_{nullptr};
   std::shared_ptr<nvonnxparser::IParser> parser_{nullptr};
   // TODO: configerable max batch size
-  size_t batch_size_{10};
+  size_t max_batch_size_{128};
 };
 
 class GraphRep {
 public:
-  GraphRep(OnnxTensorRTBackendRep *backendrep) {
-    assert(backendrep);
+  GraphRep(OnnxTensorRTBackendRep *backendrep)
+      : max_batch_size_(backendrep->max_batch_size()),
+        stream_(backendrep->stream()) {
     trt_engine_ = infer_object(backendrep->buildCudaEngine());
-    batch_size_ = backendrep->batch_size();
+    max_batch_size_ = backendrep->max_batch_size();
   }
 
   ~GraphRep() { ClearDeviceBuffers(); }
@@ -175,6 +214,8 @@ public:
                     const onnxTensorDescriptor *outputDescriptors);
 
   onnxStatus Run();
+
+  cudaStream_t stream() const { return stream_; }
 
 private:
   void ClearDeviceBuffers();
@@ -190,6 +231,7 @@ private:
   std::unordered_map<std::string, void *> device_buffers_;
   size_t max_batch_size_{0};
   size_t batch_size_{0};
+  cudaStream_t stream_;
 };
 
 void GraphRep::ClearDeviceBuffers() {
@@ -238,7 +280,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
                             const onnxTensorDescriptor *outputDescriptors) {
   ClearDeviceBuffers();
   // Setup the input/output bindings and decide batch size
-  for (auto i = 0; i < inputsCount; ++i) {
+  for (unsigned i = 0; i < inputsCount; ++i) {
     if (!inputDescriptors[i].name) {
       return ONNXIFI_STATUS_INVALID_NAME;
     }
@@ -263,7 +305,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     return ONNXIFI_STATUS_NO_DEVICE_RESOURCES;
   }
 
-  for (auto i = 0; i < outputsCount; ++i) {
+  for (unsigned i = 0; i < outputsCount; ++i) {
     if (!outputDescriptors[i].name) {
       return ONNXIFI_STATUS_INVALID_NAME;
     }
@@ -347,44 +389,60 @@ onnxStatus GraphRep::Run() {
   return ONNXIFI_STATUS_SUCCESS;
 }
 
-} // namespace
-
-#define ONNXIFI_CATCH_EXCPETION()                                              \
-  catch (const std::exception &e) {                                            \
-    std::cerr << "Internal Error: " << e.what() << std::endl;                  \
-    return ONNXIFI_STATUS_INTERNAL_ERROR;                                      \
-  }                                                                            \
-  catch (...) {                                                                \
-    return ONNXIFI_STATUS_INTERNAL_ERROR;                                      \
+template <class F> onnxStatus OnnxifiTryCatch(F &&tryBlock) {
+  try {
+    return tryBlock();
+  } catch (const std::bad_alloc &e) {
+    std::cout << "Allocation failed: " << e.what() << std::endl;
+    return ONNXIFI_STATUS_NO_SYSTEM_MEMORY;
+  } catch (const std::exception &e) {
+    std::cerr << "Internal Error: " << e.what() << std::endl;
+    return ONNXIFI_STATUS_INTERNAL_ERROR;
+  } catch (...) {
+    return ONNXIFI_STATUS_INTERNAL_ERROR;
   }
+}
+} // namespace
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxGetBackendIDs)(onnxBackendID *backendIDs, size_t *numBackends) {
-  try {
-    *backendIDs = (onnxBackendID)(new OnnxTensorRTBackendID());
-    *numBackends = 1;
-    return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  return OnnxifiTryCatch([&] {
+    if (!numBackends) {
+      return ONNXIFI_STATUS_INVALID_POINTER;
+    }
+
+    int nDevices{0};
+    cudaGetDeviceCount(&nDevices);
+    if (!backendIDs) {
+      *numBackends = nDevices;
+      return ONNXIFI_STATUS_SUCCESS;
+    } else {
+      int len = (*numBackends < nDevices) ? (*numBackends) : nDevices;
+      for (int i = 0; i < len; ++i) {
+        *(backendIDs + i) = (onnxBackendID)(new OnnxTensorRTBackendID(i));
+      }
+      return (*numBackends < nDevices) ? ONNXIFI_STATUS_FALLBACK
+                                       : ONNXIFI_STATUS_SUCCESS;
+    }
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 ONNXIFI_SYMBOL_NAME(onnxReleaseBackendID)(onnxBackendID backendID) {
-  try {
+  return OnnxifiTryCatch([&] {
     auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
     if (!backend_id) {
       return ONNXIFI_STATUS_INVALID_ID;
     }
     delete backend_id;
     return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxGetBackendInfo)(onnxBackendID backendID, onnxBackendInfo infoType,
                         void *infoValue, size_t *infoValueSize) {
-  try {
+  return OnnxifiTryCatch([&] {
     if (!infoValueSize) {
       return ONNXIFI_STATUS_INVALID_POINTER;
     }
@@ -448,18 +506,13 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     return ONNXIFI_STATUS_SUCCESS;
 #undef RETURN_STRING
 #undef SET_UINT64
-  }
-
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
-// NB: Why not have onnxModel as const char*?  and we should set the name to
-// onnxGraph And we don't have ir_version and opset info here, which are needed
-// for model check
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxGetBackendCompatibility)(onnxBackendID backendID, size_t onnxModelSize,
                                  const void *onnxModel) {
-  try {
+  return OnnxifiTryCatch([&] {
     if (!onnxModel) {
       return ONNXIFI_STATUS_INVALID_POINTER;
     }
@@ -471,8 +524,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     // conversion. However, this might be the case for other vendors
     OnnxTensorRTBackendRep backendrep;
     return backendrep.ImportModel(onnxModel, onnxModelSize);
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
 // NB: Passing arguments to backend is tricky. And we need more documentation
@@ -486,24 +538,72 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxInitBackend)(onnxBackendID backendID, const uint64_t *auxPropertiesList,
                      onnxBackend *backend) {
-  try {
+  return OnnxifiTryCatch([&] {
     *backend = (onnxBackend)(new OnnxTensorRTBackendRep());
     return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 ONNXIFI_SYMBOL_NAME(onnxReleaseBackend)(onnxBackend backend) {
-  try {
+  return OnnxifiTryCatch([&] {
     auto *backendrep = reinterpret_cast<OnnxTensorRTBackendRep *>(backend);
     if (!backendrep) {
       return ONNXIFI_STATUS_INVALID_BACKEND;
     }
     delete backendrep;
     return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
+}
+
+ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
+ONNXIFI_SYMBOL_NAME(onnxInitEvent)(onnxBackend backend, onnxEvent *event) {
+  return OnnxifiTryCatch([&] {
+    if (!event) {
+      return ONNXIFI_STATUS_INVALID_POINTER;
+    }
+    auto *backendrep = reinterpret_cast<OnnxTensorRTBackendRep *>(backend);
+    if (!backendrep) {
+      return ONNXIFI_STATUS_INVALID_BACKEND;
+    }
+    *event = reinterpret_cast<onnxEvent>(
+        new OnnxTensorRTEvent(backendrep->stream()));
+    return ONNXIFI_STATUS_SUCCESS;
+  });
+}
+
+ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
+ONNXIFI_SYMBOL_NAME(onnxSignalEvent)(onnxEvent event) {
+  return OnnxifiTryCatch([&] {
+    auto trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
+    if (!trt_event) {
+      return ONNXIFI_STATUS_INVALID_EVENT;
+    }
+    return trt_event->Signal();
+  });
+}
+
+ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
+ONNXIFI_SYMBOL_NAME(onnxWaitEvent)(onnxEvent event) {
+  return OnnxifiTryCatch([&] {
+    auto trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
+    if (!trt_event) {
+      return ONNXIFI_STATUS_INVALID_EVENT;
+    }
+    return trt_event->Wait();
+  });
+}
+
+ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
+ONNXIFI_SYMBOL_NAME(onnxReleaseEvent)(onnxEvent event) {
+  return OnnxifiTryCatch([&] {
+    auto* trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
+    if (!trt_event) {
+      return ONNXIFI_STATUS_INVALID_EVENT;
+    }
+    delete trt_event;
+    return ONNXIFI_STATUS_SUCCESS;
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
@@ -511,7 +611,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
                    const void *onnxModel, uint32_t weightsCount,
                    const onnxTensorDescriptor *weightDescriptors,
                    onnxGraph *graph) {
-  try {
+  return OnnxifiTryCatch([&] {
     auto *backendrep = reinterpret_cast<OnnxTensorRTBackendRep *>(backend);
     if (!backendrep) {
       return ONNXIFI_STATUS_INVALID_BACKEND;
@@ -535,8 +635,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     // TODO: error handling
     *graph = (onnxGraph)(new GraphRep(backendrep));
     return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
 // NB: in the context of TRT, this step will setup the input/output bindings for
@@ -546,7 +645,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
                     const onnxTensorDescriptor *inputDescriptors,
                     uint32_t outputsCount,
                     const onnxTensorDescriptor *outputDescriptors) {
-  try {
+  return OnnxifiTryCatch([&] {
     auto *graph_rep = reinterpret_cast<GraphRep *>(graph);
     if (!graph_rep) {
       return ONNXIFI_STATUS_INVALID_GRAPH;
@@ -557,33 +656,43 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
 
     return graph_rep->InitIO(inputsCount, inputDescriptors, outputsCount,
                              outputDescriptors);
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxRunGraph)(onnxGraph graph, const onnxMemoryFence *inputFence,
                   onnxMemoryFence *outputFence) {
-  try {
-    auto *graph_rep = reinterpret_cast<GraphRep *>(graph);
+  return OnnxifiTryCatch([&] {
+    auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(
+        *inputFence->event);
+    auto ret = trt_event->Wait();
+    if (ret != ONNXIFI_STATUS_SUCCESS) {
+      return ret;
+    }
+    auto *graph_rep =
+        reinterpret_cast<GraphRep *>(graph);
     if (!graph_rep) {
       return ONNXIFI_STATUS_INVALID_GRAPH;
     }
 
-    return graph_rep->Run();
-  }
-  ONNXIFI_CATCH_EXCPETION();
+    ret = graph_rep->Run();
+    auto output_event = new OnnxTensorRTEvent(graph_rep->stream());
+    *outputFence->event =
+        reinterpret_cast<onnxEvent>(output_event);
+    outputFence->type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    output_event->Signal();
+    return ret;
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 ONNXIFI_SYMBOL_NAME(onnxReleaseGraph)(onnxGraph graph) {
-  try {
+  return OnnxifiTryCatch([&] {
     auto *graph_rep = reinterpret_cast<GraphRep *>(graph);
     if (!graph_rep) {
       return ONNXIFI_STATUS_INVALID_GRAPH;
     }
     delete graph_rep;
     return ONNXIFI_STATUS_SUCCESS;
-  }
-  ONNXIFI_CATCH_EXCPETION();
+  });
 }
