@@ -25,6 +25,7 @@
 #include "plugin.hpp"
 #include "FancyActivation.hpp"
 #include "ResizeNearest.hpp"
+#include "ResizeBilinear.hpp"
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
 
@@ -304,12 +305,14 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
   OnnxAttrs attrs(node);
   float eps = attrs.get<float>("epsilon", 1e-5f);
   // TODO: Check if ONNX "spatial" attribute is important (maybe changes mean and variance broadcasting?)
+ /*
   ASSERT(scale_weights.type    == ::ONNX_NAMESPACE::TensorProto::FLOAT &&
          bias_weights.type     == ::ONNX_NAMESPACE::TensorProto::FLOAT &&
          mean_weights.type     == ::ONNX_NAMESPACE::TensorProto::FLOAT &&
          variance_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
          ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::Dims dims = tensor.getDimensions();
+*/
+nvinfer1::Dims dims = tensor.getDimensions();
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   int nchan = dims.d[0];
   nvinfer1::Dims weights_shape{1, {nchan}};
@@ -322,10 +325,12 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
   size_t nweight = nchan;
   // Fold the weights together into a single bias and scale
   for( size_t i=0; i<nweight; ++i ) {
+
     float scale    = (static_cast<float const*>(scale_weights.values))[i];
     float bias     = (static_cast<float const*>(bias_weights.values))[i];
     float mean     = (static_cast<float const*>(mean_weights.values))[i];
     float variance = (static_cast<float const*>(variance_weights.values))[i];
+
     float& combined_scale_ref = const_cast<float*>(
         static_cast<float const*>(combined_scale_weights.values))[i];
     float& combined_bias_ref  = const_cast<float*>(
@@ -333,10 +338,12 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
     combined_scale_ref = scale / sqrtf(variance + eps);
     combined_bias_ref  = bias - mean * combined_scale_ref;
   }
+     //   std::cout << "we have weights " << scale_weights.type << std::endl;
   auto dummy_power_weights = ShapedWeights::empty(scale_weights.type);
   auto* layer = ctx->network()->addScale(
     tensor, nvinfer1::ScaleMode::kCHANNEL,
     combined_bias_weights, combined_scale_weights, dummy_power_weights);
+//          std::cout << "add layer" << std::endl;
   RETURN_FIRST_OUTPUT(layer);
 }
 
@@ -1126,10 +1133,27 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
   }
   auto scale = {height_scale, width_scale};
   auto mode = attrs.get<std::string>("mode", "nearest");
-  ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
+  //ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
+  int bilinear = 0;
+ // std::cout << mode << std::endl;
+  if (mode == "bilinear") {
+      RETURN_FIRST_OUTPUT(ctx->addPlugin(new ResizeBilinearPlugin(scale),
+                                         {&inputs.at(0).tensor()}));
+  } else {
   RETURN_FIRST_OUTPUT(ctx->addPlugin(new ResizeNearestPlugin(scale),
                                      {&inputs.at(0).tensor()}));
+  }
 }
+
+/*DEFINE_BUILTIN_OP_IMPORTER(ArgMax) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  int dim = attrs.get<int>("dim");
+  RETURN_FIRST_OUTPUT(ctx->addPlugin(new ArgMaxPlugin(scale),
+                                         {&inputs.at(0).tensor()}));
+}*/
 
 } // namespace
 

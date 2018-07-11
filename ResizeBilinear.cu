@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include "ResizeNearest.hpp"
+#include "ResizeBilinear.hpp"
 #include <cuda_fp16.h>
 #include <cassert>
 
@@ -32,7 +32,7 @@ inline bool is_CHW(nvinfer1::Dims const& dims) {
           dims.type[2] == nvinfer1::DimensionType::kSPATIAL);
 }
 
-nvinfer1::Dims ResizeNearestPlugin::getOutputDimensions(int index,
+nvinfer1::Dims ResizeBilinearPlugin::getOutputDimensions(int index,
                                                         const nvinfer1::Dims *inputDims,
                                                         int nbInputs) {
   assert(nbInputs == 1);
@@ -54,7 +54,7 @@ nvinfer1::Dims ResizeNearestPlugin::getOutputDimensions(int index,
   return output;
 }
 
-int ResizeNearestPlugin::initialize() {
+int ResizeBilinearPlugin::initialize() {
   _output_dims = this->getOutputDimensions(0, &this->getInputDims(0), 1);
   assert(is_CHW(this->getInputDims(0)));
   assert(is_CHW(_output_dims));
@@ -64,7 +64,7 @@ int ResizeNearestPlugin::initialize() {
 
 template <typename Data>
 __global__
-void resize_nearest_kernel_2d(int nbatch,
+void resize_bilinear_kernel_2d(int nbatch,
                               float2 scale,
                               int2 osize,
                               Data const* idata, int istride, int ibatchstride,
@@ -72,20 +72,38 @@ void resize_nearest_kernel_2d(int nbatch,
   int x0 = threadIdx.x + blockIdx.x * blockDim.x;
   int y0 = threadIdx.y + blockIdx.y * blockDim.y;
   int z0 = blockIdx.z;
+  int src_cols = int(osize.x / scale.x);
+  int src_rows = int(osize.y / scale.y);
   for( int batch=z0; batch<nbatch; batch+=gridDim.z ) {
     for( int oy=y0; oy<osize.y; oy+=blockDim.y*gridDim.y ) {
       for( int ox=x0; ox<osize.x; ox+=blockDim.x*gridDim.x ) {
-        int ix = int(ox / scale.x);
-        int iy = int(oy / scale.y);
-        odata[batch * obatchstride + oy * ostride + ox] =
-          idata[batch * ibatchstride + iy * istride + ix];
+        float src_x = ox / scale.x;
+        float src_y = oy / scale.y;
+        int x1 = int(src_x);
+        int y1 = int(src_y);
+        int x2 = src_x + 1;
+        int y2 = src_y + 1;
+        int x2_read = ::min(x2, src_cols - 1);
+        int y2_read = ::min(y2, src_rows - 1);
+
+        float src_reg = idata[batch * ibatchstride + y1 * istride + x1];
+        odata[batch * obatchstride + oy * ostride + ox] = src_reg * ((x2 - src_x) * (y2 - src_y));
+
+        src_reg = (float)(idata[batch * ibatchstride + y1 * istride + x2_read]);
+        odata[batch * obatchstride + oy * ostride + ox] = (float)odata[batch * obatchstride + oy * ostride + ox] + src_reg * (float)((src_x - x1) * (y2 - src_y));
+
+        src_reg = (float)(idata[batch * ibatchstride + y2_read * istride + x1]);
+        odata[batch * obatchstride + oy * ostride + ox] = (float)odata[batch * obatchstride + oy * ostride + ox] + src_reg * (float)((x2 - src_x) * (src_y - y1));
+
+        src_reg = (float)(idata[batch * ibatchstride + y2_read * istride + x2_read]);
+        odata[batch * obatchstride + oy * ostride + ox] = (float)(odata[batch * obatchstride + oy * ostride + ox]) + src_reg * (float)((src_x - x1) * (src_y - y1));
+
       }
     }
   }
 }
 
-
-int ResizeNearestPlugin::enqueue(int batchSize,
+int ResizeBilinearPlugin::enqueue(int batchSize,
                                  const void *const *inputs, void **outputs,
                                  void *workspace, cudaStream_t stream) {
   auto const& input_dims = this->getInputDims(0);
@@ -103,14 +121,14 @@ int ResizeNearestPlugin::enqueue(int batchSize,
               (osize.y - 1) / block.y + 1,
               std::min(batchSize * nchan, 65535));
 
-           // std::cout << "nearest" << std::endl;
+      //  std::cout << "bilinear" << std::endl;
         if (getDataType()==nvinfer1::DataType::kFLOAT) {
-            resize_nearest_kernel_2d<<<grid, block, 0, stream>>>
+            resize_bilinear_kernel_2d<<<grid, block, 0, stream>>>
                                                                (batchSize * nchan, scale, osize,
                                                                 static_cast<float const*>( inputs[0]), istride, ibatchstride,
                     static_cast<float*      >(outputs[0]), ostride, obatchstride);
         } else {
-            resize_nearest_kernel_2d<<<grid, block, 0, stream>>>
+            resize_bilinear_kernel_2d<<<grid, block, 0, stream>>>
                                                                (batchSize * nchan, scale, osize,
                                                                 static_cast<__half const*>( inputs[0]), istride, ibatchstride,
                     static_cast<__half*      >(outputs[0]), ostride, obatchstride);

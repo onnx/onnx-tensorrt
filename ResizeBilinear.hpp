@@ -27,10 +27,9 @@
 
 #include <cassert>
 
-class ResizeNearestPlugin final : public onnx2trt::Plugin {
+class ResizeBilinearPlugin final : public onnx2trt::Plugin {
   int   _ndims;
   float _scale[nvinfer1::Dims::MAX_DIMS];
-  int _bilinear;
   nvinfer1::Dims _output_dims;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
@@ -47,15 +46,15 @@ protected:
     serialize_value(&buffer, _scale);
   }
 public:
-  ResizeNearestPlugin(std::vector<float> const& scale)
+  ResizeBilinearPlugin(std::vector<float> const& scale)
     : _ndims(scale.size()) {
     assert(scale.size() <= nvinfer1::Dims::MAX_DIMS);
     std::copy(scale.begin(), scale.end(), _scale);
   }
-  ResizeNearestPlugin(void const* serialData, size_t serialLength) {
+  ResizeBilinearPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
-  virtual const char* getPluginType() const override { return "ResizeNearest"; }
+  virtual const char* getPluginType() const override { return "ResizeBilinear"; }
   virtual int getNbOutputs() const override { return 1; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
