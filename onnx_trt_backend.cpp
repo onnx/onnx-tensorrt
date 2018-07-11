@@ -670,7 +670,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
                   onnxMemoryFence *outputFence) {
   return OnnxifiTryCatch([&] {
     auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(
-        *inputFence->event);
+        inputFence->event);
     auto ret = trt_event->Wait();
     if (ret != ONNXIFI_STATUS_SUCCESS) {
       return ret;
@@ -683,7 +683,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
 
     ret = graph_rep->Run();
     auto output_event = new OnnxTensorRTEvent(graph_rep->stream());
-    *outputFence->event =
+    outputFence->event =
         reinterpret_cast<onnxEvent>(output_event);
     outputFence->type = ONNXIFI_SYNCHRONIZATION_EVENT;
     output_event->Signal();
