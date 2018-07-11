@@ -425,13 +425,9 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
          mean_weights.type     == ::ONNX_NAMESPACE::TensorProto::FLOAT &&
          variance_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
          ErrorCode::kUNSUPPORTED_NODE);
-<<<<<<< HEAD
 */
-nvinfer1::Dims dims = tensor.getDimensions();
-  ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-=======
   nvinfer1::Dims dims = tensor.getDimensions();
->>>>>>> df7167404c819d3dc3dd22ccf93b1d4927ed104a
+
   int nchan = dims.d[0];
   nvinfer1::Dims weights_shape{1, {nchan}};
   ASSERT(scale_weights.shape    == weights_shape, ErrorCode::kINVALID_NODE);
@@ -456,18 +452,10 @@ nvinfer1::Dims dims = tensor.getDimensions();
     combined_scale_ref = scale / sqrtf(variance + eps);
     combined_bias_ref  = bias - mean * combined_scale_ref;
   }
-<<<<<<< HEAD
-     //   std::cout << "we have weights " << scale_weights.type << std::endl;
-  auto dummy_power_weights = ShapedWeights::empty(scale_weights.type);
-  auto* layer = ctx->network()->addScale(
-    tensor, nvinfer1::ScaleMode::kCHANNEL,
-    combined_bias_weights, combined_scale_weights, dummy_power_weights);
-//          std::cout << "add layer" << std::endl;
-  RETURN_FIRST_OUTPUT(layer);
-=======
+
   return addScale(ctx, tensor, nvinfer1::ScaleMode::kCHANNEL,
                   combined_bias_weights, combined_scale_weights, {});
->>>>>>> df7167404c819d3dc3dd22ccf93b1d4927ed104a
+
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
