@@ -37,6 +37,9 @@ inline int get_dtype_size(nvinfer1::DataType trt_dtype) {
   case nvinfer1::DataType::kFLOAT: return 4;
   case nvinfer1::DataType::kINT8:  return 1;
   case nvinfer1::DataType::kHALF:  return 2;
+#if NV_TENSORRT_MAJOR >= 4
+  case nvinfer1::DataType::kINT32: return 4;
+#endif
     // TODO: Some sort of error handling
   default: return -1;
     //throw std::invalid_argument("Unsupported TRT data type: " +
@@ -56,6 +59,22 @@ inline int64_t get_shape_size(nvinfer1::Dims shape) {
   return count;
 }
 
+inline nvinfer1::Dims insert_dim(nvinfer1::Dims const& dims, int idx, int value) {
+  assert(idx < dims.nbDims + 1);
+  nvinfer1::Dims new_dims;
+  new_dims.nbDims = dims.nbDims + 1;
+  for( int i=0; i<idx; ++i ) {
+    new_dims.d[i]    = dims.d[i];
+    new_dims.type[i] = dims.type[i];
+  }
+  new_dims.d[idx] = value;
+  for( int i=idx+1; i<new_dims.nbDims; ++i ) {
+    new_dims.d[i]    = dims.d[i - 1];
+    new_dims.type[i] = dims.type[i - 1];
+  }
+  return new_dims;
+}
+
 inline nvinfer1::Dims remove_dim(nvinfer1::Dims const& dims, int idx) {
   assert(idx < dims.nbDims);
   nvinfer1::Dims new_dims;
@@ -73,6 +92,20 @@ inline nvinfer1::Dims remove_dim(nvinfer1::Dims const& dims, int idx) {
     new_dims.nbDims = 1;
     new_dims.d[0] = 1;
     new_dims.type[0] = nvinfer1::DimensionType::kCHANNEL;
+  }
+  return new_dims;
+}
+
+inline nvinfer1::Dims expand_dims(nvinfer1::Dims const& dims, int ndim_new) {
+  assert(dims.nbDims <= ndim_new);
+  nvinfer1::Dims new_dims;
+  new_dims.nbDims = ndim_new;
+  int j = 0;
+  for( ; j<ndim_new - dims.nbDims; ++j ) {
+    new_dims.d[j] = 1;
+  }
+  for( int i=0; i<dims.nbDims; ++i, ++j ) {
+    new_dims.d[j] = dims.d[i];
   }
   return new_dims;
 }

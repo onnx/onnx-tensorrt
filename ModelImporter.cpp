@@ -65,6 +65,7 @@ Status importInput(ImporterContext* importer_ctx,
     *tensor = user_input;
     return Status::success();
   }
+#if NV_TENSORRT_MAJOR < 4
   // WAR for TRT not supporting < 3 input dims
   for( int i=trt_dims.nbDims; i<3; ++i ) {
     // Pad with unitary dims
@@ -75,6 +76,7 @@ Status importInput(ImporterContext* importer_ctx,
                         nvinfer1::DimensionType::kSPATIAL);
   }
   ASSERT(trt_dims.nbDims <= 3, ErrorCode::kUNSUPPORTED_NODE);
+#endif // NV_TENSORRT_MAJOR < 4
   ASSERT(*tensor = importer_ctx->network()->addInput(
            input.name().c_str(), trt_dtype, trt_dims),
          ErrorCode::kUNSUPPORTED_NODE);
@@ -268,11 +270,18 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
     nvinfer1::ITensor** user_output = _importer_ctx.getUserOutput(output.name().c_str());
     if( !user_output ) {
       _importer_ctx.network()->markOutput(*output_tensor_ptr);
-      nvinfer1::DataType trt_dtype;
-      ASSERT(convert_dtype(output.type().tensor_type().elem_type(), &trt_dtype),
+      nvinfer1::DataType output_trt_dtype;
+      ASSERT(convert_dtype(
+                 output.type().tensor_type().elem_type(), &output_trt_dtype),
              ErrorCode::kUNSUPPORTED_NODE);
+#if NV_TENSORRT_MAJOR >= 4
+      // For INT32 data type, output type must match tensor type
+      ASSERT(output_tensor_ptr->getType() != nvinfer1::DataType::kINT32 ||
+             output_trt_dtype == nvinfer1::DataType::kINT32,
+             ErrorCode::kUNSUPPORTED_NODE);
+#endif // NV_TENSORRT_MAJOR >= 4
       // Note: Without this, output type is always float32
-      output_tensor_ptr->setType(trt_dtype);
+      output_tensor_ptr->setType(output_trt_dtype);
     }
   }
   // Return user-requested output tensors
