@@ -399,7 +399,7 @@ template <class F> onnxStatus OnnxifiTryCatch(F &&tryBlock) {
   try {
     return tryBlock();
   } catch (const std::bad_alloc &e) {
-    std::cout << "Allocation failed: " << e.what() << std::endl;
+    std::cerr << "Allocation failed: " << e.what() << std::endl;
     return ONNXIFI_STATUS_NO_SYSTEM_MEMORY;
   } catch (const std::exception &e) {
     std::cerr << "Internal Error: " << e.what() << std::endl;
@@ -671,7 +671,6 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
   return OnnxifiTryCatch([&] {
     auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(
         *inputFence->event);
-    std::cerr << "Waiting!" << std::endl;
     auto ret = trt_event->Wait();
     if (ret != ONNXIFI_STATUS_SUCCESS) {
       return ret;
@@ -682,9 +681,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
       return ONNXIFI_STATUS_INVALID_GRAPH;
     }
 
-    std::cerr << "Running!" << std::endl;
     ret = graph_rep->Run();
-    std::cerr << "Done!" << std::endl;
     auto output_event = new OnnxTensorRTEvent(graph_rep->stream());
     *outputFence->event =
         reinterpret_cast<onnxEvent>(output_event);
