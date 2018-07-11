@@ -52,7 +52,7 @@ public:
 onnxStatus CheckShape(const nvinfer1::Dims &dims,
                       const onnxTensorDescriptor &input) {
   bool matched = false;
-  if (input.dimensions != dims.nbDims + 1) {
+  if (input.dimensions == dims.nbDims + 1) {
     matched = true;
     for (int i = 0; i < dims.nbDims; ++i) {
       if (input.shape[i + 1] != dims.d[i]) {
@@ -109,7 +109,8 @@ struct OnnxTensorRTBackendID {
 class OnnxTensorRTEvent {
   public:
   OnnxTensorRTEvent(cudaStream_t s):stream_(s) {
-    if(cudaEventCreateWithFlags(&event_, cudaEventBlockingSync) != cudaSuccess) {
+    if (cudaEventCreateWithFlags(&event_, cudaEventBlockingSync) !=
+        cudaSuccess) {
       throw std::runtime_error("Cannot create cudaEvent");
     }
   }
@@ -125,13 +126,13 @@ class OnnxTensorRTEvent {
   }
 
   onnxStatus Wait() {
-    return (cudaEventSynchronize(event_) == cudaSuccess)
+    return (cudaStreamWaitEvent(stream_, event_, 0) == cudaSuccess)
                ? ONNXIFI_STATUS_SUCCESS
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
   private:
-  cudaStream_t stream_;
+  cudaStream_t stream_{0};
   cudaEvent_t event_;
 };
 
@@ -244,8 +245,9 @@ void GraphRep::ClearDeviceBuffers() {
 onnxStatus GraphRep::CheckAndBindTensor(const nvinfer1::Dims &dims,
                                         const onnxTensorDescriptor &tensor) {
   // Check memory type
-  if (tensor.memoryType != ONNXIFI_MEMORY_TYPE_CPU ||
+  if (tensor.memoryType != ONNXIFI_MEMORY_TYPE_CPU &&
       tensor.memoryType != ONNXIFI_MEMORY_TYPE_CUDA_BUFFER) {
+  std::cerr << tensor.memoryType << std::endl;
     return ONNXIFI_STATUS_INVALID_DATATYPE;
   }
   // Check input shape
@@ -295,6 +297,8 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
         return ONNXIFI_STATUS_INVALID_SHAPE;
       }
     }
+    std::cerr << "Adding input " << i << ": " << inputDescriptors[i].name
+              << ", type: " << inputDescriptors[i].memoryType << std::endl;
     input_map_.emplace(std::string(inputDescriptors[i].name),
                        inputDescriptors + i);
   }
@@ -330,12 +334,16 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     }
 
     if (trt_engine_->bindingIsInput(b)) {
+      std::cerr << "Input: " << trt_engine_->getBindingName(b)
+                << ", Dim: " << dims.d[0] << ", " << dims.d[1] << ", "
+                << dims.d[2] << std::endl;
       const auto it = input_map_.find(trt_engine_->getBindingName(b));
       if (it == input_map_.end()) {
         return ONNXIFI_STATUS_INVALID_NAME;
       }
       if (auto ret =
               CheckAndBindTensor(dims, *it->second) != ONNXIFI_STATUS_SUCCESS) {
+        std::cerr << "Bad binding input" << std::endl;
         return ret;
       }
     } else {
@@ -369,10 +377,8 @@ onnxStatus GraphRep::Run() {
   }
 
   // Run TensorRT
-  // TODO(add async api)
-  cudaStream_t stream = 0;
-  trt_executor_->enqueue(batch_size_, bindings_.data(), stream, nullptr);
-  if (cudaStreamSynchronize(stream) != cudaSuccess) {
+  trt_executor_->enqueue(batch_size_, bindings_.data(), stream_, nullptr);
+  if (cudaStreamSynchronize(stream_) != cudaSuccess) {
     return ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
@@ -665,6 +671,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
   return OnnxifiTryCatch([&] {
     auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(
         *inputFence->event);
+    std::cerr << "Waiting!" << std::endl;
     auto ret = trt_event->Wait();
     if (ret != ONNXIFI_STATUS_SUCCESS) {
       return ret;
@@ -675,7 +682,9 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
       return ONNXIFI_STATUS_INVALID_GRAPH;
     }
 
+    std::cerr << "Running!" << std::endl;
     ret = graph_rep->Run();
+    std::cerr << "Done!" << std::endl;
     auto output_event = new OnnxTensorRTEvent(graph_rep->stream());
     *outputFence->event =
         reinterpret_cast<onnxEvent>(output_event);
