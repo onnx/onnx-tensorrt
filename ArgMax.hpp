@@ -29,6 +29,7 @@
 
 class ArgMaxPlugin final : public onnx2trt::Plugin {
   int   _dim;
+  int _channels;
   nvinfer1::Dims _output_dims;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
