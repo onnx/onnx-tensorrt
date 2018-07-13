@@ -50,6 +50,7 @@ set(ONNX2TRT_PATCH 0)
 #--------------------------------------------------
 
 set(PLUGIN_SOURCES
+  ArgMax.cu
   FancyActivation.cu
   ResizeNearest.cu
   ResizeBilinear.cu
