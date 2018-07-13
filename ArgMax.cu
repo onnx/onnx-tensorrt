@@ -69,7 +69,7 @@ void argmax_kernel(int nbatch,
                   int c,
                   int2 osize,
                   Data const* idata, int istride, int ibatchstride,
-                  int*       odata, int ostride, int obatchstride)
+                  Data*       odata, int ostride, int obatchstride)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if ((x >= osize.x*osize.y) || (x < 0)) return;
@@ -78,7 +78,7 @@ void argmax_kernel(int nbatch,
     for (int i = 0; i < c; i++)
         if ((float)idata[x*c+i]>=max) {
         max = (float)idata[x*c+i];
-        am = i;
+        am = (float)i;
     }
     odata[x]=am;
 }
@@ -103,12 +103,12 @@ int ArgMaxPlugin::enqueue(int batchSize,
             argmax_kernel<<<grid, block, 0, stream>>>
                                                                (batchSize * nchan, nchan, osize,
                                                                 static_cast<float const*>( inputs[0]), istride, ibatchstride,
-                    static_cast<int*      >(outputs[0]), ostride, obatchstride);
+                    static_cast<float*      >(outputs[0]), ostride, obatchstride);
         } else {
             argmax_kernel<<<grid, block, 0, stream>>>
                                                                (batchSize * nchan, nchan, osize,
                                                                 static_cast<__half const*>( inputs[0]), istride, ibatchstride,
-                    static_cast<int*      >(outputs[0]), ostride, obatchstride);
+                    static_cast<__half*      >(outputs[0]), ostride, obatchstride);
         }
 
     return cudaGetLastError() != cudaSuccess;

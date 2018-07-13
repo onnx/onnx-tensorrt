@@ -1737,7 +1737,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ArgMax) {
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   ASSERT(tensor.getDimensions().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
-  int dim = attrs.get<int>("dim");
+  int dim = attrs.get<int>("axis");
   RETURN_FIRST_OUTPUT(ctx->addPlugin(new ArgMaxPlugin(dim),
                                          {&inputs.at(0).tensor()}));
 }
