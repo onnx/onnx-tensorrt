@@ -508,48 +508,67 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     *(uint64_t *)(infoValue) = x;                                              \
     *infoValueSize = sizeof(uint64_t);                                         \
   }
-    if (infoType == ONNXIFI_BACKEND_NAME) {
-      SET_STRING("TensorRT");
-    } else if (infoType == ONNXIFI_BACKEND_VENDOR) {
-      SET_STRING("Nvidia");
-    } else if (infoType == ONNXIFI_BACKEND_VERSION) {
-      SET_STRING("1.0.0");
-    } else if (infoType == ONNXIFI_BACKEND_EXTENSIONS) {
-      *infoValueSize = 0;
-    } else if (infoType == ONNXIFI_BACKEND_DEVICE) {
-      SET_STRING("gpu");
-    } else if (infoType == ONNXIFI_BACKEND_DEVICE_TYPE) {
-      SET_UINT64(ONNXIFI_DEVICE_TYPE_GPU);
-    } else if (infoType == ONNXIFI_BACKEND_CAPABILITIES) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_INIT_PROPERTIES) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_MEMORY_TYPES) {
-      SET_UINT64(ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
-    } else if (infoType == ONNXIFI_BACKEND_MEMORY_SIZE) {
+    switch(ONNXIFI_BACKEND_NAME) {
+    case ONNXIFI_BACKEND_NAME:
+    SET_STRING("TensorRT");
+    break;
+    case ONNXIFI_BACKEND_VENDOR:
+    SET_STRING("Nvidia");
+    break;
+    case ONNXIFI_BACKEND_VERSION:
+    SET_STRING("1.0.0");
+    break;
+    case ONNXIFI_BACKEND_EXTENSIONS:
+    *infoValueSize = 0;
+    break;
+    case ONNXIFI_BACKEND_DEVICE:
+    SET_STRING("gpu");
+    break;
+    case ONNXIFI_BACKEND_DEVICE_TYPE:
+    SET_UINT64(ONNXIFI_DEVICE_TYPE_GPU);
+    break;
+    case ONNXIFI_BACKEND_CAPABILITIES:
+    SET_UINT64(0UL);
+    break;
+    case ONNXIFI_BACKEND_INIT_PROPERTIES:
+     SET_UINT64(0UL);
+     break;
+    case ONNXIFI_BACKEND_MEMORY_TYPES:
+     SET_UINT64(ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
+     break;
+    case ONNXIFI_BACKEND_MEMORY_SIZE:
+     {
       size_t free, total;
       if (cudaMemGetInfo(&free, &total) != cudaSuccess) {
         return ONNXIFI_STATUS_BACKEND_UNAVAILABLE;
       }
       SET_UINT64(uint64_t(total));
-    }
-    // Dummy numbers
-    else if (infoType == ONNXIFI_BACKEND_MAX_GRAPH_SIZE) {
-      SET_UINT64(1000000UL);
-    } else if (infoType == ONNXIFI_BACKEND_MAX_GRAPH_COUNT) {
-      SET_UINT64(1UL);
-    } else if (infoType == ONNXIFI_BACKEND_MACS_FP32) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_MACS_FP16) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_MEMORY_BANDWIDTH) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH) {
-      SET_UINT64(0UL);
-    } else if (infoType == ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH) {
-      SET_UINT64(0UL);
-    } else {
-      return ONNXIFI_STATUS_UNSUPPORTED_PARAMETER;
+      break;
+     }
+    // TODO: Dummy numbers below
+    case ONNXIFI_BACKEND_MAX_GRAPH_SIZE:
+     SET_UINT64(1000000UL);
+     break;
+    case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
+     SET_UINT64(1UL);
+     break;
+    case ONNXIFI_BACKEND_MACS_FP32:
+     SET_UINT64(0UL);
+     break;
+    case ONNXIFI_BACKEND_MACS_FP16:
+     SET_UINT64(0UL);
+     break;
+    case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
+     SET_UINT64(0UL);
+     break;
+    case ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH:
+     SET_UINT64(0UL);
+     break;
+    case ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH:
+     SET_UINT64(0UL);
+     break;
+    default:
+     return ONNXIFI_STATUS_UNSUPPORTED_PARAMETER;
     }
     return ONNXIFI_STATUS_SUCCESS;
 #undef SET_STRING
