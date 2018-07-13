@@ -76,11 +76,11 @@ void argmax_kernel(int nbatch,
     float max = -1e6;
     int am = 0;
     for (int i = 0; i < c; i++)
-        if (tensor[x*c+i]>=max) {
-        max = tensor[x*c+i];
+        if ((float)idata[x*c+i]>=max) {
+        max = (float)idata[x*c+i];
         am = i;
     }
-    result[x]=am;
+    odata[x]=am;
 }
 
 
@@ -89,9 +89,7 @@ int ArgMaxPlugin::enqueue(int batchSize,
                                  void *workspace, cudaStream_t stream) {
   auto const& input_dims = this->getInputDims(0);
   int nchan = input_dims.d[0];
-  switch( _ndims ) {
-  case 2: {
-    float2 scale = {_scale[1], _scale[0]};
+
     int2 osize = {_output_dims.d[2], _output_dims.d[1]};
     int istride =   input_dims.d[2];
     int ostride = _output_dims.d[2];
@@ -114,7 +112,5 @@ int ArgMaxPlugin::enqueue(int batchSize,
         }
 
     return cudaGetLastError() != cudaSuccess;
-  }
-  default: return -1;
-  }
+
 }

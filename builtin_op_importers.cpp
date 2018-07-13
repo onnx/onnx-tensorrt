@@ -24,6 +24,7 @@
 #include "onnx2trt_utils.hpp"
 #include "plugin.hpp"
 #include "FancyActivation.hpp"
+#include "ArgMax.hpp"
 #include "ResizeNearest.hpp"
 #include "ResizeBilinear.hpp"
 #include "Split.hpp"
