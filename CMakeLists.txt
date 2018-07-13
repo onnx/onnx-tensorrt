@@ -71,7 +71,7 @@ set(RUNTIME_SOURCES
   builtin_plugins.cpp
 )
 
-set(ONNXIFY_SOURCES onnx_trt_backend.cpp)
+set(ONNXIFI_SOURCES onnx_trt_backend.cpp)
 
 set(EXECUTABLE_SOURCES
   main.cpp
@@ -81,6 +81,10 @@ set(HEADERS
   NvOnnxParser.h
   NvOnnxParserRuntime.h
 )
+
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_package(Threads REQUIRED)
 
 FIND_PACKAGE(Protobuf REQUIRED)
 
@@ -210,11 +214,11 @@ target_include_directories(nvonnxparser_runtime_static PUBLIC ${CUDA_INCLUDE_DIR
 target_link_libraries(nvonnxparser_runtime_static PUBLIC nvonnxparser_plugin ${CUDNN_LIBRARY} ${TENSORRT_LIBRARY})
 
 # --------------------------------
-# Onnxify library
+# Onnxifi library
 # --------------------------------
-add_library(trt_onnxify SHARED ${ONNXIFY_SOURCES})
+add_library(trt_onnxify SHARED ${ONNXIFI_SOURCES})
 target_include_directories(trt_onnxify PUBLIC ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
-target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} -lrt -lpthread)
+target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 # --------------------------------
 # Converter executable
@@ -223,7 +227,7 @@ target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} -
 add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
-target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} -lrt -lpthread)
+target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 # --------------------------------
 # Installation

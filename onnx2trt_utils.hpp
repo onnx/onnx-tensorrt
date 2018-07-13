@@ -147,9 +147,6 @@ inline nvinfer1::Dims convert_dims(OnnxDims const& onnx_dims) {
 
 inline bool convert_weight_descriptor(onnxTensorDescriptor const &desc,
                                       onnx2trt::ShapedWeights *weights) {
-  // We only support grabbing weight from CPU memory now
-  assert(desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU);
-
   nvinfer1::Dims shape;
   shape.nbDims = desc.dimensions;
   // Special case for scalars

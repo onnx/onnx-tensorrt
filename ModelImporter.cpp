@@ -96,11 +96,12 @@ Status importInputs(ImporterContext* importer_ctx,
     ASSERT(!initializer_map.count(initializer.name()), ErrorCode::kINVALID_GRAPH);
     initializer_map.insert({initializer.name(), &initializer});
   }
+  ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
   string_map<onnxTensorDescriptor const*> weight_map;
   for (uint32_t i = 0; i < weights_count; ++i) {
     onnxTensorDescriptor const* desc = weight_descriptors + i;
-    ASSERT(desc, ErrorCode::kINVALID_VALUE);
-    weight_map.emplace(desc->name, desc);
+    ASSERT(weight_map.emplace(desc->name, desc).second,
+           ErrorCode::kINVALID_VALUE);
   }
   for( ::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input() ) {
     TensorOrWeights tensor;
@@ -113,6 +114,10 @@ Status importInputs(ImporterContext* importer_ctx,
     } else if (weight_map.count(input.name())) {
       onnxTensorDescriptor const& weight_desc = *weight_map.at(input.name());
       ShapedWeights weights;
+      // We only support grabbing weight from CPU memory now
+      ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
+             ErrorCode::kINVALID_VALUE);
+
       ASSERT(convert_weight_descriptor(weight_desc, &weights),
              ErrorCode::kUNSUPPORTED_NODE);
       tensor = weights;

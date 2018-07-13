@@ -139,10 +139,10 @@ class OnnxTensorRTEvent {
 class CudaDeviceGuard {
   public:
     CudaDeviceGuard(int backend_id) {
-      if (cudaGetDevice(&current_device_) != cudaSuccess) {
+      if (cudaGetDevice(&saved_device_) != cudaSuccess) {
         throw std::runtime_error("Cannot run cudaGetDevice");
       }
-      if (current_device_ != backend_id) {
+      if (saved_device_ != backend_id) {
         if (cudaSetDevice(backend_id) != cudaSuccess) {
           throw std::runtime_error("Cannot run cudaSetDevice");
         }
@@ -152,12 +152,12 @@ class CudaDeviceGuard {
 
     ~CudaDeviceGuard() {
       if (need_restore_) {
-        cudaSetDevice(current_device_);
+        cudaSetDevice(saved_device_);
       }
     }
 
   private:
-    int current_device_{0};
+    int saved_device_{-1};
     bool need_restore_{false};
 };
 class OnnxTensorRTBackendRep {
@@ -284,7 +284,6 @@ onnxStatus GraphRep::CheckAndBindTensor(const nvinfer1::Dims &dims,
   // Check memory type
   if (tensor.memoryType != ONNXIFI_MEMORY_TYPE_CPU &&
       tensor.memoryType != ONNXIFI_MEMORY_TYPE_CUDA_BUFFER) {
-  std::cerr << tensor.memoryType << std::endl;
     return ONNXIFI_STATUS_INVALID_DATATYPE;
   }
   // Check input shape
@@ -353,10 +352,10 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     }
     // We only support NCHW
     if (outputDescriptors[i].dimensions != 4) {
-      return ONNXIFI_STATUS_INVALID_SHAPE;
+      return ONNXIFI_STATUS_UNSUPPORTED_SHAPE;
     }
     if (batch_size_ != outputDescriptors[i].shape[0]) {
-      return ONNXIFI_STATUS_INVALID_SHAPE;
+      return ONNXIFI_STATUS_UNSUPPORTED_SHAPE;
     }
     output_map_.emplace(std::string(outputDescriptors[i].name),
                         outputDescriptors + i);
@@ -462,9 +461,13 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
       *numBackends = nDevices;
       return ONNXIFI_STATUS_SUCCESS;
     } else {
-      int len = (*numBackends < nDevices) ? (*numBackends) : nDevices;
-      for (int i = 0; i < len; ++i) {
-        *(backendIDs + i) = (onnxBackendID)(new OnnxTensorRTBackendID(i));
+      size_t len = (*numBackends < nDevices) ? (*numBackends) : nDevices;
+      std::vector<std::unique_ptr<OnnxTensorRTBackendID>> vtmp;
+      for (size_t i = 0; i < len; ++i) {
+        vtmp.emplace_back(new OnnxTensorRTBackendID(i));
+      }
+      for (size_t i = 0; i < len; ++i) {
+        *(backendIDs + i) = (onnxBackendID)(vtmp[i].release());
       }
       return (*numBackends < nDevices) ? ONNXIFI_STATUS_FALLBACK
                                        : ONNXIFI_STATUS_SUCCESS;
@@ -549,7 +552,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
       return ONNXIFI_STATUS_UNSUPPORTED_PARAMETER;
     }
     return ONNXIFI_STATUS_SUCCESS;
-#undef RETURN_STRING
+#undef SET_STRING
 #undef SET_UINT64
   });
 }
