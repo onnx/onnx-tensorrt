@@ -76,8 +76,8 @@ void argmax_kernel(int nbatch,
     float max = -1e6;
     int am = 0;
     for (int i = 0; i < c; i++)
-        if ((float)idata[x*c+i]>=max) {
-        max = (float)idata[x*c+i];
+        if ((float)idata[x+i*osize.x*osize.y]>=max) {
+        max = (float)idata[x+i*osize.x*osize.y];
         am = (float)i;
     }
     odata[x]=am;
