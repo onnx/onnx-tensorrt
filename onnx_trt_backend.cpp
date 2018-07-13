@@ -153,13 +153,18 @@ public:
   cudaStream_t stream() const { return stream_; }
 
   onnxStatus ImportModel(void const *serialized_onnx_model,
-                         size_t serialized_onnx_model_size) {
-    auto succeeded =
-        parser_->parse(serialized_onnx_model, serialized_onnx_model_size);
+                         size_t serialized_onnx_model_size,
+                         uint32_t weight_count, onnxTensorDescriptor const *weight_descriptors) {
+    auto succeeded = parser_->parseWithWeightDescriptors(
+        serialized_onnx_model, serialized_onnx_model_size, weight_count,
+        weight_descriptors);
     if (!succeeded) {
       const auto num_errors = parser_->getNbErrors();
       if (num_errors > 0) {
         const auto *error = parser_->getError(num_errors - 1);
+        std::cerr << "Parsing error: " << error->desc() << " at "
+                  << error->file() << ":" << error->line() << " ("
+                  << error->func() << ")." << std::endl;
         switch (error->code()) {
         case nvonnxparser::ErrorCode::kMEM_ALLOC_FAILED:
           return ONNXIFI_STATUS_NO_SYSTEM_MEMORY;
@@ -529,7 +534,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     // NB: not ideal case. We CHECK model by actually trying to run the
     // conversion. However, this might be the case for other vendors
     OnnxTensorRTBackendRep backendrep;
-    return backendrep.ImportModel(onnxModel, onnxModelSize);
+    return backendrep.ImportModel(onnxModel, onnxModelSize, 0, nullptr);
   });
 }
 
@@ -630,9 +635,8 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     }
 
     // Parse the model
-    // TODO: Ignore the weightDescriptors for now and rely on initialization
-    // list
-    auto ret = backendrep->ImportModel(onnxModel, onnxModelSize);
+    auto ret = backendrep->ImportModel(onnxModel, onnxModelSize, weightsCount,
+                                       weightDescriptors);
     if (ret != ONNXIFI_STATUS_SUCCESS) {
       return ret;
     }

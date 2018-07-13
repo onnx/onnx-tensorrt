@@ -33,6 +33,7 @@ static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) +
                                            (NV_ONNX_PARSER_MINOR * 100) +
                                            NV_ONNX_PARSER_PATCH);
 
+class onnxTensorDescriptor;
 namespace nvonnxparser
 {
 
@@ -107,6 +108,23 @@ public:
      */
     virtual bool parse(void const* serialized_onnx_model,
                        size_t      serialized_onnx_model_size) = 0;
+
+    /** \brief Parse a serialized ONNX model into the TensorRT network
+     * with consideration of user provided weights
+     *
+     * \param serialized_onnx_model Pointer to the serialized ONNX model
+     * \param serialized_onnx_model_size Size of the serialized ONNX model
+     *        in bytes
+     * \param weight_count number of user provided weights
+     * \param weight_descriptors pointer to user provided weight array
+     * \return true if the model was parsed successfully
+     * \see getNbErrors() getError()
+     */
+    virtual bool parseWithWeightDescriptors(
+        void const *serialized_onnx_model, size_t serialized_onnx_model_size,
+        uint32_t weight_count,
+        onnxTensorDescriptor const *weight_descriptors) = 0;
+
     /** \brief Returns whether the specified operator may be supported by the
      *         parser.
      *
