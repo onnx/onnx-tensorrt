@@ -136,9 +136,34 @@ class OnnxTensorRTEvent {
   cudaEvent_t event_;
 };
 
+class CudaDeviceGuard {
+  public:
+    CudaDeviceGuard(int backend_id) {
+      if (cudaGetDevice(&current_device_) != cudaSuccess) {
+        throw std::runtime_error("Cannot run cudaGetDevice");
+      }
+      if (current_device_ != backend_id) {
+        if (cudaSetDevice(backend_id) != cudaSuccess) {
+          throw std::runtime_error("Cannot run cudaSetDevice");
+        }
+        need_restore_ = true;
+      }
+    }
+
+    ~CudaDeviceGuard() {
+      if (need_restore_) {
+        cudaSetDevice(current_device_);
+      }
+    }
+
+  private:
+    int current_device_{0};
+    bool need_restore_{false};
+};
 class OnnxTensorRTBackendRep {
 public:
-  OnnxTensorRTBackendRep() {
+  OnnxTensorRTBackendRep(const OnnxTensorRTBackendID &backend_id)
+      : device_id_(backend_id.device_id) {
     trt_builder_ = infer_object(nvinfer1::createInferBuilder(trt_logger_));
     trt_network_ = infer_object(trt_builder_->createNetwork());
     parser_ =
@@ -150,6 +175,7 @@ public:
 
   ~OnnxTensorRTBackendRep() { cudaStreamDestroy(stream_); }
 
+  int device_id() const { return device_id_; }
   cudaStream_t stream() const { return stream_; }
 
   onnxStatus ImportModel(void const *serialized_onnx_model,
@@ -200,14 +226,19 @@ private:
   std::shared_ptr<nvinfer1::INetworkDefinition> trt_network_{nullptr};
   std::shared_ptr<nvonnxparser::IParser> parser_{nullptr};
   // TODO: configerable max batch size
+  int device_id_{0};
   size_t max_batch_size_{128};
 };
 
 class GraphRep {
 public:
   GraphRep(OnnxTensorRTBackendRep *backendrep)
-      : max_batch_size_(backendrep->max_batch_size()),
+      : device_id_(backendrep->device_id()),
+        max_batch_size_(backendrep->max_batch_size()),
         stream_(backendrep->stream()) {
+    if (cudaSetDevice(device_id_) != cudaSuccess) {
+      throw std::runtime_error("Cannot set CUDA device");
+    }
     trt_engine_ = infer_object(backendrep->buildCudaEngine());
     max_batch_size_ = backendrep->max_batch_size();
   }
@@ -235,6 +266,7 @@ private:
   std::unordered_map<std::string, const onnxTensorDescriptor *> input_map_;
   std::unordered_map<std::string, const onnxTensorDescriptor *> output_map_;
   std::unordered_map<std::string, void *> device_buffers_;
+  int device_id_{0};
   size_t max_batch_size_{0};
   size_t batch_size_{0};
   cudaStream_t stream_;
@@ -285,6 +317,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
                             const onnxTensorDescriptor *inputDescriptors,
                             uint32_t outputsCount,
                             const onnxTensorDescriptor *outputDescriptors) {
+  CudaDeviceGuard guard(device_id_);
   ClearDeviceBuffers();
   // Setup the input/output bindings and decide batch size
   for (unsigned i = 0; i < inputsCount; ++i) {
@@ -369,6 +402,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
 }
 
 onnxStatus GraphRep::Run() {
+  CudaDeviceGuard guard(device_id_);
   // Copy input if necessary
   // TODO: cache tensor footprint
   for (auto kv : device_buffers_) {
@@ -533,7 +567,11 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
 
     // NB: not ideal case. We CHECK model by actually trying to run the
     // conversion. However, this might be the case for other vendors
-    OnnxTensorRTBackendRep backendrep;
+    auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
+    if (!backend_id) {
+      return ONNXIFI_STATUS_INVALID_ID;
+    }
+    OnnxTensorRTBackendRep backendrep(*backend_id);
     return backendrep.ImportModel(onnxModel, onnxModelSize, 0, nullptr);
   });
 }
@@ -550,7 +588,11 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxInitBackend)(onnxBackendID backendID, const uint64_t *auxPropertiesList,
                      onnxBackend *backend) {
   return OnnxifiTryCatch([&] {
-    *backend = (onnxBackend)(new OnnxTensorRTBackendRep());
+    auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
+    if (!backend_id) {
+      return ONNXIFI_STATUS_INVALID_ID;
+    }
+    *backend = (onnxBackend)(new OnnxTensorRTBackendRep(*backend_id));
     return ONNXIFI_STATUS_SUCCESS;
   });
 }
@@ -642,7 +684,6 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     }
 
     // Create the TRT engine
-    // TODO: error handling
     *graph = (onnxGraph)(new GraphRep(backendrep));
     return ONNXIFI_STATUS_SUCCESS;
   });
