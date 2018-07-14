@@ -89,13 +89,15 @@ Status importInputs(ImporterContext* importer_ctx,
                     uint32_t weights_count,
                     onnxTensorDescriptor const* weight_descriptors) {
   // The weights may come from two sources:
-  // 1. Initializer list in onnx graph
-  // 2. User specified weight through onnxifi
+  // either Initializer list in onnx graph
+  // or User specified weight through onnxifi
   string_map<::ONNX_NAMESPACE::TensorProto const*> initializer_map;
   for( ::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer() ) {
     ASSERT(!initializer_map.count(initializer.name()), ErrorCode::kINVALID_GRAPH);
     initializer_map.insert({initializer.name(), &initializer});
   }
+  ASSERT(weights_count == 0 || initializer_map.empty(),
+         ErrorCode::kINVALID_VALUE);
   ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
   string_map<onnxTensorDescriptor const*> weight_map;
   for (uint32_t i = 0; i < weights_count; ++i) {
