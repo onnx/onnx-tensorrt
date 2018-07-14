@@ -107,17 +107,15 @@ struct OnnxTensorRTBackendID {
 };
 
 class OnnxTensorRTEvent {
-  public:
-  OnnxTensorRTEvent(cudaStream_t s):stream_(s) {
+public:
+  OnnxTensorRTEvent(cudaStream_t s) : stream_(s) {
     if (cudaEventCreateWithFlags(&event_, cudaEventBlockingSync) !=
         cudaSuccess) {
       throw std::runtime_error("Cannot create cudaEvent");
     }
   }
 
-  ~OnnxTensorRTEvent() {
-    cudaEventDestroy(event_);
-  }
+  ~OnnxTensorRTEvent() { cudaEventDestroy(event_); }
 
   onnxStatus Signal() {
     return (cudaEventRecord(event_, stream_) == cudaSuccess)
@@ -131,34 +129,34 @@ class OnnxTensorRTEvent {
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
-  private:
+private:
   cudaStream_t stream_{0};
   cudaEvent_t event_;
 };
 
 class CudaDeviceGuard {
-  public:
-    CudaDeviceGuard(int backend_id) {
-      if (cudaGetDevice(&saved_device_) != cudaSuccess) {
-        throw std::runtime_error("Cannot run cudaGetDevice");
-      }
-      if (saved_device_ != backend_id) {
-        if (cudaSetDevice(backend_id) != cudaSuccess) {
-          throw std::runtime_error("Cannot run cudaSetDevice");
-        }
-        need_restore_ = true;
-      }
+public:
+  CudaDeviceGuard(int backend_id) {
+    if (cudaGetDevice(&saved_device_) != cudaSuccess) {
+      throw std::runtime_error("Cannot run cudaGetDevice");
     }
-
-    ~CudaDeviceGuard() {
-      if (need_restore_) {
-        cudaSetDevice(saved_device_);
+    if (saved_device_ != backend_id) {
+      if (cudaSetDevice(backend_id) != cudaSuccess) {
+        throw std::runtime_error("Cannot run cudaSetDevice");
       }
+      need_restore_ = true;
     }
+  }
 
-  private:
-    int saved_device_{-1};
-    bool need_restore_{false};
+  ~CudaDeviceGuard() {
+    if (need_restore_) {
+      cudaSetDevice(saved_device_);
+    }
+  }
+
+private:
+  int saved_device_{-1};
+  bool need_restore_{false};
 };
 class OnnxTensorRTBackendRep {
 public:
@@ -166,8 +164,8 @@ public:
       : device_id_(backend_id.device_id) {
     trt_builder_ = infer_object(nvinfer1::createInferBuilder(trt_logger_));
     trt_network_ = infer_object(trt_builder_->createNetwork());
-    parser_ =
-        infer_object(nvonnxparser::createParser(*trt_network_, trt_logger_));
+    parser_ = infer_object(
+        nvonnxparser::createParser(trt_network_.get(), trt_logger_));
     if (cudaStreamCreate(&stream_) != cudaSuccess) {
       throw std::runtime_error("Cannot create cudaStream");
     }
@@ -180,7 +178,8 @@ public:
 
   onnxStatus ImportModel(void const *serialized_onnx_model,
                          size_t serialized_onnx_model_size,
-                         uint32_t weight_count, onnxTensorDescriptor const *weight_descriptors) {
+                         uint32_t weight_count,
+                         onnxTensorDescriptor const *weight_descriptors) {
     auto succeeded = parser_->parseWithWeightDescriptors(
         serialized_onnx_model, serialized_onnx_model_size, weight_count,
         weight_descriptors);
@@ -508,67 +507,66 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     *(uint64_t *)(infoValue) = x;                                              \
     *infoValueSize = sizeof(uint64_t);                                         \
   }
-    switch(ONNXIFI_BACKEND_NAME) {
+    switch (ONNXIFI_BACKEND_NAME) {
     case ONNXIFI_BACKEND_NAME:
-    SET_STRING("TensorRT");
-    break;
+      SET_STRING("TensorRT");
+      break;
     case ONNXIFI_BACKEND_VENDOR:
-    SET_STRING("Nvidia");
-    break;
+      SET_STRING("Nvidia");
+      break;
     case ONNXIFI_BACKEND_VERSION:
-    SET_STRING("1.0.0");
-    break;
+      SET_STRING("1.0.0");
+      break;
     case ONNXIFI_BACKEND_EXTENSIONS:
-    *infoValueSize = 0;
-    break;
+      *infoValueSize = 0;
+      break;
     case ONNXIFI_BACKEND_DEVICE:
-    SET_STRING("gpu");
-    break;
+      SET_STRING("gpu");
+      break;
     case ONNXIFI_BACKEND_DEVICE_TYPE:
-    SET_UINT64(ONNXIFI_DEVICE_TYPE_GPU);
-    break;
+      SET_UINT64(ONNXIFI_DEVICE_TYPE_GPU);
+      break;
     case ONNXIFI_BACKEND_CAPABILITIES:
-    SET_UINT64(0UL);
-    break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_INIT_PROPERTIES:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_MEMORY_TYPES:
-     SET_UINT64(ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
-     break;
-    case ONNXIFI_BACKEND_MEMORY_SIZE:
-     {
+      SET_UINT64(ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
+      break;
+    case ONNXIFI_BACKEND_MEMORY_SIZE: {
       size_t free, total;
       if (cudaMemGetInfo(&free, &total) != cudaSuccess) {
         return ONNXIFI_STATUS_BACKEND_UNAVAILABLE;
       }
       SET_UINT64(uint64_t(total));
       break;
-     }
+    }
     // TODO: Dummy numbers below
     case ONNXIFI_BACKEND_MAX_GRAPH_SIZE:
-     SET_UINT64(1000000UL);
-     break;
+      SET_UINT64(1000000UL);
+      break;
     case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
-     SET_UINT64(1UL);
-     break;
+      SET_UINT64(1UL);
+      break;
     case ONNXIFI_BACKEND_MACS_FP32:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_MACS_FP16:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     case ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH:
-     SET_UINT64(0UL);
-     break;
+      SET_UINT64(0UL);
+      break;
     default:
-     return ONNXIFI_STATUS_UNSUPPORTED_PARAMETER;
+      return ONNXIFI_STATUS_UNSUPPORTED_PARAMETER;
     }
     return ONNXIFI_STATUS_SUCCESS;
 #undef SET_STRING
@@ -587,14 +585,13 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
       return ONNXIFI_STATUS_INVALID_SIZE;
     }
 
-    // NB: not ideal case. We CHECK model by actually trying to run the
-    // conversion. However, this might be the case for other vendors
-    auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
-    if (!backend_id) {
-      return ONNXIFI_STATUS_INVALID_ID;
+    TRT_Logger trt_logger;
+    auto parser = infer_object(nvonnxparser::createParser(nullptr, trt_logger));
+    if (parser->supportsModel(onnxModel, onnxModelSize)) {
+      return ONNXIFI_STATUS_SUCCESS;
+    } else {
+      return ONNXIFI_STATUS_UNSUPPORTED_OPERATOR;
     }
-    OnnxTensorRTBackendRep backendrep(*backend_id);
-    return backendrep.ImportModel(onnxModel, onnxModelSize, 0, nullptr);
   });
 }
 
@@ -672,7 +669,7 @@ ONNXIFI_SYMBOL_NAME(onnxWaitEvent)(onnxEvent event) {
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 ONNXIFI_SYMBOL_NAME(onnxReleaseEvent)(onnxEvent event) {
   return OnnxifiTryCatch([&] {
-    auto* trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
+    auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
     if (!trt_event) {
       return ONNXIFI_STATUS_INVALID_EVENT;
     }
@@ -736,22 +733,19 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxRunGraph)(onnxGraph graph, const onnxMemoryFence *inputFence,
                   onnxMemoryFence *outputFence) {
   return OnnxifiTryCatch([&] {
-    auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(
-        inputFence->event);
+    auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(inputFence->event);
     auto ret = trt_event->Wait();
     if (ret != ONNXIFI_STATUS_SUCCESS) {
       return ret;
     }
-    auto *graph_rep =
-        reinterpret_cast<GraphRep *>(graph);
+    auto *graph_rep = reinterpret_cast<GraphRep *>(graph);
     if (!graph_rep) {
       return ONNXIFI_STATUS_INVALID_GRAPH;
     }
 
     ret = graph_rep->Run();
     auto output_event = new OnnxTensorRTEvent(graph_rep->stream());
-    outputFence->event =
-        reinterpret_cast<onnxEvent>(output_event);
+    outputFence->event = reinterpret_cast<onnxEvent>(output_event);
     outputFence->type = ONNXIFI_SYNCHRONIZATION_EVENT;
     output_event->Signal();
     return ret;

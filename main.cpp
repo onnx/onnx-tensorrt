@@ -244,7 +244,7 @@ int main(int argc, char* argv[]) {
   auto trt_builder = infer_object(nvinfer1::createInferBuilder(trt_logger));
   auto trt_network = infer_object(trt_builder->createNetwork());
   auto trt_parser  = infer_object(nvonnxparser::createParser(
-                                      *trt_network, trt_logger));
+                                      trt_network.get(), trt_logger));
 
   // TODO: Fix this for the new API
   //if( print_layer_info ) {

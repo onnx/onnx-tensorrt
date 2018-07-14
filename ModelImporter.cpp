@@ -200,6 +200,26 @@ Status deserialize_onnx_model(int fd,
   return Status::success();
 }
 
+bool ModelImporter::supportsModel(void const *serialized_onnx_model,
+                                  size_t serialized_onnx_model_size) {
+  ::ONNX_NAMESPACE::ModelProto model;
+
+  bool is_serialized_as_text = false;
+  Status status =
+      deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
+                             is_serialized_as_text, &model);
+  if (status.is_error()) {
+    _errors.push_back(status);
+    return false;
+  }
+  for (const auto &node : model.graph().node()) {
+    if (!this->supportsOperator(node.name().c_str())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ModelImporter::supportsOperator(const char* op_name) const {
   return _op_importers.count(op_name);
 }
