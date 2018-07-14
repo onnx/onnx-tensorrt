@@ -56,8 +56,7 @@ onnxStatus CheckShape(const nvinfer1::Dims &dims,
     matched = true;
     for (int i = 0; i < dims.nbDims; ++i) {
       if (input.shape[i + 1] != dims.d[i]) {
-        matched = false;
-        break;
+        return ONNXIFI_STATUS_MISMATCHING_SHAPE;
       }
     }
   }
@@ -109,7 +108,7 @@ struct OnnxTensorRTBackendID {
 class OnnxTensorRTEvent {
 public:
   OnnxTensorRTEvent(cudaStream_t s) : stream_(s) {
-    if (cudaEventCreateWithFlags(&event_, cudaEventBlockingSync) !=
+    if (cudaEventCreate(&event_) !=
         cudaSuccess) {
       throw std::runtime_error("Cannot create cudaEvent");
     }
@@ -166,6 +165,7 @@ public:
     trt_network_ = infer_object(trt_builder_->createNetwork());
     parser_ = infer_object(
         nvonnxparser::createParser(trt_network_.get(), trt_logger_));
+    CudaDeviceGuard guard(device_id_);
     if (cudaStreamCreate(&stream_) != cudaSuccess) {
       throw std::runtime_error("Cannot create cudaStream");
     }
@@ -375,7 +375,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
                 << dims.d[2] << std::endl;
       const auto it = input_map_.find(trt_engine_->getBindingName(b));
       if (it == input_map_.end()) {
-        return ONNXIFI_STATUS_INVALID_NAME;
+        return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
       if (auto ret =
               CheckAndBindTensor(dims, *it->second) != ONNXIFI_STATUS_SUCCESS) {
@@ -386,7 +386,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
       // output
       const auto it = output_map_.find(trt_engine_->getBindingName(b));
       if (it == output_map_.end()) {
-        return ONNXIFI_STATUS_INVALID_NAME;
+        return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
       if (auto ret =
               CheckAndBindTensor(dims, *it->second) != ONNXIFI_STATUS_SUCCESS) {
@@ -406,8 +406,9 @@ onnxStatus GraphRep::Run() {
   for (auto kv : device_buffers_) {
     auto it = input_map_.find(kv.first);
     if (it != input_map_.end()) {
-      cudaMemcpy(kv.second, (void *)(it->second->buffer),
-                 GetTensorFootprint(*it->second), cudaMemcpyHostToDevice);
+      cudaMemcpyAsync(kv.second, (void *)(it->second->buffer),
+                      GetTensorFootprint(*it->second), cudaMemcpyHostToDevice,
+                      stream_);
     } else if (output_map_.find(kv.first) == output_map_.end()) {
       return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
     }
@@ -415,16 +416,14 @@ onnxStatus GraphRep::Run() {
 
   // Run TensorRT
   trt_executor_->enqueue(batch_size_, bindings_.data(), stream_, nullptr);
-  if (cudaStreamSynchronize(stream_) != cudaSuccess) {
-    return ONNXIFI_STATUS_INTERNAL_ERROR;
-  }
 
   // Copy output if necessary
   for (auto kv : device_buffers_) {
     auto it = output_map_.find(kv.first);
     if (it != output_map_.end()) {
-      cudaMemcpy((void *)(it->second->buffer), kv.second,
-                 GetTensorFootprint(*it->second), cudaMemcpyDeviceToHost);
+      cudaMemcpyAsync((void *)(it->second->buffer), kv.second,
+                      GetTensorFootprint(*it->second), cudaMemcpyDeviceToHost,
+                      stream_);
     } else if (input_map_.find(kv.first) == input_map_.end()) {
       return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
     }
@@ -458,7 +457,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     cudaGetDeviceCount(&nDevices);
     if (!backendIDs) {
       *numBackends = nDevices;
-      return ONNXIFI_STATUS_SUCCESS;
+      return ONNXIFI_STATUS_FALLBACK;
     } else {
       size_t len = (*numBackends < nDevices) ? (*numBackends) : nDevices;
       std::vector<std::unique_ptr<OnnxTensorRTBackendID>> vtmp;
@@ -466,7 +465,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
         vtmp.emplace_back(new OnnxTensorRTBackendID(i));
       }
       for (size_t i = 0; i < len; ++i) {
-        *(backendIDs + i) = (onnxBackendID)(vtmp[i].release());
+        backendIDs[i] = (onnxBackendID)(vtmp[i].release());
       }
       return (*numBackends < nDevices) ? ONNXIFI_STATUS_FALLBACK
                                        : ONNXIFI_STATUS_SUCCESS;
@@ -606,7 +605,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     onnxInitBackend)(onnxBackendID backendID, const uint64_t *auxPropertiesList,
                      onnxBackend *backend) {
-  return OnnxifiTryCatch([&] {
+  auto ret = OnnxifiTryCatch([&] {
     auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
     if (!backend_id) {
       return ONNXIFI_STATUS_INVALID_ID;
@@ -614,6 +613,10 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     *backend = (onnxBackend)(new OnnxTensorRTBackendRep(*backend_id));
     return ONNXIFI_STATUS_SUCCESS;
   });
+  if (ret != ONNXIFI_STATUS_SUCCESS) {
+    *backend = NULL;
+  }
+  return ret;
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
@@ -630,7 +633,7 @@ ONNXIFI_SYMBOL_NAME(onnxReleaseBackend)(onnxBackend backend) {
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 ONNXIFI_SYMBOL_NAME(onnxInitEvent)(onnxBackend backend, onnxEvent *event) {
-  return OnnxifiTryCatch([&] {
+  auto ret = OnnxifiTryCatch([&] {
     if (!event) {
       return ONNXIFI_STATUS_INVALID_POINTER;
     }
@@ -642,6 +645,10 @@ ONNXIFI_SYMBOL_NAME(onnxInitEvent)(onnxBackend backend, onnxEvent *event) {
         new OnnxTensorRTEvent(backendrep->stream()));
     return ONNXIFI_STATUS_SUCCESS;
   });
+  if (ret != ONNXIFI_STATUS_SUCCESS) {
+    *event = NULL;
+  }
+  return ret;
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
@@ -683,7 +690,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
                    const void *onnxModel, uint32_t weightsCount,
                    const onnxTensorDescriptor *weightDescriptors,
                    onnxGraph *graph) {
-  return OnnxifiTryCatch([&] {
+  auto ret = OnnxifiTryCatch([&] {
     auto *backendrep = reinterpret_cast<OnnxTensorRTBackendRep *>(backend);
     if (!backendrep) {
       return ONNXIFI_STATUS_INVALID_BACKEND;
@@ -706,6 +713,10 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     *graph = (onnxGraph)(new GraphRep(backendrep));
     return ONNXIFI_STATUS_SUCCESS;
   });
+  if (ret != ONNXIFI_STATUS_SUCCESS) {
+    *graph = NULL;
+  }
+  return ret;
 }
 
 // NB: in the context of TRT, this step will setup the input/output bindings for
