@@ -23,11 +23,11 @@
 #pragma once
 
 #include "ShapedWeights.hpp"
-#include "onnx2trt_utils.hpp"
 #include "trt_utils.hpp"
 #include "OnnxAttrs.hpp"
 
 #include <onnx/onnx.pb.h>
+#include <onnx/onnxifi.h>
 #include <NvInfer.h>
 
 #include <iostream>
@@ -145,6 +145,52 @@ inline nvinfer1::Dims convert_dims(OnnxDims const& onnx_dims) {
   return trt_dims;
 }
 
+inline bool convert_weight_descriptor(onnxTensorDescriptor const &desc,
+                                      onnx2trt::ShapedWeights *weights) {
+  nvinfer1::Dims shape;
+  shape.nbDims = desc.dimensions;
+  // Special case for scalars
+  if( shape.nbDims == 0 ) {
+    shape.nbDims = 1;
+    shape.d[0] = 1;
+    shape.type[0] = nvinfer1::DimensionType::kCHANNEL;
+  } else {
+    std::copy(desc.shape, desc.shape + desc.dimensions, shape.d);
+  }
+
+  size_t element_count = 1;
+  for (int i = 0; i < shape.nbDims; ++i) {
+    element_count *= shape.d[i];
+  }
+
+  void* data_ptr;
+  size_t nbytes;
+  ::ONNX_NAMESPACE::TensorProto::DataType dtype;
+  data_ptr = (void*)(desc. buffer);
+  if (desc.dataType == ONNXIFI_DATATYPE_FLOAT32) {
+    dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    nbytes = element_count * sizeof(float);
+  } else if (desc.dataType == ONNXIFI_DATATYPE_FLOAT16) {
+    dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT16;
+    nbytes = element_count * sizeof(float) / 2;
+  } else if (desc.dataType == ONNXIFI_DATATYPE_INT32) {
+    dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
+    nbytes = element_count * sizeof(int32_t);
+  } else if (desc.dataType == ONNXIFI_DATATYPE_INT64) {
+    dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    nbytes = element_count * sizeof(int64_t);
+  } else {
+    // Unsupported format
+    return false;
+  }
+
+  onnx2trt::ShapedWeights trt_weights(dtype, data_ptr, shape);
+  (void)nbytes;
+  assert(trt_weights.size_bytes() == nbytes);
+  *weights = trt_weights;
+  return true;
+}
+
 inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tensor,
                                  onnx2trt::ShapedWeights* weights) {
   nvinfer1::Dims shape;
@@ -180,6 +226,7 @@ inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tenso
     // Unsupported ONNX tensor format!
     return false;
   }
+
   onnx2trt::ShapedWeights trt_weights(dtype, data_ptr, shape);
   (void)nbytes;
   assert(trt_weights.size_bytes() == nbytes);

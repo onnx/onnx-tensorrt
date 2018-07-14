@@ -36,7 +36,9 @@ class ModelImporter final : public nvonnxparser::IParser {
   int _current_node;
   std::vector<Status> _errors;
 
-  Status importModel(::ONNX_NAMESPACE::ModelProto const& model);
+  Status importModel(::ONNX_NAMESPACE::ModelProto const &model,
+                     uint32_t weight_count,
+                     onnxTensorDescriptor const *weight_descriptors);
   NodeImportResult importNode(::ONNX_NAMESPACE::NodeProto const& node,
                               std::vector<TensorOrWeights>& inputs);
 public:
@@ -44,8 +46,15 @@ public:
                 nvinfer1::ILogger* logger)
     : _op_importers(getBuiltinOpImporterMap()),
       _importer_ctx(network, logger) {}
-  bool parse(void const* serialized_onnx_model,
-             size_t      serialized_onnx_model_size) override;
+  bool parseWithWeightDescriptors(
+      void const *serialized_onnx_model, size_t serialized_onnx_model_size,
+      uint32_t weight_count,
+      onnxTensorDescriptor const *weight_descriptors) override;
+  bool parse(void const *serialized_onnx_model,
+             size_t serialized_onnx_model_size) override;
+  bool supportsModel(void const *serialized_onnx_model,
+                     size_t serialized_onnx_model_size) override;
+
   bool supportsOperator(const char* op_name) const override;
   void destroy() override { delete this; }
   //virtual void registerOpImporter(std::string op,
