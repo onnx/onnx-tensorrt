@@ -1296,8 +1296,23 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
   } else {
     nvinfer1::ITensor& tensor = input.tensor();
     new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
-    ASSERT(get_shape_size(new_shape) == get_shape_size(tensor.getDimensions()),
-           ErrorCode::kUNSUPPORTED_NODE);
+    int infer_dim = -1;
+    for (int i = 0; i < new_shape.nbDims; ++i) {
+      if (new_shape.d[i] < 0) {
+        // -1 bears special meaning, which means the current dimension can
+        // be inferred while keepin the total number of elements the same.
+        // https://github.com/onnx/onnx/blob/9b9f595107e3fc0295d50f6294d43879df17552f/onnx/defs/tensor/defs.cc#L73-L75
+        ASSERT(new_shape.d[i] == -1, ErrorCode::kUNSUPPORTED_NODE);
+        // We can only one dimension that has -1
+        ASSERT(infer_dim == -1, ErrorCode::kUNSUPPORTED_NODE);
+        infer_dim = i;
+      }
+    }
+    if (infer_dim < 0) {
+      ASSERT(get_shape_size(new_shape) ==
+                 get_shape_size(tensor.getDimensions()),
+             ErrorCode::kUNSUPPORTED_NODE);
+    }
 #if NV_TENSORRT_MAJOR < 4
     if( new_shape.nbDims == 1 ) {
       // Note: TRT implicitly flattens the input to FC layers, and in fact
