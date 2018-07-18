@@ -506,7 +506,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI ONNXIFI_SYMBOL_NAME(
     *(uint64_t *)(infoValue) = x;                                              \
     *infoValueSize = sizeof(uint64_t);                                         \
   }
-    switch (ONNXIFI_BACKEND_NAME) {
+    switch (infoType) {
     case ONNXIFI_BACKEND_NAME:
       SET_STRING("TensorRT");
       break;
