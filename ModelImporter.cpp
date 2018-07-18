@@ -215,7 +215,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     return false;
   }
   for (const auto &node : model.graph().node()) {
-    if (!this->supportsOperator(node.name().c_str())) {
+    if (!this->supportsOperator(node.op_type().c_str())) {
       return false;
     }
   }
