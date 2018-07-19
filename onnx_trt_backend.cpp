@@ -50,16 +50,34 @@ public:
 };
 
 onnxStatus CheckShape(const nvinfer1::Dims &dims,
-                      const onnxTensorDescriptor &input) {
+                      const onnxTensorDescriptor &desc,
+                      bool allow_same_size) {
   bool matched = false;
-  if (input.dimensions == dims.nbDims + 1) {
+  if (desc.dimensions == dims.nbDims + 1) {
     matched = true;
     for (int i = 0; i < dims.nbDims; ++i) {
-      if (input.shape[i + 1] != dims.d[i]) {
+      if (desc.shape[i + 1] != dims.d[i]) {
         return ONNXIFI_STATUS_MISMATCHING_SHAPE;
       }
     }
+  } else if (allow_same_size && desc.dimensions > 1) {
+    size_t dim_size = 1;
+    for (int i = 0; i < dims.nbDims; ++i) {
+      dim_size *= dims.d[i];
+    }
+    size_t desc_size = 1;
+    // Skip the first dim which is batch size
+    for (int i = 1; i < desc.dimensions; ++i) {
+      desc_size *= desc.shape[i];
+    }
+    matched = (dim_size == desc_size) ? true : false;
+    if (!matched) {
+      std::cerr << "mismatched output " << desc.name << ": " << desc_size
+                << " vs " << dim_size << std::endl;
+    }
   }
+
+
   return matched ? ONNXIFI_STATUS_SUCCESS : ONNXIFI_STATUS_MISMATCHING_SHAPE;
 }
 
@@ -108,7 +126,7 @@ struct OnnxTensorRTBackendID {
 class OnnxTensorRTEvent {
 public:
   OnnxTensorRTEvent(cudaStream_t s) : stream_(s) {
-    if (cudaEventCreate(&event_) !=
+    if (cudaEventCreateWithFlags(&event_, cudaEventDisableTiming) !=
         cudaSuccess) {
       throw std::runtime_error("Cannot create cudaEvent");
     }
@@ -123,7 +141,7 @@ public:
   }
 
   onnxStatus Wait() {
-    return (cudaStreamWaitEvent(stream_, event_, 0) == cudaSuccess)
+    return (cudaEventSynchronize(event_) == cudaSuccess)
                ? ONNXIFI_STATUS_SUCCESS
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
@@ -162,6 +180,8 @@ public:
   OnnxTensorRTBackendRep(const OnnxTensorRTBackendID &backend_id)
       : device_id_(backend_id.device_id) {
     trt_builder_ = infer_object(nvinfer1::createInferBuilder(trt_logger_));
+    trt_builder_->setMaxBatchSize(max_batch_size_);
+    trt_builder_->setMaxWorkspaceSize(max_workspace_size_);
     trt_network_ = infer_object(trt_builder_->createNetwork());
     parser_ = infer_object(
         nvonnxparser::createParser(trt_network_.get(), trt_logger_));
@@ -227,6 +247,7 @@ private:
   // TODO: configerable max batch size
   int device_id_{0};
   size_t max_batch_size_{128};
+  size_t max_workspace_size_{1024UL*1024UL*1024UL*2UL};
 };
 
 class GraphRep {
@@ -257,7 +278,8 @@ private:
   void ClearDeviceBuffers();
 
   onnxStatus CheckAndBindTensor(const nvinfer1::Dims &dims,
-                                const onnxTensorDescriptor &tensor);
+                                const onnxTensorDescriptor &tensor,
+                                bool is_output);
 
   std::shared_ptr<nvinfer1::ICudaEngine> trt_engine_{nullptr};
   std::shared_ptr<nvinfer1::IExecutionContext> trt_executor_{nullptr};
@@ -279,14 +301,15 @@ void GraphRep::ClearDeviceBuffers() {
 }
 
 onnxStatus GraphRep::CheckAndBindTensor(const nvinfer1::Dims &dims,
-                                        const onnxTensorDescriptor &tensor) {
+                                        const onnxTensorDescriptor &tensor,
+                                        bool is_output) {
   // Check memory type
   if (tensor.memoryType != ONNXIFI_MEMORY_TYPE_CPU &&
       tensor.memoryType != ONNXIFI_MEMORY_TYPE_CUDA_BUFFER) {
     return ONNXIFI_STATUS_INVALID_DATATYPE;
   }
-  // Check input shape
-  auto ret = CheckShape(dims, tensor);
+  // Check tensor shape
+  auto ret = CheckShape(dims, tensor, is_output);
   if (ret != ONNXIFI_STATUS_SUCCESS) {
     return ret;
   }
@@ -349,13 +372,6 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     if (!outputDescriptors[i].name) {
       return ONNXIFI_STATUS_INVALID_NAME;
     }
-    // We only support NCHW
-    if (outputDescriptors[i].dimensions != 4) {
-      return ONNXIFI_STATUS_UNSUPPORTED_SHAPE;
-    }
-    if (batch_size_ != outputDescriptors[i].shape[0]) {
-      return ONNXIFI_STATUS_UNSUPPORTED_SHAPE;
-    }
     output_map_.emplace(std::string(outputDescriptors[i].name),
                         outputDescriptors + i);
   }
@@ -378,18 +394,18 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
         return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
       if (auto ret =
-              CheckAndBindTensor(dims, *it->second) != ONNXIFI_STATUS_SUCCESS) {
-        std::cerr << "Bad binding input" << std::endl;
+              CheckAndBindTensor(dims, *it->second, false) != ONNXIFI_STATUS_SUCCESS) {
         return ret;
       }
     } else {
-      // output
+      // output: for output, we enforce 4D dim although it can be in 2D, we do
+      // an implicit reshape in `CheckAndBindTensor`
       const auto it = output_map_.find(trt_engine_->getBindingName(b));
       if (it == output_map_.end()) {
         return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
       if (auto ret =
-              CheckAndBindTensor(dims, *it->second) != ONNXIFI_STATUS_SUCCESS) {
+              CheckAndBindTensor(dims, *it->second, true) != ONNXIFI_STATUS_SUCCESS) {
         return ret;
       }
     }
