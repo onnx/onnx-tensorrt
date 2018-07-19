@@ -141,7 +141,12 @@ public:
   }
 
   onnxStatus Wait() {
-    return (cudaStreamWaitEvent(stream_, event_, 0) == cudaSuccess)
+    auto ret = cudaStreamWaitEvent(stream_, event_, 0);
+    if (ret != cudaSuccess) {
+      return ONNXIFI_STATUS_INTERNAL_ERROR;
+    }
+
+    return (cudaStreamSynchronize(stream_) == cudaSuccess)
                ? ONNXIFI_STATUS_SUCCESS
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
@@ -398,7 +403,8 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
         return ret;
       }
     } else {
-      // output
+      // output: for output, we enforce 4D dim although it can be in 2D, we do
+      // an implicit reshape in `CheckAndBindTensor`
       const auto it = output_map_.find(trt_engine_->getBindingName(b));
       if (it == output_map_.end()) {
         return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
