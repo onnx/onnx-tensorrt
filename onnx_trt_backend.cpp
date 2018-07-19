@@ -126,7 +126,7 @@ struct OnnxTensorRTBackendID {
 class OnnxTensorRTEvent {
 public:
   OnnxTensorRTEvent(cudaStream_t s) : stream_(s) {
-    if (cudaEventCreate(&event_) !=
+    if (cudaEventCreateWithFlags(&event_, cudaEventDisableTiming) !=
         cudaSuccess) {
       throw std::runtime_error("Cannot create cudaEvent");
     }
@@ -141,12 +141,7 @@ public:
   }
 
   onnxStatus Wait() {
-    auto ret = cudaStreamWaitEvent(stream_, event_, 0);
-    if (ret != cudaSuccess) {
-      return ONNXIFI_STATUS_INTERNAL_ERROR;
-    }
-
-    return (cudaStreamSynchronize(stream_) == cudaSuccess)
+    return (cudaEventSynchronize(event_) == cudaSuccess)
                ? ONNXIFI_STATUS_SUCCESS
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
