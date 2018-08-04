@@ -1,11 +1,21 @@
 #include "NvOnnxParser.h"
 #include "onnx/onnxifi.h"
+#include <cuda_runtime.h>
 #include <NvInfer.h>
 #include <atomic>
 #include <ctime>
 #include <mutex>
 #include <thrust/device_vector.h>
 #include <unordered_map>
+
+
+#define BACKEND_NAME          "TensorRT"
+#define BACKEND_VENDOR        "Nvidia"
+#define BACKEND_VERSION       "1.0.0"
+#define BACKEND_EXTENSIONS    ""
+#define BACKEND_IR_VERSION    "3"
+#define BACKEND_OPSET_VERSION "ai.onnx:7"
+
 
 namespace {
 
@@ -539,91 +549,279 @@ onnxReleaseBackendID(onnxBackendID backendID) {
   });
 }
 
+static onnxStatus setUIntInfo(
+  void* valuePtr,
+  size_t *valueSizePtr,
+  uint64_t value)
+{
+  onnxStatus status = ONNXIFI_STATUS_FALLBACK;
+  if (valuePtr != nullptr && *valueSizePtr >= sizeof(uint64_t)) {
+    *static_cast<uint64_t*>(valuePtr) = value;
+    status = ONNXIFI_STATUS_SUCCESS;
+  }
+  *valueSizePtr = sizeof(uint64_t);
+  return status;
+}
+
+static onnxStatus setStringInfo(
+  void* valuePtr,
+  size_t *valueSizePtr,
+  const char* value,
+  size_t valueSize)
+{
+  onnxStatus status = ONNXIFI_STATUS_FALLBACK;
+  if (valuePtr != nullptr && *valueSizePtr >= valueSize) {
+    memcpy(valuePtr, value, valueSize);
+    status = ONNXIFI_STATUS_SUCCESS;
+  }
+  *valueSizePtr = valueSize;
+  return status;
+}
+
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
                    void *infoValue, size_t *infoValueSize) {
   return OnnxifiTryCatch([&] {
-    if (!infoValueSize) {
+    if (infoValueSize == nullptr) {
       return ONNXIFI_STATUS_INVALID_POINTER;
     }
-#define SET_STRING(str)                                                        \
-  {                                                                            \
-    snprintf((char *)(infoValue), *infoValueSize, str);                        \
-    *infoValueSize = strlen(str) + 1;                                          \
-  }
 
-#define SET_UINT64(x)                                                          \
-  {                                                                            \
-    if (*infoValueSize < sizeof(uint64_t)) {                                   \
-      return ONNXIFI_STATUS_INVALID_POINTER;                                   \
-    }                                                                          \
-    *(uint64_t *)(infoValue) = x;                                              \
-    *infoValueSize = sizeof(uint64_t);                                         \
-  }
+    if (backendID == nullptr) {
+      return ONNXIFI_STATUS_INVALID_ID;
+    }
+
+    const int cudaDeviceId =
+      static_cast<OnnxTensorRTBackendID*>(backendID)->device_id;
+
+    onnxStatus status = ONNXIFI_STATUS_FALLBACK;
     switch (infoType) {
-    case ONNXIFI_BACKEND_NAME:
-      SET_STRING("TensorRT");
-      break;
-    case ONNXIFI_BACKEND_VENDOR:
-      SET_STRING("Nvidia");
-      break;
-    case ONNXIFI_BACKEND_VERSION:
-      SET_STRING("1.0.0");
-      break;
-    case ONNXIFI_BACKEND_EXTENSIONS:
-      *infoValueSize = 0;
-      break;
-    case ONNXIFI_BACKEND_DEVICE:
-      SET_STRING("gpu");
-      break;
-    case ONNXIFI_BACKEND_DEVICE_TYPE:
-      SET_UINT64(ONNXIFI_DEVICE_TYPE_GPU);
-      break;
-    case ONNXIFI_BACKEND_CAPABILITIES:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_INIT_PROPERTIES:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_MEMORY_TYPES:
-      SET_UINT64(ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
-      break;
-    case ONNXIFI_BACKEND_MEMORY_SIZE: {
-      size_t free, total;
-      if (cudaMemGetInfo(&free, &total) != cudaSuccess) {
-        return ONNXIFI_STATUS_BACKEND_UNAVAILABLE;
+      case ONNXIFI_BACKEND_ONNXIFI_VERSION:
+        return setUIntInfo(infoValue, infoValueSize,
+          UINT64_C(0x0000000100000000));
+      case ONNXIFI_BACKEND_NAME:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_NAME, strlen(BACKEND_NAME));
+      case ONNXIFI_BACKEND_VENDOR:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_VENDOR, strlen(BACKEND_VENDOR));
+      case ONNXIFI_BACKEND_VERSION:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_VERSION, strlen(BACKEND_VERSION));
+      case ONNXIFI_BACKEND_EXTENSIONS:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_EXTENSIONS, strlen(BACKEND_EXTENSIONS));
+      case ONNXIFI_BACKEND_DEVICE:
+      {
+        cudaDeviceProp deviceProperties = { 0 };
+        cudaError_t cudaError =
+          cudaGetDeviceProperties(&deviceProperties, cudaDeviceId);
+        switch (cudaError) {
+          case cudaSuccess:
+            break;
+          case cudaErrorInvalidDevice:
+            return ONNXIFI_STATUS_INVALID_ID;
+          default:
+            return ONNXIFI_STATUS_INTERNAL_ERROR;
+        }
+        return setStringInfo(infoValue, infoValueSize,
+          deviceProperties.name,
+          strnlen(deviceProperties.name, sizeof(deviceProperties.name)));
       }
-      SET_UINT64(uint64_t(total));
-      break;
+      case ONNXIFI_BACKEND_DEVICE_TYPE:
+        return setUIntInfo(infoValue, infoValueSize,
+          ONNXIFI_DEVICE_TYPE_GPU);
+      case ONNXIFI_BACKEND_ONNX_IR_VERSION:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_IR_VERSION, strlen(BACKEND_IR_VERSION));
+      case ONNXIFI_BACKEND_OPSET_VERSION:
+        return setStringInfo(infoValue, infoValueSize,
+          BACKEND_OPSET_VERSION, strlen(BACKEND_OPSET_VERSION));
+      case ONNXIFI_BACKEND_CAPABILITIES:
+        return setUIntInfo(infoValue, infoValueSize, 0);
+      case ONNXIFI_BACKEND_INIT_PROPERTIES:
+        return setUIntInfo(infoValue, infoValueSize, 0);
+      case ONNXIFI_BACKEND_MEMORY_TYPES:
+        return setUIntInfo(infoValue, infoValueSize,
+          ONNXIFI_MEMORY_TYPE_CPU | ONNXIFI_MEMORY_TYPE_CUDA_BUFFER);
+      case ONNXIFI_BACKEND_GRAPH_INIT_PROPERTIES:
+        return setUIntInfo(infoValue, infoValueSize, 0);
+      case ONNXIFI_BACKEND_SYNCHRONIZATION_TYPES:
+        return setUIntInfo(infoValue, infoValueSize,
+          ONNXIFI_SYNCHRONIZATION_EVENT);
+      case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
+        return setUIntInfo(infoValue, infoValueSize,
+          std::numeric_limits<uint64_t>::max());
+      case ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH:
+      case ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH:
+        /* Assume PCI Express 3.0 x16 */
+        return setUIntInfo(infoValue, infoValueSize, UINT64_C(16519104985));
+      case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
+        return setUIntInfo(infoValue, infoValueSize, UINT64_MAX);
+      case ONNXIFI_BACKEND_MEMORY_SIZE:
+      case ONNXIFI_BACKEND_MAX_GRAPH_SIZE:
+      case ONNXIFI_BACKEND_PCI_BUS_ID:
+      case ONNXIFI_BACKEND_PCI_DEVICE_ID:
+      case ONNXIFI_BACKEND_PCI_DOMAIN_ID:
+      case ONNXIFI_BACKEND_MACS_FP32:
+      case ONNXIFI_BACKEND_MACS_FP16:
+      case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
+      {
+        cudaDeviceProp deviceProperties = { 0 };
+        cudaError_t cudaError =
+          cudaGetDeviceProperties(&deviceProperties, cudaDeviceId);
+        switch (cudaError) {
+          case cudaSuccess:
+            break;
+          case cudaErrorInvalidDevice:
+            return ONNXIFI_STATUS_INVALID_ID;
+          default:
+            return ONNXIFI_STATUS_INTERNAL_ERROR;
+        }
+        switch (infoType) {
+          case ONNXIFI_BACKEND_MEMORY_SIZE:
+          case ONNXIFI_BACKEND_GRAPH_SIZE:
+            return setUIntInfo(infoValue, infoValueSize,
+              static_cast<uint64_t>(deviceProperties.totalGlobalMem));
+          case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
+            return setUIntInfo(infoValue, infoValueSize,
+              static_cast<uint64_t>(deviceProperties.memoryClockRate) *
+              static_cast<uint64_t>(deviceProperties.memoryBusWidth) *
+              /*
+               * clock rate: kHZ -> HZ (multiply by 1000)
+               * bus width: bits -> bytes (divide by 8)
+               * 2x DDR factor (multiply by 2)
+               */
+              UINT64_C(250));
+          case ONNXIFI_BACKEND_PCI_BUS_ID:
+            return setUIntInfo(infoValue, infoValueSize,
+              static_cast<uint64_t>(deviceProperties.pciBusID));
+          case ONNXIFI_BACKEND_PCI_DEVICE_ID:
+            return setUIntInfo(infoValue, infoValueSize,
+              static_cast<uint64_t>(deviceProperties.pciDeviceID));
+          case ONNXIFI_BACKEND_PCI_DOMAIN_ID:
+            return setUIntInfo(infoValue, infoValueSize,
+              static_cast<uint64_t>(deviceProperties.pciDomainID));
+          case ONNXIFI_BACKEND_MACS_FP32:
+          {
+            /*
+             * See "32-bit floating-point add, multiply, multiply-add" in
+             * "Throughput of Native Arithmetic Instructions" table in
+             * CUDA Programming Guide. Multiply by 2 because we could FMA
+             * as two FLOPs.
+             */
+            uint64_t flopsPerCycle = 0;
+            switch (deviceProperties.major) {
+              case 3:
+                /* Kepler */
+                flopsPerCycle = 192 * 2;
+                break;
+              case 5:
+                /* Maxwell */
+                flopsPerCycle = 128 * 2;
+                break;
+              case 6:
+                /* Pascal */
+                switch (deviceProperties.minor) {
+                  case 0:
+                    flopsPerCycle = 64 * 2;
+                    break;
+                  case 1:
+                    flopsPerCycle = 128 * 2;
+                    break;
+                  case 2:
+                    flopsPerCycle = 128 * 2;
+                    break;
+                }
+                break;
+              case 7:
+                /* Volta */
+                if (deviceProperties.minor == 0) {
+                  flopsPerCycle = 64 * 2;
+                }
+                break;
+            }
+            if (flopsPerCycle == 0) {
+              return ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE;
+            }
+            return setUIntInfo(infoValue, infoValueSize,
+              UINT64_C(1000) /* KHz -> Hz */ *
+              static_cast<uint64_t>(deviceProperties.clockRate) *
+              static_cast<uint64_t>(deviceProperties.multiProcessorCount) *
+              flopsPerCycle);
+          }
+          case ONNXIFI_BACKEND_MACS_FP16:
+          {
+            /*
+             * See "16-bit floating-point add, multiply, multiply-add" and
+             * "32-bit floating-point add, multiply, multiply-add" in
+             * "Throughput of Native Arithmetic Instructions" table in
+             * CUDA Programming Guide. Use the maximum among 16-bit and 32-bit
+             * throughput. Multiply by 2 because we could FMA as two FLOPs.
+             */
+            uint64_t flopsPerCycle = 0;
+            switch (deviceProperties.major) {
+              case 3:
+                /* Kepler */
+                flopsPerCycle = 192 * 2;
+                break;
+              case 5:
+                /* Maxwell */
+                if (deviceProperties.minor == 3) {
+                  /* Maxwell-based Tegra supports FP16 at 2x rate */
+                  flopsPerCycle = 256 * 2;
+                } else {
+                  flopsPerCycle = 128 * 2;
+                }
+                break;
+              case 6:
+                /* Pascal */
+                switch (deviceProperties.minor) {
+                  case 0:
+                    /* Use FP16 */
+                    flopsPerCycle = 128 * 2;
+                    break;
+                  case 1:
+                    /* Use FP32 */
+                    flopsPerCycle = 128 * 2;
+                    break;
+                  case 2:
+                    /* Use FP16 */
+                    flopsPerCycle = 256 * 2;
+                    break;
+                }
+                break;
+              case 7:
+                /* Volta */
+                if (deviceProperties.minor == 0) {
+                  /*
+                   * Tensor Core: 
+                   * - 8 Tensor Cores per multiprocessor
+                   * - 64 FMA/cycle on each Tensor Core
+                   * - 2 FLOPs / FMA
+                   */
+                  flopsPerCycle = 8 * 64 * 2;
+                }
+                break;
+            }
+            if (flopsPerCycle == 0) {
+              return ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE;
+            }
+            return setUIntInfo(infoValue, infoValueSize,
+              UINT64_C(1000) /* KHz -> Hz */ *
+              static_cast<uint64_t>(deviceProperties.clockRate) *
+              static_cast<uint64_t>(deviceProperties.multiProcessorCount) *
+              flopsPerCycle);
+          }
+          default:
+            return ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE;
+        }
+      }
+      case ONNXIFI_BACKEND_CUDA_INDEX:
+        return setUIntInfo(infoValue, infoValueSize,
+          static_cast<uint64_t>(cudaDeviceId));
+      default:
+        return ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE;
     }
-    // TODO: Dummy numbers below
-    case ONNXIFI_BACKEND_MAX_GRAPH_SIZE:
-      SET_UINT64(1000000UL);
-      break;
-    case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
-      SET_UINT64(1UL);
-      break;
-    case ONNXIFI_BACKEND_MACS_FP32:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_MACS_FP16:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH:
-      SET_UINT64(0UL);
-      break;
-    case ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH:
-      SET_UINT64(0UL);
-      break;
-    default:
-      return ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE;
-    }
-    return ONNXIFI_STATUS_SUCCESS;
-#undef SET_STRING
-#undef SET_UINT64
   });
 }
 
