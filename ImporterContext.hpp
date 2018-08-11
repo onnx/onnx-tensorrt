@@ -92,8 +92,14 @@ public:
     _opsets.emplace(domain, version);
   }
   virtual int64_t getOpsetVersion(const char* domain="") const override {
-    assert(_opsets.count(domain));
-    return _opsets.at(domain);
+    if (_opsets.empty()) {
+      return 1;
+    } else if (_opsets.size() == 1) {
+      return _opsets.begin()->second;
+    } else {
+      assert(_opsets.count(domain));
+      return _opsets.at(domain);
+    }
   }
 };
 
