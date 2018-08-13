@@ -3,6 +3,7 @@
 #include <NvInfer.h>
 #include <atomic>
 #include <ctime>
+#include <mutex>
 #include <thrust/device_vector.h>
 #include <unordered_map>
 
@@ -136,6 +137,10 @@ public:
   ~OnnxTensorRTEvent() { cudaEventDestroy(event_); }
 
   onnxStatus Signal() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (fired_) {
+      return ONNXIFI_STATUS_INVALID_STATE;
+    }
 
     if (cudaEventRecord(event_, stream_) == cudaSuccess) {
       fired_ = true;
@@ -146,12 +151,14 @@ public:
   }
 
   onnxStatus Wait() {
+    std::lock_guard<std::mutex> guard(mutex_);
     return (cudaEventSynchronize(event_) == cudaSuccess)
                ? ONNXIFI_STATUS_SUCCESS
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
   onnxStatus CheckState(onnxEventState* state) {
+    std::lock_guard<std::mutex> guard(mutex_);
     if (!fired_) {
       *state = ONNXIFI_EVENT_STATE_NONSIGNALLED;
       return ONNXIFI_STATUS_SUCCESS;
@@ -168,6 +175,7 @@ public:
   }
 
 private:
+  std::mutex mutex_;
   std::atomic<bool> fired_{false};
   cudaStream_t stream_{0};
   cudaEvent_t event_;
