@@ -1,6 +1,7 @@
 #include "NvOnnxParser.h"
 #include "onnx/onnxifi.h"
 #include <NvInfer.h>
+#include <atomic>
 #include <ctime>
 #include <thrust/device_vector.h>
 #include <unordered_map>
@@ -135,9 +136,13 @@ public:
   ~OnnxTensorRTEvent() { cudaEventDestroy(event_); }
 
   onnxStatus Signal() {
-    return (cudaEventRecord(event_, stream_) == cudaSuccess)
-               ? ONNXIFI_STATUS_SUCCESS
-               : ONNXIFI_STATUS_INTERNAL_ERROR;
+
+    if (cudaEventRecord(event_, stream_) == cudaSuccess) {
+      fired_ = true;
+      return ONNXIFI_STATUS_SUCCESS;
+    } else {
+      return ONNXIFI_STATUS_INTERNAL_ERROR;
+    }
   }
 
   onnxStatus Wait() {
@@ -146,7 +151,24 @@ public:
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
+  onnxStatus CheckState(onnxEventState* state) {
+    if (!fired_) {
+      *state = ONNXIFI_EVENT_STATE_NONSIGNALLED;
+      return ONNXIFI_STATUS_SUCCESS;
+    }
+
+    auto rt = cudaEventQuery(event_);
+    if (rt == cudaSuccess || rt == cudaErrorNotReady) {
+      *state = ONNXIFI_EVENT_STATE_SIGNALLED;
+      return ONNXIFI_STATUS_SUCCESS;
+    } else {
+      *state = ONNXIFI_EVENT_STATE_INVALID;
+      return ONNXIFI_STATUS_INVALID_STATE;
+    }
+  }
+
 private:
+  std::atomic<bool> fired_{false};
   cudaStream_t stream_{0};
   cudaEvent_t event_;
 };
@@ -691,7 +713,17 @@ onnxWaitEvent(onnxEvent event) {
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 onnxGetEventState(onnxEvent event, onnxEventState *state) {
-  return ONNXIFI_STATUS_SUCCESS;
+  return OnnxifiTryCatch([&] {
+    if (!state) {
+      return ONNXIFI_STATUS_INVALID_POINTER;
+    }
+    *state = ONNXIFI_EVENT_STATE_INVALID;
+    auto trt_event = reinterpret_cast<OnnxTensorRTEvent *>(event);
+    if (!trt_event) {
+      return ONNXIFI_STATUS_INVALID_EVENT;
+    }
+    return trt_event->CheckState(state);
+  });
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
