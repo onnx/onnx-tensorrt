@@ -79,7 +79,6 @@ onnxStatus CheckShape(const nvinfer1::Dims &dims,
     }
   }
 
-
   return matched ? ONNXIFI_STATUS_SUCCESS : ONNXIFI_STATUS_MISMATCHING_SHAPE;
 }
 
@@ -157,7 +156,7 @@ public:
                : ONNXIFI_STATUS_INTERNAL_ERROR;
   }
 
-  onnxStatus CheckState(onnxEventState* state) {
+  onnxStatus CheckState(onnxEventState *state) {
     std::lock_guard<std::mutex> guard(mutex_);
     if (!fired_) {
       *state = ONNXIFI_EVENT_STATE_NONSIGNALLED;
@@ -277,7 +276,7 @@ private:
   // TODO: configerable max batch size
   int device_id_{0};
   size_t max_batch_size_{128};
-  size_t max_workspace_size_{1024UL*1024UL*1024UL*2UL};
+  size_t max_workspace_size_{1024UL * 1024UL * 1024UL * 2UL};
 };
 
 class GraphRep {
@@ -375,6 +374,9 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     if (!inputDescriptors[i].name) {
       return ONNXIFI_STATUS_INVALID_NAME;
     }
+    if (inputDescriptors[i].tag != ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1) {
+      return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+    }
     // We only support NCHW
     if (inputDescriptors[i].dimensions != 4) {
       return ONNXIFI_STATUS_INVALID_SHAPE;
@@ -402,6 +404,9 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     if (!outputDescriptors[i].name) {
       return ONNXIFI_STATUS_INVALID_NAME;
     }
+    if (outputDescriptors[i].tag != ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1) {
+      return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+    }
     output_map_.emplace(std::string(outputDescriptors[i].name),
                         outputDescriptors + i);
   }
@@ -423,8 +428,8 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
       if (it == input_map_.end()) {
         return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
-      if (auto ret =
-              CheckAndBindTensor(dims, *it->second, false) != ONNXIFI_STATUS_SUCCESS) {
+      if (auto ret = CheckAndBindTensor(dims, *it->second, false) !=
+                     ONNXIFI_STATUS_SUCCESS) {
         return ret;
       }
     } else {
@@ -434,8 +439,8 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
       if (it == output_map_.end()) {
         return ONNXIFI_STATUS_UNIDENTIFIED_NAME;
       }
-      if (auto ret =
-              CheckAndBindTensor(dims, *it->second, true) != ONNXIFI_STATUS_SUCCESS) {
+      if (auto ret = CheckAndBindTensor(dims, *it->second, true) !=
+                     ONNXIFI_STATUS_SUCCESS) {
         return ret;
       }
     }
@@ -493,7 +498,7 @@ template <class F> onnxStatus OnnxifiTryCatch(F &&tryBlock) {
 } // namespace
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
-    onnxGetBackendIDs(onnxBackendID *backendIDs, size_t *numBackends) {
+onnxGetBackendIDs(onnxBackendID *backendIDs, size_t *numBackends) {
   return OnnxifiTryCatch([&] {
     if (!numBackends) {
       return ONNXIFI_STATUS_INVALID_POINTER;
@@ -532,8 +537,8 @@ onnxReleaseBackendID(onnxBackendID backendID) {
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
-    onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
-                        void *infoValue, size_t *infoValueSize) {
+onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
+                   void *infoValue, size_t *infoValueSize) {
   return OnnxifiTryCatch([&] {
     if (!infoValueSize) {
       return ONNXIFI_STATUS_INVALID_POINTER;
@@ -649,8 +654,8 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
 // - setInt8Mode (bool)
 // - setDebugSync (bool)
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
-    onnxInitBackend(onnxBackendID backendID, const uint64_t *auxPropertiesList,
-                     onnxBackend *backend) {
+onnxInitBackend(onnxBackendID backendID, const uint64_t *auxPropertiesList,
+                onnxBackend *backend) {
   auto ret = OnnxifiTryCatch([&] {
     auto *backend_id = reinterpret_cast<OnnxTensorRTBackendID *>(backendID);
     if (!backend_id) {
@@ -762,6 +767,12 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI onnxInitGraph(
       return ONNXIFI_STATUS_INVALID_SIZE;
     }
 
+    for (auto i = 0U; i < weightsCount; ++i) {
+      if (weightDescriptors[i].tag != ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1) {
+        return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+      }
+    }
+
     // Parse the model
     auto ret = backendrep->ImportModel(onnxModel, onnxModelSize, weightsCount,
                                        weightDescriptors);
@@ -781,11 +792,10 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI onnxInitGraph(
 
 // NB: in the context of TRT, this step will setup the input/output bindings for
 // ICudaEngine
-ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
-    onnxSetGraphIO(onnxGraph graph, uint32_t inputsCount,
-                    const onnxTensorDescriptorV1 *inputDescriptors,
-                    uint32_t outputsCount,
-                    const onnxTensorDescriptorV1 *outputDescriptors) {
+ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI onnxSetGraphIO(
+    onnxGraph graph, uint32_t inputsCount,
+    const onnxTensorDescriptorV1 *inputDescriptors, uint32_t outputsCount,
+    const onnxTensorDescriptorV1 *outputDescriptors) {
   return OnnxifiTryCatch([&] {
     auto *graph_rep = reinterpret_cast<GraphRep *>(graph);
     if (!graph_rep) {
@@ -801,9 +811,13 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 }
 
 ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
-    onnxRunGraph(onnxGraph graph, const onnxMemoryFenceV1 *inputFence,
-                  onnxMemoryFenceV1 *outputFence) {
+onnxRunGraph(onnxGraph graph, const onnxMemoryFenceV1 *inputFence,
+             onnxMemoryFenceV1 *outputFence) {
   return OnnxifiTryCatch([&] {
+    if (inputFence->tag != ONNXIFI_TAG_MEMORY_FENCE_V1 ||
+        outputFence->tag != ONNXIFI_TAG_MEMORY_FENCE_V1) {
+      return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+    }
     auto *trt_event = reinterpret_cast<OnnxTensorRTEvent *>(inputFence->event);
     auto ret = trt_event->Wait();
     if (ret != ONNXIFI_STATUS_SUCCESS) {
