@@ -33,7 +33,7 @@ static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) +
                                            (NV_ONNX_PARSER_MINOR * 100) +
                                            NV_ONNX_PARSER_PATCH);
 
-class onnxTensorDescriptor;
+class onnxTensorDescriptorV1;
 namespace nvonnxparser
 {
 
@@ -133,7 +133,7 @@ public:
     virtual bool parseWithWeightDescriptors(
         void const *serialized_onnx_model, size_t serialized_onnx_model_size,
         uint32_t weight_count,
-        onnxTensorDescriptor const *weight_descriptors) = 0;
+        onnxTensorDescriptorV1 const *weight_descriptors) = 0;
 
     /** \brief Returns whether the specified operator may be supported by the
      *         parser.

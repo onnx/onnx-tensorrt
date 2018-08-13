@@ -38,7 +38,7 @@ class ModelImporter final : public nvonnxparser::IParser {
 
   Status importModel(::ONNX_NAMESPACE::ModelProto const &model,
                      uint32_t weight_count,
-                     onnxTensorDescriptor const *weight_descriptors);
+                     onnxTensorDescriptorV1 const *weight_descriptors);
   NodeImportResult importNode(::ONNX_NAMESPACE::NodeProto const& node,
                               std::vector<TensorOrWeights>& inputs);
 public:
@@ -49,7 +49,7 @@ public:
   bool parseWithWeightDescriptors(
       void const *serialized_onnx_model, size_t serialized_onnx_model_size,
       uint32_t weight_count,
-      onnxTensorDescriptor const *weight_descriptors) override;
+      onnxTensorDescriptorV1 const *weight_descriptors) override;
   bool parse(void const *serialized_onnx_model,
              size_t serialized_onnx_model_size) override;
   bool supportsModel(void const *serialized_onnx_model,
