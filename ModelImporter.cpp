@@ -87,7 +87,7 @@ Status importInputs(ImporterContext* importer_ctx,
                     ::ONNX_NAMESPACE::GraphProto const& graph,
                     string_map<TensorOrWeights>* tensors,
                     uint32_t weights_count,
-                    onnxTensorDescriptor const* weight_descriptors) {
+                    onnxTensorDescriptorV1 const* weight_descriptors) {
   // The weights may come from two sources:
   // either Initializer list in onnx graph
   // or User specified weight through onnxifi
@@ -99,9 +99,9 @@ Status importInputs(ImporterContext* importer_ctx,
   ASSERT(weights_count == 0 || initializer_map.empty(),
          ErrorCode::kINVALID_VALUE);
   ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
-  string_map<onnxTensorDescriptor const*> weight_map;
+  string_map<onnxTensorDescriptorV1 const*> weight_map;
   for (uint32_t i = 0; i < weights_count; ++i) {
-    onnxTensorDescriptor const* desc = weight_descriptors + i;
+    onnxTensorDescriptorV1 const* desc = weight_descriptors + i;
     ASSERT(weight_map.emplace(desc->name, desc).second,
            ErrorCode::kINVALID_VALUE);
   }
@@ -114,7 +114,7 @@ Status importInputs(ImporterContext* importer_ctx,
              ErrorCode::kUNSUPPORTED_NODE);
       tensor = weights;
     } else if (weight_map.count(input.name())) {
-      onnxTensorDescriptor const& weight_desc = *weight_map.at(input.name());
+      onnxTensorDescriptorV1 const& weight_desc = *weight_map.at(input.name());
       ShapedWeights weights;
       // We only support grabbing weight from CPU memory now
       ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
@@ -228,7 +228,7 @@ bool ModelImporter::supportsOperator(const char* op_name) const {
 
 bool ModelImporter::parseWithWeightDescriptors(
     void const *serialized_onnx_model, size_t serialized_onnx_model_size,
-    uint32_t weight_count, onnxTensorDescriptor const *weight_descriptors) {
+    uint32_t weight_count, onnxTensorDescriptorV1 const *weight_descriptors) {
   _current_node = -1;
   // TODO: This function (and its overload below) could do with some cleaning,
   //       particularly wrt error handling.
@@ -261,7 +261,7 @@ bool ModelImporter::parse(void const *serialized_onnx_model,
 Status
 ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
                            uint32_t weight_count,
-                           onnxTensorDescriptor const *weight_descriptors) {
+                           onnxTensorDescriptorV1 const *weight_descriptors) {
   _importer_ctx.clearOpsets();
   for( int i=0; i<model.opset_import().size(); ++i ) {
     std::string domain  = model.opset_import(i).domain();

@@ -145,7 +145,7 @@ inline nvinfer1::Dims convert_dims(OnnxDims const& onnx_dims) {
   return trt_dims;
 }
 
-inline bool convert_weight_descriptor(onnxTensorDescriptor const &desc,
+inline bool convert_weight_descriptor(onnxTensorDescriptorV1 const &desc,
                                       onnx2trt::ShapedWeights *weights) {
   nvinfer1::Dims shape;
   shape.nbDims = desc.dimensions;
