@@ -164,7 +164,10 @@ public:
     }
 
     auto rt = cudaEventQuery(event_);
-    if (rt == cudaSuccess || rt == cudaErrorNotReady) {
+    if (rt == cudaErrorNotReady) {
+      *state = ONNXIFI_EVENT_STATE_NONSIGNALLED;
+      return ONNXIFI_STATUS_SUCCESS;
+    } else if (rt == cudaSuccess) {
       *state = ONNXIFI_EVENT_STATE_SIGNALLED;
       return ONNXIFI_STATUS_SUCCESS;
     } else {
