@@ -817,6 +817,9 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI
 onnxRunGraph(onnxGraph graph, const onnxMemoryFenceV1 *inputFence,
              onnxMemoryFenceV1 *outputFence) {
   return OnnxifiTryCatch([&] {
+    if (!inputFence || !outputFence) {
+      return ONNXIFI_STATUS_INVALID_POINTER;
+    }
     if (inputFence->tag != ONNXIFI_TAG_MEMORY_FENCE_V1 ||
         outputFence->tag != ONNXIFI_TAG_MEMORY_FENCE_V1) {
       return ONNXIFI_STATUS_UNSUPPORTED_TAG;
