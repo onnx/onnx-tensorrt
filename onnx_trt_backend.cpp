@@ -374,11 +374,11 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
   ClearDeviceBuffers();
   // Setup the input/output bindings and decide batch size
   for (unsigned i = 0; i < inputsCount; ++i) {
-    if (!inputDescriptors[i].name) {
-      return ONNXIFI_STATUS_INVALID_NAME;
-    }
     if (inputDescriptors[i].tag != ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1) {
       return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+    }
+    if (!inputDescriptors[i].name) {
+      return ONNXIFI_STATUS_INVALID_NAME;
     }
     // We only support NCHW
     if (inputDescriptors[i].dimensions != 4) {
@@ -404,11 +404,11 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
   }
 
   for (unsigned i = 0; i < outputsCount; ++i) {
-    if (!outputDescriptors[i].name) {
-      return ONNXIFI_STATUS_INVALID_NAME;
-    }
     if (outputDescriptors[i].tag != ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1) {
       return ONNXIFI_STATUS_UNSUPPORTED_TAG;
+    }
+    if (!outputDescriptors[i].name) {
+      return ONNXIFI_STATUS_INVALID_NAME;
     }
     output_map_.emplace(std::string(outputDescriptors[i].name),
                         outputDescriptors + i);
