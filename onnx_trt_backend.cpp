@@ -593,7 +593,6 @@ onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
     const int cudaDeviceId =
       static_cast<OnnxTensorRTBackendID*>(backendID)->device_id;
 
-    onnxStatus status = ONNXIFI_STATUS_FALLBACK;
     switch (infoType) {
       case ONNXIFI_BACKEND_ONNXIFI_VERSION:
         return setUIntInfo(infoValue, infoValueSize,
@@ -648,9 +647,6 @@ onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
       case ONNXIFI_BACKEND_SYNCHRONIZATION_TYPES:
         return setUIntInfo(infoValue, infoValueSize,
           ONNXIFI_SYNCHRONIZATION_EVENT);
-      case ONNXIFI_BACKEND_MAX_GRAPH_COUNT:
-        return setUIntInfo(infoValue, infoValueSize,
-          std::numeric_limits<uint64_t>::max());
       case ONNXIFI_BACKEND_CPU_MEMORY_READ_BANDWIDTH:
       case ONNXIFI_BACKEND_CPU_MEMORY_WRITE_BANDWIDTH:
         /* Assume PCI Express 3.0 x16 */
@@ -679,7 +675,7 @@ onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
         }
         switch (infoType) {
           case ONNXIFI_BACKEND_MEMORY_SIZE:
-          case ONNXIFI_BACKEND_GRAPH_SIZE:
+          case ONNXIFI_BACKEND_MAX_GRAPH_SIZE:
             return setUIntInfo(infoValue, infoValueSize,
               static_cast<uint64_t>(deviceProperties.totalGlobalMem));
           case ONNXIFI_BACKEND_MEMORY_BANDWIDTH:
@@ -794,7 +790,7 @@ onnxGetBackendInfo(onnxBackendID backendID, onnxBackendInfo infoType,
                 /* Volta */
                 if (deviceProperties.minor == 0) {
                   /*
-                   * Tensor Core: 
+                   * Tensor Core:
                    * - 8 Tensor Cores per multiprocessor
                    * - 64 FMA/cycle on each Tensor Core
                    * - 2 FLOPs / FMA
