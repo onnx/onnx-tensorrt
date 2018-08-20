@@ -1466,6 +1466,27 @@ DEFINE_BUILTIN_OP_IMPORTER(Softsign) {
                      {&inputs.at(0).tensor()}));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Slice) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::Dims dims = tensor.getDimensions();
+  OnnxAttrs attrs(node);
+  auto axes = attrs.get<std::vector<int>>("axes");
+  auto starts = attrs.get<std::vector<int>>("starts");
+  auto ends = attrs.get<std::vector<int>>("ends");
+  // TRT only support 2D slice since padding only takes DimsHW
+  ASSERT(axes.size() == 2, ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(starts.size() == 2, ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(ends.size() == 2, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::DimsHW start_pad, end_pad;
+  start_pad.h() = starts[0];
+  start_pad.w() = starts[1];
+  end_pad.h() = dims.d[dims.nbDims - 2] - ends[0];
+  end_pad.w() = dims.d[dims.nbDims - 1] - ends[1];
+  RETURN_FIRST_OUTPUT(
+    ctx->network()->addPadding(tensor, -start_pad, -end_pad));
+}
+
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(SpaceToDepth) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
