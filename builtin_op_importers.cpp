@@ -737,8 +737,20 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace) {
 }
 #endif // NV_TENSORRT_MAJOR >= 4
 
+DECLARE_BUILTIN_OP_IMPORTER(Mul);
 DEFINE_BUILTIN_OP_IMPORTER(Div) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  if( inputs.at(0).is_tensor() && inputs.at(1).is_weights() ) {
+    auto weights = inputs.at(1).weights();
+    auto inv_weights = ctx->createTempWeights(weights.type, weights.shape);
+    auto status = apply_unary_function(
+        weights, &inv_weights, nvinfer1::UnaryOperation::kRECIP);
+    if (status.is_error()) {
+      return status;
+    }
+    std::vector<TensorOrWeights> new_inputs = {inputs.at(0), inv_weights};
+    return importMul(ctx, node, new_inputs);
+  }
   return combineTensorsElementwise(
     ctx, inputs, nvinfer1::ElementWiseOperation::kDIV);
 }
@@ -1602,8 +1614,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze) {
 }
 #endif // NV_TENSORRT_MAJOR >= 4
 
+DECLARE_BUILTIN_OP_IMPORTER(Add);
 DEFINE_BUILTIN_OP_IMPORTER(Sub) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  if( inputs.at(0).is_tensor() && inputs.at(1).is_weights() ) {
+    auto weights = inputs.at(1).weights();
+    auto neg_weights = ctx->createTempWeights(weights.type, weights.shape);
+    auto status = apply_unary_function(
+        weights, &neg_weights, nvinfer1::UnaryOperation::kNEG);
+    if (status.is_error()) {
+      return status;
+    }
+    std::vector<TensorOrWeights> new_inputs = {inputs.at(0), neg_weights};
+    return importAdd(ctx, node, new_inputs);
+  }
   return combineTensorsElementwise(
     ctx, inputs, nvinfer1::ElementWiseOperation::kSUB);
 }
