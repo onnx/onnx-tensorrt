@@ -121,6 +121,14 @@ remove_first_dim(nvinfer1::Permutation const& perm) {
   return new_perm;
 }
 
+inline nvinfer1::Dims squeeze_trailing_dims(nvinfer1::Dims const& dims) {
+  nvinfer1::Dims new_dims = dims;
+  while( new_dims.d[new_dims.nbDims - 1] == 1 ) {
+    --new_dims.nbDims;
+  }
+  return new_dims;
+}
+
 inline nvinfer1::Dims set_dims_CHW(nvinfer1::Dims const& dims) {
   nvinfer1::Dims new_dims = dims;
   assert(new_dims.nbDims > 0);
