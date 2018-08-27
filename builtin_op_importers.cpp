@@ -193,9 +193,14 @@ combineTensorsElementwise(IImporterContext* ctx,
                           nvinfer1::ElementWiseOperation binary_op) {
   ASSERT(!inputs.empty(), ErrorCode::kINVALID_NODE);
   std::vector<nvinfer1::ITensor*> input_tensors;
-  int ndim_max = 0;
+  int ndim_max = -1;
+  int tensors_ndim_max = -1;
   for( auto input : inputs ) {
     ndim_max = std::max(ndim_max, input.shape().nbDims);
+    // Note: Tensor dims always exclude the batch dim, but weights may not
+    if( input.is_tensor() ) {
+      tensors_ndim_max = std::max(tensors_ndim_max, input.shape().nbDims);
+    }
   }
   for( auto input : inputs ) {
     nvinfer1::ITensor* tensor_ptr;
@@ -209,23 +214,21 @@ combineTensorsElementwise(IImporterContext* ctx,
       if( input.shape().nbDims < ndim_max ) {
         weights.shape = expand_dims(weights.shape, ndim_max);
       }
-      // Note: TRT Constant layer has implicit batch dim of 1
-      enum { BATCH_DIM = 0 };
-      ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
-      weights.shape = remove_dim(weights.shape, BATCH_DIM);
+      if (weights.shape.nbDims == tensors_ndim_max + 1) {
+        // The weights contain a batch dim, which must be removed
+        // Note: TRT Constant layer has implicit batch dim of 1
+        ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
+        weights.shape = remove_dim(weights.shape, BATCH_DIM);
+      }
       auto* layer = ctx->network()->addConstant(weights.shape, weights);
       ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
       tensor_ptr = layer->getOutput(0);
     } else {
       tensor_ptr = &input.tensor();
       // Note: TRT supports broadcasting, but ranks must match
-      if( input.shape().nbDims < ndim_max ) {
-        auto new_shape = expand_dims(input.shape(), ndim_max);
-        auto* layer = ctx->network()->addShuffle(*tensor_ptr);
-        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-        layer->setReshapeDimensions(new_shape);
-        tensor_ptr = layer->getOutput(0);
-      }
+      // We can't expand the dims because the batch dim is always the left-most
+      ASSERT(input.shape().nbDims == tensors_ndim_max,
+             ErrorCode::kUNSUPPORTED_NODE);
     }
 #endif
     input_tensors.push_back(tensor_ptr);
