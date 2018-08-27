@@ -1143,8 +1143,61 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Pow) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  return combineTensorsElementwise(
-    ctx, inputs, nvinfer1::ElementWiseOperation::kPOW);
+  if( inputs.at(0).is_tensor() && inputs.at(1).is_tensor() ) {
+    // TODO: Check "broadcast" and "axis" attributes
+    return combineTensorsElementwise(
+        ctx, inputs, nvinfer1::ElementWiseOperation::kPOW);
+  } else if( inputs.at(0).is_weights() && inputs.at(1).is_weights() ) {
+    // TODO: Add weights together (i.e., constant fold)
+    return MAKE_ERROR("Both inputs are weights",
+                      ErrorCode::kUNSUPPORTED_NODE);
+  } else {
+    // We have two inputs, one is tensor, another are weights
+    auto* tensor_ptr = (inputs.at(0).is_tensor() ?
+                        &inputs.at(0).tensor() :
+                        &inputs.at(1).tensor());
+    auto power_weights = (inputs.at(0).is_weights() ?
+                          inputs.at(0).weights() :
+                          inputs.at(1).weights());
+    nvinfer1::Dims dims = tensor_ptr->getDimensions();
+    nvinfer1::ScaleMode mode = get_scale_mode(power_weights.shape);
+    switch( mode ) {
+      case nvinfer1::ScaleMode::kELEMENTWISE:
+      {
+        // TODO: TRT doesn't support including the batch dim in elementwise,
+        //       but we can't do a more specific assertion here yet because
+        //       the input tensor's shape may have been padded to WAR TRT's
+        //       shape issues.
+        ASSERT(get_shape_size(power_weights.shape) == get_shape_size(dims),
+               ErrorCode::kUNSUPPORTED_NODE);
+        break;
+      }
+      case nvinfer1::ScaleMode::kCHANNEL:
+      {
+        OnnxAttrs attrs(node);
+        // TRT does not currently support full broadcasting
+        ASSERT(attrs.count("broadcast"), ErrorCode::kUNSUPPORTED_NODE);
+        bool broadcast = attrs.get<int>("broadcast");
+        ASSERT(broadcast, ErrorCode::kINVALID_NODE);
+        int axis = attrs.get<int>("axis", -1);
+        if( axis < 0 ) {
+          axis += dims.nbDims; // Support negative indexing
+        }
+        ASSERT(axis == 1, ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(power_weights.shape.d[0] == dims.d[0],
+               ErrorCode::kUNSUPPORTED_NODE);
+        break;
+      }
+      case nvinfer1::ScaleMode::kUNIFORM:
+        break;
+      default:
+      {
+        bool unsupported_nvinfer_scale_mode = false;
+        ASSERT(unsupported_nvinfer_scale_mode, ErrorCode::kINTERNAL_ERROR);
+      }
+    }
+    return addScale(ctx, *tensor_ptr, mode, {}, {}, power_weights);
+  }
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
