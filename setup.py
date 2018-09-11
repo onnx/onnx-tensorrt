@@ -89,4 +89,5 @@ setup(name='onnx_tensorrt',
           "numpy>=1.8.1",
           "tensorrt>=3.0.0",
           "onnx>=1.0.1",
+          "pycuda",
       ])
