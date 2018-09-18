@@ -96,6 +96,7 @@ inline nvinfer1::Dims remove_dim(nvinfer1::Dims const& dims, int idx) {
   return new_dims;
 }
 
+// Adds unitary dimensions on the left
 inline nvinfer1::Dims expand_dims(nvinfer1::Dims const& dims, int ndim_new) {
   assert(dims.nbDims <= ndim_new);
   nvinfer1::Dims new_dims;
@@ -119,6 +120,15 @@ remove_first_dim(nvinfer1::Permutation const& perm) {
     new_perm.order[i] = perm.order[i + 1] - 1;
   }
   return new_perm;
+}
+
+inline nvinfer1::Dims squeeze_trailing_dims(nvinfer1::Dims const& dims) {
+  nvinfer1::Dims new_dims = dims;
+  // Note: TRT requires at least one dimension, so we don't squeeze [1]->[]
+  while( new_dims.nbDims > 1 && new_dims.d[new_dims.nbDims - 1] == 1 ) {
+    --new_dims.nbDims;
+  }
+  return new_dims;
 }
 
 inline nvinfer1::Dims set_dims_CHW(nvinfer1::Dims const& dims) {
