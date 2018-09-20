@@ -31,6 +31,7 @@
 #include <onnx/onnx.pb.h>
 #include <NvInfer.h>
 #include <vector>
+#include <functional>
 
 namespace onnx2trt {
 
