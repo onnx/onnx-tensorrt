@@ -58,6 +58,9 @@ public:
   SplitPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
+  SplitPlugin* clone() const override {
+    return new SplitPlugin(_axis, _output_lengths);
+  }
   virtual const char* getPluginType() const override { return "Split"; }
   virtual int getNbOutputs() const override { return _output_lengths.size(); }
   virtual nvinfer1::Dims getOutputDimensions(int index,

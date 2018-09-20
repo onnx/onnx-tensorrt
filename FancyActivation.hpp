@@ -75,6 +75,9 @@ public:
   FancyActivationPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
+  FancyActivationPlugin* clone() const override {
+    return new FancyActivationPlugin(_activation_type, _alpha, _gamma);
+  }
   virtual const char* getPluginType() const override { return "FancyActivation"; }
   virtual int getNbOutputs() const override { return 1; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
