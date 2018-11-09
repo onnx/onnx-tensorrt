@@ -28,7 +28,7 @@
 #include "Status.hpp"
 #include "plugin.hpp"
 
-#include <onnx/onnx.pb.h>
+#include <onnx/onnx_pb.h>
 #include <NvInfer.h>
 #include <vector>
 #include <functional>
