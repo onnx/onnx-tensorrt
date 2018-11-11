@@ -67,17 +67,6 @@ public:
   InstanceNormalizationPlugin(void const* serialData, size_t serialLength) : _initialized(false) {
     this->deserialize(serialData, serialLength);
   }
-  InstanceNormalizationPlugin* clone() const override {
-    nvinfer1::Weights scale;
-    scale.type = nvinfer1::DataType::kFLOAT;
-    scale.count = _h_scale.size();
-    scale.values = _h_scale.data();
-    nvinfer1::Weights bias;
-    bias.type = nvinfer1::DataType::kFLOAT;
-    bias.count = _h_bias.size();
-    bias.values = _h_bias.data();
-    return new InstanceNormalizationPlugin(_epsilon, scale, bias);
-  }
   const char* getPluginType() const override { return "InstanceNormalization"; }
   bool supportsFormat(nvinfer1::DataType type,
                       nvinfer1::PluginFormat format) const override;

@@ -39,14 +39,7 @@ namespace onnx2trt {
 // to be identified when deserializing.
 class Plugin : public nvinfer1::IPluginExt, public IOwnable {
 public:
-  // TODO(benbarsdell): Once TRT 4 support is dropped, our handling of plugins
-  // can be simplified by removing things like IOwnable, getPluginType
-  // serialization, PluginFactory etc. that are now built into TRT >=5.
-#if NV_TENSORRT_MAJOR < 5
-  virtual nvinfer1::IPluginExt* clone() const = 0;
   virtual const char* getPluginType() const = 0;
-#endif
-  virtual const char* getPluginVersion() const { return "1"; }
 
   nvinfer1::Dims const&  getInputDims(int index) const { return _input_dims.at(index); }
   size_t                 getMaxBatchSize()       const { return _max_batch_size; }
@@ -86,14 +79,6 @@ protected:
 public:
   PluginAdapter(nvinfer1::IPlugin* plugin) :
     _plugin(plugin), _ext(dynamic_cast<IPluginExt*>(plugin)) {}
-  nvinfer1::IPluginExt* clone() const override {
-#if NV_TENSORRT_MAJOR < 5
-    // Clone is not (and should not be) used prior to TRT 5
-    return nullptr;
-#else
-    return _ext->clone();
-#endif
-  }
   virtual int getNbOutputs() const override;
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputDims,
