@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include <onnx/onnx.pb.h>
+#include <onnx/onnx_pb.h>
 #include <google/protobuf/text_format.h>
 #include <sstream>
 

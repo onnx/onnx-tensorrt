@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <onnx/onnx.pb.h>
+#include <onnx/onnx_pb.h>
 #include <NvInfer.h>
 
 namespace onnx2trt {

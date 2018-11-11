@@ -65,10 +65,10 @@ onnxStatus CheckShape(const nvinfer1::Dims &dims,
                       const onnxTensorDescriptorV1 &desc,
                       bool allow_same_size) {
   bool matched = false;
-  if (desc.dimensions == dims.nbDims + 1) {
+  if (desc.dimensions == static_cast<uint32_t>(dims.nbDims) + 1) {
     matched = true;
     for (int i = 0; i < dims.nbDims; ++i) {
-      if (desc.shape[i + 1] != dims.d[i]) {
+      if (desc.shape[i + 1] != static_cast<uint64_t>(dims.d[i])) {
         return ONNXIFI_STATUS_MISMATCHING_SHAPE;
       }
     }
@@ -79,7 +79,7 @@ onnxStatus CheckShape(const nvinfer1::Dims &dims,
     }
     size_t desc_size = 1;
     // Skip the first dim which is batch size
-    for (int i = 1; i < desc.dimensions; ++i) {
+    for (uint32_t i = 1; i < desc.dimensions; ++i) {
       desc_size *= desc.shape[i];
     }
     matched = (dim_size == desc_size) ? true : false;
@@ -517,8 +517,9 @@ onnxGetBackendIDs(onnxBackendID *backendIDs, size_t *numBackends) {
       return ONNXIFI_STATUS_INVALID_POINTER;
     }
 
-    int nDevices{0};
-    cudaGetDeviceCount(&nDevices);
+    int nDevices_int{0};
+    cudaGetDeviceCount(&nDevices_int);
+    size_t nDevices{static_cast<size_t>(nDevices_int)};
     if (!backendIDs) {
       *numBackends = nDevices;
       return ONNXIFI_STATUS_FALLBACK;

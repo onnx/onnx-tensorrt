@@ -26,7 +26,7 @@
 #include "trt_utils.hpp"
 #include "OnnxAttrs.hpp"
 
-#include <onnx/onnx.pb.h>
+#include <onnx/onnx_pb.h>
 #include <onnx/onnxifi.h>
 #include <NvInfer.h>
 
