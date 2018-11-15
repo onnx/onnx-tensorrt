@@ -106,6 +106,7 @@ list(APPEND GPU_ARCHS
     53
     61
     70
+    75
     )
 
 set(CUDA_VERBOSE_BUILD ON)
