@@ -65,6 +65,10 @@ public:
   inline operator bool() const {
     return this->is_tensor() ? (bool)_tensor : (bool)_weights;
   }
+  nvinfer1::ITensor* reset_tensor(nvinfer1::ITensor* tensor) {
+    assert(this->is_tensor());
+    return _tensor = tensor;
+  }
 };
 
 } // namespace onnx2trt
