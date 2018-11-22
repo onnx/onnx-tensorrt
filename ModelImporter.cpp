@@ -321,9 +321,9 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     if( !user_output ) {
       _importer_ctx.network()->markOutput(*output_tensor_ptr);
       nvinfer1::DataType output_trt_dtype;
-      ASSERT(convert_dtype(
-                 output.type().tensor_type().elem_type(), &output_trt_dtype),
-             ErrorCode::kUNSUPPORTED_NODE);
+//      ASSERT(convert_dtype(
+//                 output.type().tensor_type().elem_type(), &output_trt_dtype),
+//             ErrorCode::kUNSUPPORTED_NODE);
 #if NV_TENSORRT_MAJOR >= 4
       // For INT32 data type, output type must match tensor type
       ASSERT(output_tensor_ptr->getType() != nvinfer1::DataType::kINT32 ||
@@ -331,7 +331,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
              ErrorCode::kUNSUPPORTED_NODE);
 #endif // NV_TENSORRT_MAJOR >= 4
       // Note: Without this, output type is always float32
-      output_tensor_ptr->setType(output_trt_dtype);
+//      output_tensor_ptr->setType(output_trt_dtype);
     }
   }
   // Return user-requested output tensors
