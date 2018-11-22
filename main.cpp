@@ -193,6 +193,11 @@ int main(int argc, char* argv[]) {
     return -2;
   }
 
+  if (!std::ifstream(onnx_filename.c_str())) {
+    cerr << "Input file not found: " << onnx_filename << endl;
+    return -3;
+  }
+
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   bool is_binary = ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
   if( !is_binary && !ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
@@ -244,7 +249,7 @@ int main(int argc, char* argv[]) {
   auto trt_builder = infer_object(nvinfer1::createInferBuilder(trt_logger));
   auto trt_network = infer_object(trt_builder->createNetwork());
   auto trt_parser  = infer_object(nvonnxparser::createParser(
-                                      *trt_network, trt_logger));
+                                      trt_network.get(), trt_logger));
 
   // TODO: Fix this for the new API
   //if( print_layer_info ) {
@@ -316,11 +321,16 @@ int main(int argc, char* argv[]) {
     trt_builder->setDebugSync(debug_builder);
     auto trt_engine = infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
 
+    auto engine_plan = infer_object(trt_engine->serialize());
+    std::ofstream engine_file(engine_filename.c_str());
+    if (!engine_file) {
+      cerr << "Failed to open output file for writing: "
+           << engine_filename << endl;
+      return -6;
+    }
     if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {
       cout << "Writing TensorRT engine to " << engine_filename << endl;
     }
-    auto engine_plan = infer_object(trt_engine->serialize());
-    std::ofstream engine_file(engine_filename.c_str());
     engine_file.write((char*)engine_plan->data(), engine_plan->size());
     engine_file.close();
   }

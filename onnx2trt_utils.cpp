@@ -53,8 +53,8 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
     dilations->h() = onnx_dilations->ints(0);
     dilations->w() = ndim > 1 ? onnx_dilations->ints(1) : 1;
   }
-  auto onnx_auto_pad = attrs.get("auto_pad", std::string("VALID"));
-  if( onnx_auto_pad == "VALID" ) {
+  auto onnx_auto_pad = attrs.get("auto_pad", std::string("NOTSET"));
+  if( onnx_auto_pad == "VALID" || onnx_auto_pad == "NOTSET" ) {
     if( attrs.count("pads") ) {
       auto onnx_padding = attrs.get<std::vector<int>>("pads");
       int ndim = onnx_padding.size() / 2;

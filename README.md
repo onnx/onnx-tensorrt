@@ -94,6 +94,8 @@ All tests:
 
     python onnx_backend_test.py
 
+You can use `-v` flag to make output more verbose.
+
 ## Pre-trained models
 
 Pre-trained Caffe2 models in ONNX format can be found at https://github.com/onnx/models

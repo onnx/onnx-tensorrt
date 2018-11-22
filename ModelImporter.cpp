@@ -85,11 +85,25 @@ Status importInput(ImporterContext* importer_ctx,
 
 Status importInputs(ImporterContext* importer_ctx,
                     ::ONNX_NAMESPACE::GraphProto const& graph,
-                    string_map<TensorOrWeights>* tensors) {
+                    string_map<TensorOrWeights>* tensors,
+                    uint32_t weights_count,
+                    onnxTensorDescriptorV1 const* weight_descriptors) {
+  // The weights may come from two sources:
+  // either Initializer list in onnx graph
+  // or User specified weight through onnxifi
   string_map<::ONNX_NAMESPACE::TensorProto const*> initializer_map;
   for( ::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer() ) {
     ASSERT(!initializer_map.count(initializer.name()), ErrorCode::kINVALID_GRAPH);
     initializer_map.insert({initializer.name(), &initializer});
+  }
+  ASSERT(weights_count == 0 || initializer_map.empty(),
+         ErrorCode::kINVALID_VALUE);
+  ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
+  string_map<onnxTensorDescriptorV1 const*> weight_map;
+  for (uint32_t i = 0; i < weights_count; ++i) {
+    onnxTensorDescriptorV1 const* desc = weight_descriptors + i;
+    ASSERT(weight_map.emplace(desc->name, desc).second,
+           ErrorCode::kINVALID_VALUE);
   }
   for( ::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input() ) {
     TensorOrWeights tensor;
@@ -99,6 +113,16 @@ Status importInputs(ImporterContext* importer_ctx,
       ASSERT(convert_onnx_weights(initializer, &weights),
              ErrorCode::kUNSUPPORTED_NODE);
       tensor = weights;
+    } else if (weight_map.count(input.name())) {
+      onnxTensorDescriptorV1 const& weight_desc = *weight_map.at(input.name());
+      ShapedWeights weights;
+      // We only support grabbing weight from CPU memory now
+      ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
+             ErrorCode::kINVALID_VALUE);
+
+      ASSERT(convert_weight_descriptor(weight_desc, &weights),
+             ErrorCode::kUNSUPPORTED_NODE);
+      tensor = weights;
     } else {
       nvinfer1::ITensor* tensor_ptr;
       TRT_CHECK(importInput(importer_ctx, input, &tensor_ptr));
@@ -106,7 +130,6 @@ Status importInputs(ImporterContext* importer_ctx,
     }
     ASSERT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH);
     tensors->insert({input.name(), tensor});
-
   }
   return Status::success();
 }
@@ -179,28 +202,49 @@ Status deserialize_onnx_model(int fd,
   return Status::success();
 }
 
+bool ModelImporter::supportsModel(void const *serialized_onnx_model,
+                                  size_t serialized_onnx_model_size) {
+  ::ONNX_NAMESPACE::ModelProto model;
+
+  bool is_serialized_as_text = false;
+  Status status =
+      deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
+                             is_serialized_as_text, &model);
+  if (status.is_error()) {
+    _errors.push_back(status);
+    return false;
+  }
+  for (const auto &node : model.graph().node()) {
+    if (!this->supportsOperator(node.op_type().c_str())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool ModelImporter::supportsOperator(const char* op_name) const {
   return _op_importers.count(op_name);
 }
 
-bool ModelImporter::parse(void const *serialized_onnx_model,
-                          size_t serialized_onnx_model_size) {
+bool ModelImporter::parseWithWeightDescriptors(
+    void const *serialized_onnx_model, size_t serialized_onnx_model_size,
+    uint32_t weight_count, onnxTensorDescriptorV1 const *weight_descriptors) {
   _current_node = -1;
   // TODO: This function (and its overload below) could do with some cleaning,
   //       particularly wrt error handling.
   // Note: We store a copy of the model so that weight arrays will persist
   _onnx_models.emplace_back();
-  ::ONNX_NAMESPACE::ModelProto& model = _onnx_models.back();
+  ::ONNX_NAMESPACE::ModelProto &model = _onnx_models.back();
   bool is_serialized_as_text = false;
-  Status status = deserialize_onnx_model(
-      serialized_onnx_model, serialized_onnx_model_size,
-      is_serialized_as_text, &model);
-  if( status.is_error() ) {
+  Status status =
+      deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
+                             is_serialized_as_text, &model);
+  if (status.is_error()) {
     _errors.push_back(status);
     return false;
   }
-  status = this->importModel(model);
-  if( status.is_error() ) {
+  status = this->importModel(model, weight_count, weight_descriptors);
+  if (status.is_error()) {
     status.setNode(_current_node);
     _errors.push_back(status);
     return false;
@@ -208,11 +252,16 @@ bool ModelImporter::parse(void const *serialized_onnx_model,
   return true;
 }
 
-Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
-  // TODO: Remove when done testing
-  //cout << "------Begin model " << model.graph().name() << "-------" << endl;
-  //cout << model << endl;
-  //cout << "------End model-------" << endl;
+bool ModelImporter::parse(void const *serialized_onnx_model,
+                          size_t serialized_onnx_model_size) {
+  return this->parseWithWeightDescriptors(
+      serialized_onnx_model, serialized_onnx_model_size, 0, nullptr);
+}
+
+Status
+ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
+                           uint32_t weight_count,
+                           onnxTensorDescriptorV1 const *weight_descriptors) {
   _importer_ctx.clearOpsets();
   for( int i=0; i<model.opset_import().size(); ++i ) {
     std::string domain  = model.opset_import(i).domain();
@@ -221,7 +270,8 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
   }
   ::ONNX_NAMESPACE::GraphProto const& graph = model.graph();
   string_map<TensorOrWeights> tensors;
-  TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors));
+  TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors, weight_count,
+                         weight_descriptors));
   std::vector<size_t> topological_order;
   ASSERT(toposort(graph.node(), &topological_order), ErrorCode::kINVALID_GRAPH);
   for( size_t node_idx : topological_order ) {
@@ -271,9 +321,9 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
     if( !user_output ) {
       _importer_ctx.network()->markOutput(*output_tensor_ptr);
       nvinfer1::DataType output_trt_dtype;
-      ASSERT(convert_dtype(
-                 output.type().tensor_type().elem_type(), &output_trt_dtype),
-             ErrorCode::kUNSUPPORTED_NODE);
+//      ASSERT(convert_dtype(
+//                 output.type().tensor_type().elem_type(), &output_trt_dtype),
+//             ErrorCode::kUNSUPPORTED_NODE);
 #if NV_TENSORRT_MAJOR >= 4
       // For INT32 data type, output type must match tensor type
       ASSERT(output_tensor_ptr->getType() != nvinfer1::DataType::kINT32 ||
@@ -281,7 +331,7 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model) {
              ErrorCode::kUNSUPPORTED_NODE);
 #endif // NV_TENSORRT_MAJOR >= 4
       // Note: Without this, output type is always float32
-      output_tensor_ptr->setType(output_trt_dtype);
+//      output_tensor_ptr->setType(output_trt_dtype);
     }
   }
   // Return user-requested output tensors
