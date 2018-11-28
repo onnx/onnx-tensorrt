@@ -19,7 +19,25 @@
  # DEALINGS IN THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
-project(onnx2trt LANGUAGES CXX C)
+# The version of CMake which is not compatible with the old CUDA CMake commands.
+set(CMAKE_VERSION_THRESHOLD "3.10.0")
+
+if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
+  project(onnx2trt LANGUAGES CXX C)
+else()
+  project(onnx2trt LANGUAGES CXX C CUDA)
+endif() 
+
+
+#
+# CUDA Configuration
+# This is no longer necessary, https://cmake.org/cmake/help/latest/module/FindCUDA.html
+# so we will do it only for older versions of cmake
+if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
+  find_package(CUDA REQUIRED)
+endif()  
+
+
 set(ONNX2TRT_ROOT ${PROJECT_SOURCE_DIR})
 # Set C++11 as standard for the whole project
 set(CMAKE_CXX_STANDARD  11)
@@ -82,10 +100,6 @@ set(HEADERS
   NvOnnxParserRuntime.h
 )
 
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-find_package(Threads REQUIRED)
-
 FIND_PACKAGE(Protobuf REQUIRED)
 
 if(NOT TARGET onnx_proto)
@@ -97,10 +111,7 @@ if(NOT TARGET onnx_proto)
   add_subdirectory(third_party/onnx EXCLUDE_FROM_ALL)
 endif()
 
-#
-# CUDA Configuration
-#
-find_package(CUDA REQUIRED)
+
 list(APPEND GPU_ARCHS
     35
     53
@@ -119,13 +130,35 @@ endforeach()
 list(GET GPU_ARCHS -1 LATEST_GPU_ARCH)
 set(GENCODES "${GENCODES} -gencode arch=compute_${LATEST_GPU_ARCH},code=compute_${LATEST_GPU_ARCH}")
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
+if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} \
     -cudart static \
     -lineinfo \
     -g \
     --expt-extended-lambda \
     ${GENCODES} \
-")
+    ")
+  
+  if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
+    list(APPEND CUDA_NVCC_FLAGS -std=c++11)
+  endif()
+
+else()
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
+    -cudart static \
+    -lineinfo \
+    -g \
+    --expt-extended-lambda \
+    ${GENCODES} \
+    ")
+
+  if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+11" )
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++11")
+  endif()
+
+endif()  
+  
+
 
 # Specify the cuda host compiler to use the same compiler as cmake.
 set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
@@ -173,12 +206,14 @@ endif()
 # --------------------------------
 # Plugin library
 # --------------------------------
-if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
-  list(APPEND CUDA_NVCC_FLAGS -std=c++11)
-endif()
 list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC --expt-extended-lambda")
-CUDA_INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR})
-CUDA_ADD_LIBRARY(nvonnxparser_plugin STATIC ${PLUGIN_SOURCES})
+if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
+  CUDA_INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR})
+  CUDA_ADD_LIBRARY(nvonnxparser_plugin STATIC ${PLUGIN_SOURCES})
+else()
+  include_directories(${CUDNN_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR})
+  add_library(nvonnxparser_plugin STATIC ${PLUGIN_SOURCES})
+endif()
 target_include_directories(nvonnxparser_plugin PUBLIC ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
 target_link_libraries(nvonnxparser_plugin ${TENSORRT_LIBRARY})
 
