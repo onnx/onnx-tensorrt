@@ -234,6 +234,23 @@ inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tenso
   return true;
 }
 
+// Returns the input if it is already a tensor. If it is of type ShapedWeights, adds a new
+// constant layer to the TRT network and returns its output.
+inline nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx)
+{
+    if (input.is_tensor())
+    {
+        return input.tensor();
+    }
+    else
+    {
+        // Handle non-tensor indices input by adding a new constant layer to the network.
+        const ShapedWeights& weights = input.weights();
+        return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+    }
+
+}
+
 inline int div_ceil(int n, int d) {
   return (n - 1) / d + 1;
 }
