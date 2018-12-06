@@ -24,6 +24,7 @@
 #define NV_ONNX_PARSER_H
 
 #include "NvInfer.h"
+#include "NvOnnxParserTypedefs.h"
 
 #define NV_ONNX_PARSER_MAJOR 0
 #define NV_ONNX_PARSER_MINOR 1
@@ -114,11 +115,15 @@ public:
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
      *        in bytes
+     * \param coontainer_t to return a collection of supported subgraphs, nodes by idx
+     *        if sorted in topological order
      * \return true if the model is supported
      */
-    virtual bool supportsModel(void const *serialized_onnx_model,
-                               size_t serialized_onnx_model_size) = 0;
-
+    virtual bool supportsModel(void const* serialized_onnx_model,
+			       size_t serialized_onnx_model_size,
+			       SubGraphCollection_t &supportedSubGraphs)
+      = 0;
+    
     /** \brief Parse a serialized ONNX model into the TensorRT network
      * with consideration of user provided weights
      *

@@ -95,6 +95,11 @@ set(EXECUTABLE_SOURCES
   main.cpp
 )
 
+set(API_TESTS_SOURCES
+  getSupportedAPITest.cpp
+)
+
+
 set(HEADERS
   NvOnnxParser.h
   NvOnnxParserRuntime.h
@@ -264,6 +269,16 @@ add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
 target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+
+# --------------------------------
+# API Tests
+# --------------------------------
+
+add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
+target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
+
+target_link_libraries(getSupportedAPITest PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+
 
 # --------------------------------
 # Installation
