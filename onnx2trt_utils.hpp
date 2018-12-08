@@ -77,7 +77,7 @@ inline std::ostream& operator<<(std::ostream& stream, google::protobuf::Message 
 */
 namespace onnx2trt {
 
-inline int get_dtype_size(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype) {
+inline int get_dtype_size(int32_t onnx_dtype) {
   switch( onnx_dtype ) {
   case ::ONNX_NAMESPACE::TensorProto::FLOAT:   return 4;
   case ::ONNX_NAMESPACE::TensorProto::INT8:    return 1;
@@ -91,7 +91,7 @@ inline int get_dtype_size(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype) {
   }
 }
 
-inline const char* get_dtype_name(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype) {
+inline const char* get_dtype_name(int32_t onnx_dtype) {
   switch( onnx_dtype ) {
   case ::ONNX_NAMESPACE::TensorProto::FLOAT:      return "FLOAT";
   case ::ONNX_NAMESPACE::TensorProto::UINT8:      return "UINT8";
@@ -112,7 +112,7 @@ inline const char* get_dtype_name(::ONNX_NAMESPACE::TensorProto::DataType onnx_d
   }
 }
 
-inline bool convert_dtype(::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype,
+inline bool convert_dtype(int32_t onnx_dtype,
                           nvinfer1::DataType* trt_dtype) {
   switch( onnx_dtype ) {
   case ::ONNX_NAMESPACE::TensorProto::FLOAT:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
@@ -165,7 +165,7 @@ inline bool convert_weight_descriptor(onnxTensorDescriptorV1 const &desc,
 
   void* data_ptr;
   size_t nbytes;
-  ::ONNX_NAMESPACE::TensorProto::DataType dtype;
+  int32_t dtype;
   data_ptr = (void*)(desc. buffer);
   if (desc.dataType == ONNXIFI_DATATYPE_FLOAT32) {
     dtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
