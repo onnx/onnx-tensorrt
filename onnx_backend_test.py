@@ -38,7 +38,7 @@ backend_test = onnx.backend.test.BackendTest(trt, __name__)
 # Ops that are not currently supported
 backend_test.exclude(r'[a-z,_]*_cast_[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*_hardmax_[a-z,_]*')
-#backend_test.exclude(r'[a-z,_]*_slice_[a-z,_]*')
+backend_test.exclude(r'[a-z,_]*_slice_[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*_PReLU_[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*_tile_[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*_repeat_[a-z,_]*') # 'Tile' op
