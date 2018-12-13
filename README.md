@@ -69,7 +69,9 @@ Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt
     sudo make install
 
 ### Python modules
+TensorRT version 5.0 and up create Python wrappers using pybind11. No build is necessary.
 
+For earlier versions of TensorRT, the Python wrappers are built using SWIG.
 Build the Python wrappers and modules by running:
 
     python setup.py build
