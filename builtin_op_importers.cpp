@@ -938,6 +938,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
   return {{tensor_ptr}};
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Gather) {
+    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
+    OnnxAttrs attrs(node);
+    int axis = attrs.get<int>("axis");
+    RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::FLOOR),
