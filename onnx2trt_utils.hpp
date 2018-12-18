@@ -79,19 +79,19 @@ namespace onnx2trt {
 
 inline int get_dtype_size(int32_t onnx_dtype) {
   switch( onnx_dtype ) {
-  case ::ONNX_NAMESPACE::TensorProto::FLOAT16:   return 2;
-  case ::ONNX_NAMESPACE::TensorProto::FLOAT:     return 4;
-  case ::ONNX_NAMESPACE::TensorProto::DOUBLE:    return 8;
-  case ::ONNX_NAMESPACE::TensorProto::COMPLEX64  return 8;
-  case ::ONNX_NAMESPACE::TensorProto::COMPLEX128 return 16;
-  case ::ONNX_NAMESPACE::TensorProto::UINT8:     return 1;
-  case ::ONNX_NAMESPACE::TensorProto::INT8:      return 1;
-  case ::ONNX_NAMESPACE::TensorProto::UINT16:    return 2;
-  case ::ONNX_NAMESPACE::TensorProto::INT16:     return 2;
-  case ::ONNX_NAMESPACE::TensorProto::UINT32:    return 4;
-  case ::ONNX_NAMESPACE::TensorProto::INT32:     return 4;
-  case ::ONNX_NAMESPACE::TensorProto::UINT64:    return 8;
-  case ::ONNX_NAMESPACE::TensorProto::INT64:     return 8;
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT16:    return 2;
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT:      return 4;
+  case ::ONNX_NAMESPACE::TensorProto::DOUBLE:     return 8;
+  case ::ONNX_NAMESPACE::TensorProto::COMPLEX64:  return 8;
+  case ::ONNX_NAMESPACE::TensorProto::COMPLEX128: return 16;
+  case ::ONNX_NAMESPACE::TensorProto::UINT8:      return 1;
+  case ::ONNX_NAMESPACE::TensorProto::INT8:       return 1;
+  case ::ONNX_NAMESPACE::TensorProto::UINT16:     return 2;
+  case ::ONNX_NAMESPACE::TensorProto::INT16:      return 2;
+  case ::ONNX_NAMESPACE::TensorProto::UINT32:     return 4;
+  case ::ONNX_NAMESPACE::TensorProto::INT32:      return 4;
+  case ::ONNX_NAMESPACE::TensorProto::UINT64:     return 8;
+  case ::ONNX_NAMESPACE::TensorProto::INT64:      return 8;
   // TODO: Add BOOL if necessary...
     // TODO: Some sort of error handling
   default: return -1;//throw std::invalid_argument("Unsupported TRT data type: " +
