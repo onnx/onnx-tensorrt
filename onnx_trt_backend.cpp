@@ -1,3 +1,4 @@
+#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "onnx/onnxifi.h"
 #include <cuda_runtime.h>
@@ -835,7 +836,8 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
 
     TRT_Logger trt_logger;
     auto parser = infer_object(nvonnxparser::createParser(nullptr, trt_logger));
-    if (parser->supportsModel(onnxModel, onnxModelSize)) {
+    SubGraphCollection_t subgraphcollection;
+    if (parser->supportsModel(onnxModel, onnxModelSize, subgraphcollection)) {
       return ONNXIFI_STATUS_SUCCESS;
     } else {
       return ONNXIFI_STATUS_UNSUPPORTED_OPERATOR;
