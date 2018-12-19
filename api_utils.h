@@ -86,7 +86,8 @@ std::string onnx_ir_version_string(int64_t ir_version=::ONNX_NAMESPACE::IR_VERSI
 void print_usage() {
   cout << "This program will determine whether or not an ONNX model is compatible with TensorRT. " 
        << "If it isn't, a list of supported subgraphs and unsupported operations will be printed." << endl;
-  cout << "Usage: getSupportedAPITest onnx_model.pb" << "\n";
+  cout << "Usage: getSupportedAPITest -m onnx_model.pb" << endl;
+  cout << "Optional argument: -e TRT_engine" << endl;
 }
 
 
