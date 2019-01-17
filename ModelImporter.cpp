@@ -224,25 +224,28 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
 
   bool newSubGraph(true), allSupported(true);
 
-  for( size_t node_idx : topological_order ) {
+  for( size_t node_idx : topological_order ) 
+  {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
-    if (this->supportsOperator(node.op_type().c_str())) {
-      if (newSubGraph) {
+    if (this->supportsOperator(node.op_type().c_str())) 
+    {
+      if (newSubGraph) 
+      {
         // If it is the beginning of a new subGraph, we start a new vector
         sub_graph_collection.emplace_back();
         newSubGraph = false;
       }
       // We add the new node to the last graph
       sub_graph_collection.back().emplace_back(node_idx);
-    } else {
+    } else 
+    {
       // This is not a supported node, reset the newSubGraph
       cout << "Found unsupported node: " << node.op_type().c_str() << endl;
       newSubGraph = true;
       allSupported = false;
     }
-    
   }
-  return allSupported;
+  return allSupported; 
 }
 
 bool ModelImporter::supportsOperator(const char* op_name) const {

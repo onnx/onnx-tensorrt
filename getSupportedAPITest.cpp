@@ -35,29 +35,48 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
-template<typename inferenceModel, typename parserInstance>
-SubGraphCollection_t GetCapability(inferenceModel& onnx_model, parserInstance& trt_parser, std::vector<char> onnx_buf) {
+// template<typename inferenceModel, typename parserInstance>
+// SubGraphCollection_t GetCapability(inferenceModel& onnx_model, parserInstance& trt_parser, std::vector<char> onnx_buf) {
 
-  SubGraphCollection_t supportedSubGraphsCollection;
+//   SubGraphCollection_t subGraphs;
   
-  if (trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), supportedSubGraphsCollection)) {
-      cout << "The model is fully supported by the TensorRT";
-  } else {
-      cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs:";
-      cout << "There are "<<supportedSubGraphsCollection.size()<<" supported subGraphs: "<<endl;
-      cout << "{ ";
-    for (auto subGraph: supportedSubGraphsCollection) {
+//   if (trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), supportedSubGraphsCollection)) {
+//       cout << "The model is fully supported by the TensorRT";
+//   } else {
+//       cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs:";
+//       cout << "There are "<<supportedSubGraphsCollection.size()<<" supported subGraphs: "<<endl;
+//       cout << "{ ";
+//     for (auto subGraph: supportedSubGraphsCollection) {
+//         cout << "\t{";
+//         for (auto idx: subGraph) cout <<"\t"<< idx <<","<<onnx_model.graph().node(idx).op_type();
+//         cout << "\t}"<<endl;
+//     }
+//     cout << "\t}"<<endl;
+//   }
+//   cout << endl;
+  
+//   return supportedSubGraphsCollection;
+// }
+
+void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
+{
+    if (subGraphs.size() > 1)
+    {
+        cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs." << endl;
+        cout << "There are "<< subGraphs.size() << " supported subGraphs: " << endl;
+    }
+    else 
+    {
+        cout << "The model is fully supported by TensorRT. Printing the parsed graph:" << endl;
+    }
+
+    for (auto subGraph: subGraphs) 
+    {
         cout << "\t{";
-        for (auto idx: subGraph) cout <<"\t"<< idx <<","<<onnx_model.graph().node(idx).op_type();
+        for (auto idx: subGraph) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
         cout << "\t}"<<endl;
     }
-    cout << "\t}"<<endl;
-  }
-  cout << endl;
-  
-  return supportedSubGraphsCollection;
 }
-
 
 
 int main(int argc, char* argv[]) {
@@ -114,13 +133,15 @@ int main(int argc, char* argv[]) {
     ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
 
     SubGraphCollection_t SubGraphCollection;
-    try {
-        cout << "---------------------------------------------------------------" << endl;
-        SubGraphCollection = GetCapability(onnx_model, trt_parser, onnx_buf);
-    } catch (const std::exception &e) {
-        std::cerr << "Internal Error: " << e.what() << std::endl;
-        return 1;
+
+    if (!trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), SubGraphCollection))
+    {
+        cout << "Model cannot be fully parsed by TensorRT!" << endl;
+        printSubGraphs(SubGraphCollection, onnx_model);
+        return -1;
     }
+
+    printSubGraphs(SubGraphCollection, onnx_model);
     
     if( !engine_filename.empty() ) {
         trt_builder->setMaxBatchSize(max_batch_size);

@@ -115,7 +115,7 @@ public:
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
      *        in bytes
-     * \param coontainer_t to return a collection of supported subgraphs, nodes by idx
+     * \param coontainer_t to return a collection of supported subgraphs, nodes by index
      *        if sorted in topological order
      * \return true if the model is supported
      */
