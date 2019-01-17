@@ -35,29 +35,6 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
-// template<typename inferenceModel, typename parserInstance>
-// SubGraphCollection_t GetCapability(inferenceModel& onnx_model, parserInstance& trt_parser, std::vector<char> onnx_buf) {
-
-//   SubGraphCollection_t subGraphs;
-  
-//   if (trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), supportedSubGraphsCollection)) {
-//       cout << "The model is fully supported by the TensorRT";
-//   } else {
-//       cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs:";
-//       cout << "There are "<<supportedSubGraphsCollection.size()<<" supported subGraphs: "<<endl;
-//       cout << "{ ";
-//     for (auto subGraph: supportedSubGraphsCollection) {
-//         cout << "\t{";
-//         for (auto idx: subGraph) cout <<"\t"<< idx <<","<<onnx_model.graph().node(idx).op_type();
-//         cout << "\t}"<<endl;
-//     }
-//     cout << "\t}"<<endl;
-//   }
-//   cout << endl;
-  
-//   return supportedSubGraphsCollection;
-// }
-
 void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
 {
     if (subGraphs.size() > 1)
