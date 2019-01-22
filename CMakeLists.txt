@@ -105,7 +105,9 @@ set(HEADERS
   NvOnnxParserRuntime.h
 )
 
-FIND_PACKAGE(Protobuf REQUIRED)
+if (NOT TARGET protobuf::libprotobuf) #slx
+  FIND_PACKAGE(Protobuf REQUIRED)
+endif()
 
 if(NOT TARGET onnx_proto)
   # Note: This avoids libprotobuf.so complaining about name collisions at runtime
@@ -158,7 +160,7 @@ else()
     ")
 
   if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+11" )
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++11")
+    #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++11") #slx
   endif()
 
 endif()  
@@ -268,16 +270,16 @@ target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} $
 add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
-target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+target_link_libraries(onnx2trt PUBLIC protobuf::libprotobuf nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #slx
 
 # --------------------------------
 # API Tests
 # --------------------------------
-
-add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
+add_library(getSupportedAPITest STATIC ${API_TESTS_SOURCES}) #slx
+#add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
 target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
-target_link_libraries(getSupportedAPITest PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+target_link_libraries(getSupportedAPITest PUBLIC protobuf::libprotobuf nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #slx
 
 
 # --------------------------------
