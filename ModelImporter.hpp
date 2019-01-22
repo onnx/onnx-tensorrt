@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "ImporterContext.hpp"
 #include "utils.hpp"
@@ -53,7 +54,8 @@ public:
   bool parse(void const *serialized_onnx_model,
              size_t serialized_onnx_model_size) override;
   bool supportsModel(void const *serialized_onnx_model,
-                     size_t serialized_onnx_model_size) override;
+                     size_t serialized_onnx_model_size,
+         SubGraphCollection_t &sub_graph_collection) override;
 
   bool supportsOperator(const char* op_name) const override;
   void destroy() override { delete this; }
