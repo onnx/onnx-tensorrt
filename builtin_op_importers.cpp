@@ -423,6 +423,66 @@ bool registerBuiltinOpImporter(std::string op,
   return {{output}}; \
 } while(0)
 
+#if NV_TENSORRT_MAJOR >= 4
+// Helper for ArgMax/ArgMin
+NodeImportResult argMinMaxHelper(IImporterContext* ctx,
+    const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op)
+{
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
+    // Get attributes.
+    OnnxAttrs attrs(node);
+    int keepdims = attrs.get("keepdims", 1);
+    int axis = attrs.get("axis", -1);
+    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Insert a TopK layer with k set to 1.
+    int nbDims = tensor.getDimensions().nbDims;
+    axis = getAxis(axis, nbDims);
+    ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+
+    uint32_t axisMask = 1 << axis;
+    nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(tensor, op, 1, axisMask);
+    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+    // We don't care about the TopK values, just the indices.
+    nvinfer1::ITensor* indices = layer->getOutput(1);
+    indices->setType(nvinfer1::DataType::kINT32);
+    if (keepdims)
+    {
+        // The default behavior of the TopK layer is to keepdims.
+        return {{indices}};
+    }
+    else
+    {
+        // Otherwise, we need to squeeze the axis dimension - we achieve this by reshaping.
+        // The new dimensions are just the old dimensions with all values after axis shifted over.
+        nvinfer1::Dims reshapeDims = indices->getDimensions();
+        --reshapeDims.nbDims;
+        // The axis dimension should be reduced to size 1 after performing the reduction.
+        ASSERT(reshapeDims.d[axis] == 1, ErrorCode::kINVALID_VALUE);
+        for (int i = axis; i < reshapeDims.nbDims; ++i)
+        {
+            reshapeDims.d[i] = reshapeDims.d[i + 1];
+        }
+        nvinfer1::IShuffleLayer* squeezeLayer = ctx->network()->addShuffle(*indices);
+        squeezeLayer->setReshapeDimensions(reshapeDims);
+        return {{squeezeLayer->getOutput(0)}};
+    }
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(ArgMax)
+{
+    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMAX);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(ArgMin)
+{
+    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMIN);
+}
+#endif // #if NV_TENSORRT_MAJOR >= 4
+
+
 DEFINE_BUILTIN_OP_IMPORTER(Abs) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kABS);
 }
@@ -1276,12 +1336,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx,
   }
   uint32_t axis_mask = 0;
   for( int axis : axes ) {
-    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-    if( axis < 0 ) {
-      axis += ndim; // Support negative indexing
-    } else {
-      --axis; // Don't include batch dim
-    }
+    axis = getAxis(axis, ndim);
+    ASSERT(axis >= 0 && axis < ndim, ErrorCode::kUNSUPPORTED_NODE);
     axis_mask |= 1 << axis;
   }
   RETURN_FIRST_OUTPUT(
@@ -1735,13 +1791,11 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK) {
   ASSERT(attrs.count("k"), ErrorCode::kINVALID_NODE);
   int k    = attrs.get<int>("k");
   int axis = attrs.get("axis", -1);
-  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-  if( axis < 0 ) {
-    nvinfer1::Dims dims = tensor.getDimensions();
-    axis += dims.nbDims;
-  } else {
-    --axis; // Don't include batch dim
-  }
+  // Adjust axis to TensorRT format
+  int nbDims = tensor.getDimensions().nbDims;
+  axis = getAxis(axis, nbDims);
+  ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+
   uint32_t axis_mask = 1 << axis;
   auto* layer = ctx->network()->addTopK(
       tensor, nvinfer1::TopKOperation::kMAX, k, axis_mask);
