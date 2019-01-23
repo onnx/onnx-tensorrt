@@ -36,6 +36,16 @@ namespace {
 
 enum { BATCH_DIM = 0 };
 
+// Takes idx from [MIN_INT, MAX_INT] to [0, ax_size] (for Slice op)
+int slice_clip_index(int ax_size, int idx)
+{
+  if (idx < 0)
+  {
+    idx += ax_size;
+  }
+  return std::min(std::max(idx, 0), ax_size);
+}
+
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 bool is_transpose_required(nvinfer1::Dims const& shape,
                            nvinfer1::Permutation const& perm) {
@@ -1516,6 +1526,111 @@ DEFINE_BUILTIN_OP_IMPORTER(Size) {
   int32_t size = get_shape_size(shape);
   *static_cast<int32_t*>(const_cast<void*>(weights.values)) = size;
   return {{weights}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Slice) {
+  ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+  nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+  int nbDims = dims.nbDims;
+  OnnxAttrs attrs(node);
+  auto axes = attrs.get<std::vector<int>>("axes");
+  auto starts = attrs.get<std::vector<int>>("starts");
+  auto ends = attrs.get<std::vector<int>>("ends");
+  int H_idx = -1, W_idx = -1;
+  // This will be modified to contain expanded dims metadata,
+  // if needed (e.g. input tensor is 2D)
+  int artificial_dims = 0;
+  bool need_to_expand_dims = dims.nbDims < 3;
+
+  // Argument validation
+
+  // We don't support implicit indexing due to
+  // inability to deal with batch dim slicing
+  // (TRT doesn't support batch dim slicing)
+  ASSERT(axes.size() != 0, ErrorCode::kUNSUPPORTED_NODE);
+
+  // Since indexing is explicit, there must be
+  // equal number of axis, start and end indices
+  ASSERT((axes.size() == starts.size())
+    && (starts.size() == ends.size()), ErrorCode::kUNSUPPORTED_NODE);
+
+  for (size_t i = 0; i < axes.size(); ++i)
+  {
+    // We don't allow slicing batch dim, due to TRT limitations
+    ASSERT(axes[i] > 0 && axes[i] <= nbDims, ErrorCode::kUNSUPPORTED_NODE);
+
+    starts[i] = slice_clip_index(dims.d[axes[i]-1], starts[i]);
+    ends[i] = slice_clip_index(dims.d[axes[i]-1], ends[i]);
+
+    // TRT only supports slicing HW dims when using padding layer,
+    // so if user wants to slice some other axis, we check whether
+    // slice contains full dimension
+    if (axes[i] != nbDims-1 && axes[i] != nbDims)
+    {
+      ASSERT((ends[i] - starts[i]) == dims.d[axes[i]-1], ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+      if (axes[i] == nbDims-1)
+      {
+        H_idx = i;
+      }
+      else if (axes[i] == nbDims)
+      {
+        W_idx = i;
+      }
+    }
+  }
+
+  // This case requires hack where you unsqueeze input tensor
+  // before running TRT padding layer, since it accepts tensors
+  // of dimension >= 3 [not counting batch dim]
+  if (need_to_expand_dims)
+  {
+    nvinfer1::Dims expanded_dims;
+    expanded_dims.nbDims = 3;
+    artificial_dims = 3 - dims.nbDims;
+    for (int i = 0; i < artificial_dims; ++i)
+    {
+      expanded_dims.d[i] = 1;
+    }
+    for (int i = 0; i < dims.nbDims; ++i)
+    {
+      expanded_dims.d[artificial_dims + i] = dims.d[i];
+    }
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, expanded_dims);
+  }
+
+  nvinfer1::DimsHW start_pad, end_pad;
+  start_pad.h() = (H_idx != -1) ? starts[H_idx] : 0;
+  end_pad.h() = (H_idx != -1) ? dims.d[dims.nbDims - 2] - ends[H_idx] : 0;
+  start_pad.w() = (W_idx != -1) ? starts[W_idx] : 0;
+  end_pad.w() = (W_idx != -1) ? dims.d[dims.nbDims - 1] - ends[W_idx] : 0;
+
+  auto layer_ptr = ctx->network()->addPadding(*tensor_ptr, -start_pad, -end_pad);
+  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  auto layer_out = layer_ptr->getOutput(0);
+
+  // Squeeze back artificial dimensions introduced earlier
+  if (need_to_expand_dims)
+  {
+    nvinfer1::Dims expanded_dims;
+    int original_dims_nb = dims.nbDims;
+    nvinfer1::Dims squeezed_dims;
+    expanded_dims = layer_out->getDimensions();
+    squeezed_dims.nbDims = original_dims_nb;
+    for (int i = 0; i < original_dims_nb; ++i)
+    {
+      squeezed_dims.d[i] = expanded_dims.d[artificial_dims + i];
+    }
+    tensor_ptr = reshape_tensor(ctx, *layer_out, squeezed_dims);
+  }
+  else // No squeezing required, we'll just return padding layer result
+  {
+    tensor_ptr = layer_out;
+  }
+  return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
