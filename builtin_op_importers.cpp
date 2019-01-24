@@ -1532,13 +1532,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   ASSERT(0 <= axis && axis < ndim, ErrorCode::kINVALID_NODE);
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   nvinfer1::Dims shape = tensor_ptr->getDimensions();
-  ASSERT(tensor_ptr = flatten_tensor(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, axis, 0), ErrorCode::kUNSUPPORTED_NODE);
+  // Reshape the tensor so that the softmax axis is 0
+  if (axis > 0)
+  {
+    ASSERT(tensor_ptr = flatten_tensor(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, axis, 0), ErrorCode::kUNSUPPORTED_NODE);
+  }
   auto* layer = ctx->network()->addSoftMax(*tensor_ptr);
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   tensor_ptr = layer->getOutput(0);
-  ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, 0, axis), ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(tensor_ptr = reshape_tensor(ctx, *tensor_ptr, shape), ErrorCode::kUNSUPPORTED_NODE);
+  // Reshape the tensor back if it was reshaped above
+  if (axis > 0)
+  {
+    ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, 0, axis), ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(tensor_ptr = reshape_tensor(ctx, *tensor_ptr, shape), ErrorCode::kUNSUPPORTED_NODE);
+  }
   return {{tensor_ptr}};
 }
 
