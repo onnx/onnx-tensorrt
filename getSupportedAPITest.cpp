@@ -29,8 +29,6 @@
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
 #include "common.hpp"
-#include "api_utils.h"
-
 
 using std::cout;
 using std::cerr;
