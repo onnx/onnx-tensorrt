@@ -1,4 +1,6 @@
+#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
+#include "common.hpp"
 #include "onnx/onnxifi.h"
 #include <cuda_runtime.h>
 #include <NvInfer.h>
@@ -18,48 +20,6 @@
 
 
 namespace {
-
-struct InferDeleter {
-  template <typename T> void operator()(T *obj) const {
-    if (obj) {
-      obj->destroy();
-    }
-  }
-};
-template <typename T> inline std::shared_ptr<T> infer_object(T *obj) {
-  if (!obj) {
-    throw std::runtime_error("Failed to create object");
-  }
-  return std::shared_ptr<T>(obj, InferDeleter());
-}
-
-// Logger for GIE info/warning/errors
-class TRT_Logger : public nvinfer1::ILogger {
-  nvinfer1::ILogger::Severity _verbosity;
-  std::ostream *_ostream;
-
-public:
-  TRT_Logger(Severity verbosity = Severity::kWARNING,
-             std::ostream &ostream = std::cout)
-      : _verbosity(verbosity), _ostream(&ostream) {}
-  void log(Severity severity, const char *msg) override {
-    if (severity <= _verbosity) {
-      time_t rawtime = std::time(0);
-      char buf[256];
-      strftime(&buf[0], 256, "%Y-%m-%d %H:%M:%S", std::gmtime(&rawtime));
-      const char *sevstr =
-          (severity == Severity::kINTERNAL_ERROR
-               ? "    BUG"
-               : severity == Severity::kERROR
-                     ? "  ERROR"
-                     : severity == Severity::kWARNING
-                           ? "WARNING"
-                           : severity == Severity::kINFO ? "   INFO"
-                                                         : "UNKNOWN");
-      (*_ostream) << "[" << buf << " " << sevstr << "] " << msg << std::endl;
-    }
-  }
-};
 
 onnxStatus CheckShape(const nvinfer1::Dims &dims,
                       const onnxTensorDescriptorV1 &desc,
@@ -221,11 +181,11 @@ class OnnxTensorRTBackendRep {
 public:
   OnnxTensorRTBackendRep(const OnnxTensorRTBackendID &backend_id)
       : device_id_(backend_id.device_id) {
-    trt_builder_ = infer_object(nvinfer1::createInferBuilder(trt_logger_));
+    trt_builder_ = common::infer_object(nvinfer1::createInferBuilder(trt_logger_));
     trt_builder_->setMaxBatchSize(max_batch_size_);
     trt_builder_->setMaxWorkspaceSize(max_workspace_size_);
-    trt_network_ = infer_object(trt_builder_->createNetwork());
-    parser_ = infer_object(
+    trt_network_ = common::infer_object(trt_builder_->createNetwork());
+    parser_ = common::infer_object(
         nvonnxparser::createParser(trt_network_.get(), trt_logger_));
     CudaDeviceGuard guard(device_id_);
     if (cudaStreamCreate(&stream_) != cudaSuccess) {
@@ -281,7 +241,7 @@ public:
   size_t max_batch_size() const { return max_batch_size_; }
 
 private:
-  TRT_Logger trt_logger_;
+  common::TRT_Logger trt_logger_;
   cudaStream_t stream_;
   std::shared_ptr<nvinfer1::IBuilder> trt_builder_{nullptr};
   std::shared_ptr<nvinfer1::INetworkDefinition> trt_network_{nullptr};
@@ -301,7 +261,7 @@ public:
     if (cudaSetDevice(device_id_) != cudaSuccess) {
       throw std::runtime_error("Cannot set CUDA device");
     }
-    trt_engine_ = infer_object(backendrep->buildCudaEngine());
+    trt_engine_ = common::infer_object(backendrep->buildCudaEngine());
     max_batch_size_ = backendrep->max_batch_size();
   }
 
@@ -459,7 +419,7 @@ onnxStatus GraphRep::InitIO(uint32_t inputsCount,
     }
   }
 
-  trt_executor_ = infer_object(trt_engine_->createExecutionContext());
+  trt_executor_ = common::infer_object(trt_engine_->createExecutionContext());
   return ONNXIFI_STATUS_SUCCESS;
 }
 
@@ -833,9 +793,10 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
       return ONNXIFI_STATUS_INVALID_SIZE;
     }
 
-    TRT_Logger trt_logger;
-    auto parser = infer_object(nvonnxparser::createParser(nullptr, trt_logger));
-    if (parser->supportsModel(onnxModel, onnxModelSize)) {
+    common::TRT_Logger trt_logger;
+    auto parser = common::infer_object(nvonnxparser::createParser(nullptr, trt_logger));
+    SubGraphCollection_t subgraphcollection;
+    if (parser->supportsModel(onnxModel, onnxModelSize, subgraphcollection)) {
       return ONNXIFI_STATUS_SUCCESS;
     } else {
       return ONNXIFI_STATUS_UNSUPPORTED_OPERATOR;
