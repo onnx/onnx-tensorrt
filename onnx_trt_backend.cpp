@@ -1,4 +1,3 @@
-#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "common.hpp"
 #include "onnx/onnxifi.h"
@@ -186,7 +185,7 @@ public:
     trt_builder_->setMaxWorkspaceSize(max_workspace_size_);
     trt_network_ = common::infer_object(trt_builder_->createNetwork());
     parser_ = common::infer_object(
-        nvonnxparser::createParser(trt_network_.get(), trt_logger_));
+        nvonnxparser::createParser(*trt_network_, trt_logger_));
     CudaDeviceGuard guard(device_id_);
     if (cudaStreamCreate(&stream_) != cudaSuccess) {
       throw std::runtime_error("Cannot create cudaStream");
@@ -794,7 +793,9 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
     }
 
     common::TRT_Logger trt_logger;
-    auto parser = common::infer_object(nvonnxparser::createParser(nullptr, trt_logger));
+    auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
+    auto trt_network = common::infer_object(trt_builder->createNetwork());
+    auto parser = common::infer_object(nvonnxparser::createParser(*trt_network, trt_logger));
     SubGraphCollection_t subgraphcollection;
     if (parser->supportsModel(onnxModel, onnxModelSize, subgraphcollection)) {
       return ONNXIFI_STATUS_SUCCESS;

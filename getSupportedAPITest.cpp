@@ -25,7 +25,6 @@
 #include <unistd.h> // For ::getopt
 #include <string>
 
-#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
 #include "common.hpp"
@@ -97,7 +96,7 @@ int main(int argc, char* argv[]) {
     common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
     auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
     auto trt_network = common::infer_object(trt_builder->createNetwork());
-    auto trt_parser  = common::infer_object(nvonnxparser::createParser(trt_network.get(), trt_logger));
+    auto trt_parser  = common::infer_object(nvonnxparser::createParser(*trt_network, trt_logger));
 
     cout << "Parsing model: " << onnx_filename << endl;
     
@@ -113,7 +112,12 @@ int main(int argc, char* argv[]) {
     }
 
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
+    if (!trt_parser->parseFromFile(onnx_buf.data(), verbosity))
+    {
+        cout << "Failure while parsing ONNX file" << endl;
+        return 1;
+
+    }
 
     SubGraphCollection_t SubGraphCollection;
 
