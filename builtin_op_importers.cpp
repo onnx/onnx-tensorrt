@@ -468,18 +468,7 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx,
         return {{squeezeLayer->getOutput(0)}};
     }
 }
-
-DEFINE_BUILTIN_OP_IMPORTER(ArgMax)
-{
-    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMAX);
-}
-
-DEFINE_BUILTIN_OP_IMPORTER(ArgMin)
-{
-    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMIN);
-}
 #endif // #if NV_TENSORRT_MAJOR >= 4
-
 
 DEFINE_BUILTIN_OP_IMPORTER(Abs) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kABS);
@@ -498,6 +487,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Add) {
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM, true);
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(ArgMax)
+{
+    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMAX);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(ArgMin)
+{
+    return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMIN);
+}
+#endif // #if NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
