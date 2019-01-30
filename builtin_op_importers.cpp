@@ -882,7 +882,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
     OnnxAttrs attrs(node);
-    int axis = attrs.get<int>("axis");
+    int axis = attrs.get<int>("axis", 0);
+    // Support negative indexing
+    int ndim = inputs.at(0).shape().nbDims;
+    if (axis < 0)
+    {
+      axis += ndim;
+    }
+
+    // TRT does not support operations across the batch dimension
+    if (inputs.at(0).is_tensor())
+    {
+      --axis; 
+    }
+    
+    ASSERT(0 <= axis && axis < ndim, ErrorCode::kINVALID_NODE);
     RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
 }
 #endif // NV_TENSORRT_MAJOR >= 4
