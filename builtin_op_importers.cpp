@@ -988,9 +988,9 @@ DEFINE_BUILTIN_OP_IMPORTER(ImageScaler) {
     std::vector<float> biases = attrs.get<std::vector<float>>("bias");
     nvinfer1::Dims dims{1, static_cast<int>(biases.size())};
     ShapedWeights shiftWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, dims);
-    std::memcpy(shiftWeights.values, biases.data(), biases.size());
+    std::copy(biases.begin(), biases.end(), static_cast<float*>(shiftWeights.values));
     // Scale is applied to every element of the input, but we need to duplicate it over every channel.
-    float scale = attrs.get<float>("scale");
+    float scale = attrs.get<float>("scale", 1.0f);
     ShapedWeights scaleWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, dims);
     std::fill(static_cast<float*>(scaleWeights.values), static_cast<float*>(scaleWeights.values) + scaleWeights.count(), scale);
     // Finally add the scale layer.
