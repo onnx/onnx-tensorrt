@@ -238,18 +238,33 @@ inline int div_ceil(int n, int d) {
   return (n - 1) / d + 1;
 }
 
-// Given an axis in ONNX and the rank of the TRT input tensor, returns an axis compatible with TRT.
-inline int getAxis(int axis, int nbDims)
+// Given an axis and TRT input tensor, modify and return the axis value
+// depending on whether or not the input is a TRT tensor.
+inline Status convert_axis(int& axis, int nbDims, bool isTensor)
 {
+  enum { BATCH_DIM = 0 };
+  // If the input is a TRT tensor, no modification to axis is necessary
+  if (isTensor)
+  {
     if (axis < 0)
     {
-        // For an ONNX NCHW input tensor, TRT nbDims == 3, but ONNX nbDims == 4.
-        // Since we're computing everything in ONNX terms here, we add 1 to the TRT dims.
-        axis += nbDims + 1;
+      axis += nbDims;
+    }
+  }
+  // For an ONNX NCHW input tensor, TRT nbDims == 3, but ONNX nbDims == 4.
+  else
+  {
+    if (axis < 0)
+    {
+      // Since we're computing everything in ONNX terms here, we add 1 to the TRT dims.
+      axis += nbDims + 1;
     }
     // Now remove the batch dimension from the axis. Up to this point, the axis is an ONNX index.
     // After subtracting 1, it becomes a TRT index (i.e. excluding batch dimension.)
-    return axis - 1;
+    axis = axis - 1;
+  }
+  ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+  return Status::success();
 }
 
 inline int get_conv_output_size(int input_size, int filter_size,

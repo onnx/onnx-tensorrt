@@ -434,15 +434,13 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx,
     // Get attributes.
     OnnxAttrs attrs(node);
     int keepdims = attrs.get("keepdims", 1);
-    int axis = attrs.get("axis", -1);
-    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-
-    // Insert a TopK layer with k set to 1.
+    int axis = attrs.get("axis", 0);
     int nbDims = tensor.getDimensions().nbDims;
-    axis = getAxis(axis, nbDims);
-    ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+    // Adjust axis to TensorRT format
+    TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
 
     uint32_t axisMask = 1 << axis;
+    // Insert a TopK layer with k set to 1.
     nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(tensor, op, 1, axisMask);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
     // We don't care about the TopK values, just the indices.
@@ -1336,8 +1334,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx,
   }
   uint32_t axis_mask = 0;
   for( int axis : axes ) {
-    axis = getAxis(axis, ndim);
-    ASSERT(axis >= 0 && axis < ndim, ErrorCode::kUNSUPPORTED_NODE);
+    // Adjust axis to TensorRT format
+    TRT_CHECK(convert_axis(axis, ndim, input.is_tensor()));
     axis_mask |= 1 << axis;
   }
   RETURN_FIRST_OUTPUT(
@@ -1791,10 +1789,9 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK) {
   ASSERT(attrs.count("k"), ErrorCode::kINVALID_NODE);
   int k    = attrs.get<int>("k");
   int axis = attrs.get("axis", -1);
-  // Adjust axis to TensorRT format
   int nbDims = tensor.getDimensions().nbDims;
-  axis = getAxis(axis, nbDims);
-  ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+  // Adjust axis to TensorRT format
+  TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
 
   uint32_t axis_mask = 1 << axis;
   auto* layer = ctx->network()->addTopK(
