@@ -205,9 +205,8 @@ Status deserialize_onnx_model(int fd,
 
 bool ModelImporter::supportsModel(void const *serialized_onnx_model,
                                   size_t serialized_onnx_model_size,
-				  SubGraphCollection_t &sub_graph_collection) {
+                                  SubGraphCollection_t &sub_graph_collection) {
   ::ONNX_NAMESPACE::ModelProto model;
-
   bool is_serialized_as_text = false;
   Status status =
       deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
@@ -219,30 +218,34 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
 
   NodesContainer_t topological_order;
   if (!toposort(model.graph().node(), &topological_order)) {
-    cout << "Failed to sort model topologically, exiting ..." <<endl;
+    cout << "Failed to sort model topologically, exiting ..." << endl;
     return false;
   }
 
   bool newSubGraph(true), allSupported(true);
 
-  for( size_t node_idx : topological_order ) {
+  for( size_t node_idx : topological_order ) 
+  {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
-    if (this->supportsOperator(node.op_type().c_str())) {
-      if (newSubGraph) {
-	//...If it is the beginning of a new subGraph, we start a new vector
-	sub_graph_collection.emplace_back();
-	newSubGraph = false;
+    if (this->supportsOperator(node.op_type().c_str())) 
+    {
+      if (newSubGraph) 
+      {
+        // If it is the beginning of a new subGraph, we start a new vector
+        sub_graph_collection.emplace_back();
+        newSubGraph = false;
       }
-      //...We add the new node to the last graph
+      // We add the new node to the last graph
       sub_graph_collection.back().emplace_back(node_idx);
-    } else {
-      //...This is not a supported node, reset the newSubGraph
+    } else 
+    {
+      // This is not a supported node, reset the newSubGraph
+      cout << "Found unsupported node: " << node.op_type().c_str() << endl;
       newSubGraph = true;
       allSupported = false;
     }
-    
-  } // for( size_t node_idx : topological_order ) {
-  return allSupported;
+  }
+  return allSupported; 
 }
 
 bool ModelImporter::supportsOperator(const char* op_name) const {
