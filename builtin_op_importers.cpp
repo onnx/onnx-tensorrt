@@ -313,12 +313,7 @@ Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs,
     bool broadcast = attrs.get<int>("broadcast");
     ASSERT(broadcast || dims.nbDims == 1, ErrorCode::kINVALID_NODE);
     int axis = attrs.get<int>("axis", -1);
-    if( axis < 0 ) {
-      axis += dims.nbDims; // Support negative indexing
-    } else {
-      ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-      axis -= 1; // Remove batch dim
-    }
+    TRT_CHECK(convert_tensor(axis, dims.nbDims, true));
     ASSERT(axis == 0, ErrorCode::kUNSUPPORTED_NODE);
   }
   return Status::success();
@@ -635,14 +630,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
     tensors.push_back(&input.tensor());
   }
   OnnxAttrs attrs(node);
+  int nbDims = inputs.at(0).shape().nbDims;
   int axis = attrs.get<int>("axis");
-  if( axis < 0 ) {
-    // Support negative indexing
-    axis += inputs.at(0).shape().nbDims;
-  } else {
-    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-    axis -= 1; // Remove batch dim
-  }
+  TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
 #if NV_TENSORRT_MAJOR >= 4
   auto* layer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
@@ -1577,14 +1567,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
   int axis = attrs.get("axis", 1);
-  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
   int ndim = inputs.at(0).shape().nbDims;
-  if( axis < 0 ) {
-    axis += ndim; // Negative indexing
-  } else {
-    --axis; // Don't include the batch dim
-  }
-  ASSERT(0 <= axis && axis < ndim, ErrorCode::kINVALID_NODE);
+  TRT_CHECK(convert_axis(axis, ndim, inputs.at(0).is_tensor()));
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   nvinfer1::Dims shape = tensor_ptr->getDimensions();
   ASSERT(tensor_ptr = flatten_tensor(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
@@ -1841,8 +1825,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   auto axes = attrs.get<std::vector<int>>("axes");
   // Note: Can't handle batch dim as it is implicit in TRT
   for( auto& axis : axes ) {
-    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-    --axis;
+    ASSERT(axis >= 0, ErrorCode::kUNSUPPORTED_NODE);
+    TRT_CHECK(convert_axis(axis,ndim_in,inputs.at(0).is_tensor()));
   }
   std::set<int> axes_set(axes.begin(), axes.end());
   int ndim_out = ndim_in + axes_set.size();
