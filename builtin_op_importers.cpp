@@ -842,7 +842,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Div) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Dropout) {
-  RETURN_IDENTITY(inputs.at(0));
+  int noutputs = node.output().size();
+  if (noutputs == 1)
+  {
+    RETURN_IDENTITY(inputs.at(0));
+  }
+  else 
+  {
+    // Return both Dropout outputs: (output + mask)
+    std::vector<TensorOrWeights> outputs;
+    outputs.push_back(identity(ctx,inputs.at(0)));
+    outputs.push_back(identity(ctx,inputs.at(0)));
+    return outputs;
+  }
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Elu) {
