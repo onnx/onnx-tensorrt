@@ -238,26 +238,19 @@ inline int div_ceil(int n, int d) {
   return (n - 1) / d + 1;
 }
 
-// Convert ONNX axis into TRT axis
-inline Status convert_axis(int& axis, int nbDims, bool isTensor)
+// Convert an ONNX axis into a TRT axis
+inline Status convert_axis(int& axis, int nbDims)
 {
   // Support negative indexing
   if (axis < 0)
   {
-    if (isTensor)
-    {
-      axis += nbDims;
-    }
-    // For an ONNX NCHW input tensor, TRT nbDims == 3, but ONNX nbDims == 4.
-    // Since we're computing everything in ONNX terms here, we add 1 to the TRT dims.
-    else
-    {
-      axis += nbDims + 1;
-    }
+    axis += nbDims;
   }
-  // Now remove the batch dimension from the axis. Up to this point, the axis is an ONNX index.
-  // After subtracting 1, it becomes a TRT index (i.e. excluding batch dimension.)
-  axis = axis - 1;
+  // If axis was positive, subtract 1 to strip batch dimension
+  else
+  {
+    axis = axis - 1;
+  }
   ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
   return Status::success();
 }

@@ -432,7 +432,7 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx,
     int axis = attrs.get("axis", 0);
     int nbDims = tensor.getDimensions().nbDims;
     // Adjust axis to TensorRT format
-    TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
+    TRT_CHECK(convert_axis(axis, nbDims));
 
     uint32_t axisMask = 1 << axis;
     // Insert a TopK layer with k set to 1.
@@ -632,7 +632,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
   OnnxAttrs attrs(node);
   int nbDims = inputs.at(0).shape().nbDims;
   int axis = attrs.get<int>("axis");
-  TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
+  TRT_CHECK(convert_axis(axis, nbDims));
 #if NV_TENSORRT_MAJOR >= 4
   auto* layer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
@@ -1326,7 +1326,7 @@ NodeImportResult reduceTensor(IImporterContext* ctx,
   uint32_t axis_mask = 0;
   for( int axis : axes ) {
     // Adjust axis to TensorRT format
-    TRT_CHECK(convert_axis(axis, ndim, input.is_tensor()));
+    TRT_CHECK(convert_axis(axis, ndim));
     axis_mask |= 1 << axis;
   }
   RETURN_FIRST_OUTPUT(
@@ -1568,7 +1568,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   OnnxAttrs attrs(node);
   int axis = attrs.get("axis", 1);
   int ndim = inputs.at(0).shape().nbDims;
-  TRT_CHECK(convert_axis(axis, ndim, inputs.at(0).is_tensor()));
+  TRT_CHECK(convert_axis(axis, ndim));
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   nvinfer1::Dims shape = tensor_ptr->getDimensions();
   ASSERT(tensor_ptr = flatten_tensor(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
@@ -1776,7 +1776,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK) {
   int axis = attrs.get("axis", -1);
   int nbDims = tensor.getDimensions().nbDims;
   // Adjust axis to TensorRT format
-  TRT_CHECK(convert_axis(axis, nbDims, inputs.at(0).is_tensor()));
+  TRT_CHECK(convert_axis(axis, nbDims));
 
   uint32_t axis_mask = 1 << axis;
   auto* layer = ctx->network()->addTopK(
@@ -1826,7 +1826,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   // Note: Can't handle batch dim as it is implicit in TRT
   for( auto& axis : axes ) {
     ASSERT(axis >= 0, ErrorCode::kUNSUPPORTED_NODE);
-    TRT_CHECK(convert_axis(axis,ndim_in,inputs.at(0).is_tensor()));
+    TRT_CHECK(convert_axis(axis,ndim_in));
   }
   std::set<int> axes_set(axes.begin(), axes.end());
   int ndim_out = ndim_in + axes_set.size();
