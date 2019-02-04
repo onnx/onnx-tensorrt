@@ -313,7 +313,7 @@ Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs,
     bool broadcast = attrs.get<int>("broadcast");
     ASSERT(broadcast || dims.nbDims == 1, ErrorCode::kINVALID_NODE);
     int axis = attrs.get<int>("axis", -1);
-    TRT_CHECK(convert_tensor(axis, dims.nbDims, true));
+    TRT_CHECK(convert_axis(axis, dims.nbDims));
     ASSERT(axis == 0, ErrorCode::kUNSUPPORTED_NODE);
   }
   return Status::success();
@@ -937,6 +937,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
   ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{tensor_ptr}};
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(Gather) {
+    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
+    OnnxAttrs attrs(node);
+    int axis = attrs.get<int>("axis", 0);
+    int nbDims = inputs.at(0).shape().nbDims;
+    TRT_CHECK(convert_axis(axis, nbDims));
+    RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
+}
+#endif // NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
