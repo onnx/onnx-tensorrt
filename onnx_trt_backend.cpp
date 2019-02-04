@@ -792,7 +792,6 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
     if (onnxModelSize == 0) {
       return ONNXIFI_STATUS_INVALID_SIZE;
     }
-
     common::TRT_Logger trt_logger;
     auto parser = common::infer_object(nvonnxparser::createParser(nullptr, trt_logger));
     SubGraphCollection_t subgraphcollection;
