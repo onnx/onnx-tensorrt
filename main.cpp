@@ -22,6 +22,7 @@
 
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
+#include "common.hpp"
 
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -36,78 +37,6 @@ using std::endl;
 #include <ctime>
 #include <fcntl.h> // For ::open
 #include <limits>
-
-struct InferDeleter {
-  template<typename T>
-  void operator()(T* obj) const {
-    if( obj ) {
-      obj->destroy();
-    }
-  }
-};
-template<typename T>
-inline std::shared_ptr<T> infer_object(T* obj) {
-  if( !obj ) {
-    throw std::runtime_error("Failed to create object");
-  }
-  return std::shared_ptr<T>(obj, InferDeleter());
-}
-
-// Logger for GIE info/warning/errors
-class TRT_Logger : public nvinfer1::ILogger {
-  nvinfer1::ILogger::Severity _verbosity;
-  std::ostream* _ostream;
-public:
-  TRT_Logger(Severity verbosity=Severity::kWARNING,
-             std::ostream& ostream=std::cout)
-    : _verbosity(verbosity), _ostream(&ostream) {}
-  void log(Severity severity, const char* msg) override {
-    if( severity <= _verbosity ) {
-      time_t rawtime = std::time(0);
-      char buf[256];
-      strftime(&buf[0], 256,
-               "%Y-%m-%d %H:%M:%S",
-               std::gmtime(&rawtime));
-      const char* sevstr = (severity == Severity::kINTERNAL_ERROR ? "    BUG" :
-                            severity == Severity::kERROR          ? "  ERROR" :
-                            severity == Severity::kWARNING        ? "WARNING" :
-                            severity == Severity::kINFO           ? "   INFO" :
-                            "UNKNOWN");
-      (*_ostream) << "[" << buf << " " << sevstr << "] "
-                  << msg
-                  << std::endl;
-    }
-  }
-};
-
-bool ParseFromFile_WAR(google::protobuf::Message* msg,
-                       const char*                filename) {
-  int fd = ::open(filename, O_RDONLY);
-  google::protobuf::io::FileInputStream raw_input(fd);
-  raw_input.SetCloseOnDelete(true);
-  google::protobuf::io::CodedInputStream coded_input(&raw_input);
-  // Note: This WARs the very low default size limit (64MB)
-  coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(),
-                                 std::numeric_limits<int>::max()/4);
-  return msg->ParseFromCodedStream(&coded_input);
-}
-
-bool ParseFromTextFile(google::protobuf::Message* msg,
-                       const char*                filename) {
-  int fd = ::open(filename, O_RDONLY);
-  google::protobuf::io::FileInputStream raw_input(fd);
-  raw_input.SetCloseOnDelete(true);
-  return google::protobuf::TextFormat::Parse(&raw_input, msg);
-}
-
-std::string onnx_ir_version_string(int64_t ir_version=::ONNX_NAMESPACE::IR_VERSION) {
-  int onnx_ir_major = ir_version / 1000000;
-  int onnx_ir_minor = ir_version % 1000000 / 10000;
-  int onnx_ir_patch = ir_version % 10000;
-  return (std::to_string(onnx_ir_major) + "." +
-          std::to_string(onnx_ir_minor) + "." +
-          std::to_string(onnx_ir_patch));
-}
 
 void print_usage() {
   cout << "ONNX to TensorRT model parser" << endl;
@@ -124,15 +53,6 @@ void print_usage() {
        << "                [-q] (decrease verbosity)" << "\n"
        << "                [-V] (show version information)" << "\n"
        << "                [-h] (show help)" << endl;
-}
-
-void print_version() {
-  cout << "Parser built against:" << endl;
-  cout << "  ONNX IR version:  " << onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << endl;
-  cout << "  TensorRT version: "
-       << NV_TENSORRT_MAJOR << "."
-       << NV_TENSORRT_MINOR << "."
-       << NV_TENSORRT_PATCH << endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -173,7 +93,7 @@ int main(int argc, char* argv[]) {
     case 'g': debug_builder = true; break;
     case 'v': ++verbosity; break;
     case 'q': --verbosity; break;
-    case 'V': print_version(); return 0;
+    case 'V': common::print_version(); return 0;
     case 'h': print_usage(); return 0;
     }
   }
@@ -199,8 +119,8 @@ int main(int argc, char* argv[]) {
   }
 
   ::ONNX_NAMESPACE::ModelProto onnx_model;
-  bool is_binary = ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
-  if( !is_binary && !ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
+  bool is_binary = common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
+  if( !is_binary && !common::ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
     cerr << "Failed to parse ONNX model" << endl;
     return -3;
   }
@@ -210,7 +130,7 @@ int main(int argc, char* argv[]) {
                              onnx_model.opset_import(0).version() : 0);
     cout << "----------------------------------------------------------------" << endl;
     cout << "Input filename:   " << onnx_filename << endl;
-    cout << "ONNX IR version:  " << onnx_ir_version_string(onnx_model.ir_version()) << endl;
+    cout << "ONNX IR version:  " << common::onnx_ir_version_string(onnx_model.ir_version()) << endl;
     cout << "Opset version:    " << opset_version << endl;
     cout << "Producer name:    " << onnx_model.producer_name() << endl;
     cout << "Producer version: " << onnx_model.producer_version() << endl;
@@ -222,9 +142,9 @@ int main(int argc, char* argv[]) {
 
   if( onnx_model.ir_version() > ::ONNX_NAMESPACE::IR_VERSION ) {
     cerr << "WARNING: ONNX model has a newer ir_version ("
-         << onnx_ir_version_string(onnx_model.ir_version())
+         << common::onnx_ir_version_string(onnx_model.ir_version())
          << ") than this parser was built against ("
-         << onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << ")." << endl;
+         << common::onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << ")." << endl;
   }
 
   if( !text_filename.empty() ) {
@@ -245,10 +165,10 @@ int main(int argc, char* argv[]) {
     full_onnx_text_file.write(full_onnx_text.c_str(), full_onnx_text.size());
   }
 
-  TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
-  auto trt_builder = infer_object(nvinfer1::createInferBuilder(trt_logger));
-  auto trt_network = infer_object(trt_builder->createNetwork());
-  auto trt_parser  = infer_object(nvonnxparser::createParser(
+  common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
+  auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
+  auto trt_network = common::infer_object(trt_builder->createNetwork());
+  auto trt_parser  = common::infer_object(nvonnxparser::createParser(
                                       trt_network.get(), trt_logger));
 
   // TODO: Fix this for the new API
@@ -319,9 +239,9 @@ int main(int argc, char* argv[]) {
       return -5;
     }
     trt_builder->setDebugSync(debug_builder);
-    auto trt_engine = infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
+    auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
 
-    auto engine_plan = infer_object(trt_engine->serialize());
+    auto engine_plan = common::infer_object(trt_engine->serialize());
     std::ofstream engine_file(engine_filename.c_str());
     if (!engine_file) {
       cerr << "Failed to open output file for writing: "

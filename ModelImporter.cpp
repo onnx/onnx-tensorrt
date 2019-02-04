@@ -20,6 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#include "NvOnnxParserTypedefs.h"
 #include "ModelImporter.hpp"
 #include "toposort.hpp"
 #include "onnx_utils.hpp"
@@ -203,9 +204,9 @@ Status deserialize_onnx_model(int fd,
 }
 
 bool ModelImporter::supportsModel(void const *serialized_onnx_model,
-                                  size_t serialized_onnx_model_size) {
+                                  size_t serialized_onnx_model_size,
+                                  SubGraphCollection_t &sub_graph_collection) {
   ::ONNX_NAMESPACE::ModelProto model;
-
   bool is_serialized_as_text = false;
   Status status =
       deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
@@ -214,12 +215,37 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     _errors.push_back(status);
     return false;
   }
-  for (const auto &node : model.graph().node()) {
-    if (!this->supportsOperator(node.op_type().c_str())) {
-      return false;
+
+  NodesContainer_t topological_order;
+  if (!toposort(model.graph().node(), &topological_order)) {
+    cout << "Failed to sort model topologically, exiting ..." << endl;
+    return false;
+  }
+
+  bool newSubGraph(true), allSupported(true);
+
+  for( size_t node_idx : topological_order ) 
+  {
+    ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
+    if (this->supportsOperator(node.op_type().c_str())) 
+    {
+      if (newSubGraph) 
+      {
+        // If it is the beginning of a new subGraph, we start a new vector
+        sub_graph_collection.emplace_back();
+        newSubGraph = false;
+      }
+      // We add the new node to the last graph
+      sub_graph_collection.back().emplace_back(node_idx);
+    } else 
+    {
+      // This is not a supported node, reset the newSubGraph
+      cout << "Found unsupported node: " << node.op_type().c_str() << endl;
+      newSubGraph = true;
+      allSupported = false;
     }
   }
-  return true;
+  return allSupported; 
 }
 
 bool ModelImporter::supportsOperator(const char* op_name) const {
