@@ -1868,35 +1868,44 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
 
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
   nvinfer1::Dims old_shape = tensor.getDimensions();
   int ndim_in = old_shape.nbDims;
   OnnxAttrs attrs(node);
   auto axes = attrs.get<std::vector<int>>("axes");
-  // Note: Can't handle batch dim as it is implicit in TRT
-  for( auto& axis : axes ) {
-    ASSERT(axis >= 0, ErrorCode::kUNSUPPORTED_NODE);
-    TRT_CHECK(convert_axis(axis,ndim_in));
-  }
   std::set<int> axes_set(axes.begin(), axes.end());
   int ndim_out = ndim_in + axes_set.size();
-  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS,
-         ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims new_shape;
   new_shape.nbDims = ndim_out;
-  for( int i=0,j=0; j<new_shape.nbDims; ++j ) {
-    if( !axes_set.count(j) ) {
-      new_shape.d[j] = old_shape.d[i++];
-    } else {
-      new_shape.d[j] = 1;
-    }
+
+  // If the input was already a tensor, then we're dealing with a TRT shape,
+  // so subtract 1 from the axes. Otherwise, this is an ONNX shape.
+  if (inputs.at(0).is_tensor())
+  {
+      for (auto& axis : axes)
+      {
+          ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+          --axis;
+      }
+  }
+
+  for (int i = 0, j = 0; j < new_shape.nbDims; ++j )
+  {
+      if( !axes_set.count(j) )
+      {
+          new_shape.d[j] = old_shape.d[i++];
+      }
+      else
+      {
+          new_shape.d[j] = 1;
+      }
   }
   nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   layer->setReshapeDimensions(new_shape);
-  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
-         get_shape_size(old_shape), ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) == get_shape_size(old_shape),
+      ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(layer);
 }
 #endif // NV_TENSORRT_MAJOR >= 4
