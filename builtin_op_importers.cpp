@@ -1042,6 +1042,25 @@ DEFINE_BUILTIN_OP_IMPORTER(Identity) {
   RETURN_IDENTITY(inputs.at(0));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(ImageScaler) {
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    OnnxAttrs attrs{node};
+    // Shift the input by a per-channel bias value.
+    std::vector<float> biases = attrs.get<std::vector<float>>("bias");
+    nvinfer1::Dims dims{1, static_cast<int>(biases.size())};
+    ShapedWeights shiftWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, dims);
+    std::copy(biases.begin(), biases.end(), static_cast<float*>(shiftWeights.values));
+    // Scale is applied to every element of the input, but we need to duplicate it over every channel.
+    float scale = attrs.get<float>("scale", 1.0f);
+    ShapedWeights scaleWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, dims);
+    std::fill(static_cast<float*>(scaleWeights.values), static_cast<float*>(scaleWeights.values) + scaleWeights.count(), scale);
+    // Finally add the scale layer.
+    RETURN_FIRST_OUTPUT(
+        ctx->network()->addScale(inputs.at(0).tensor(), nvinfer1::ScaleMode::kCHANNEL,
+            shiftWeights, scaleWeights, nvinfer1::Weights{})
+    );
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
