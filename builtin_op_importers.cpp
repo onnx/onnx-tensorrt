@@ -313,7 +313,7 @@ Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs,
     bool broadcast = attrs.get<int>("broadcast");
     ASSERT(broadcast || dims.nbDims == 1, ErrorCode::kINVALID_NODE);
     int axis = attrs.get<int>("axis", -1);
-    TRT_CHECK(convert_tensor(axis, dims.nbDims, true));
+    TRT_CHECK(convert_axis(axis, dims.nbDims));
     ASSERT(axis == 0, ErrorCode::kUNSUPPORTED_NODE);
   }
   return Status::success();
