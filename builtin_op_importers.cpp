@@ -1534,7 +1534,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   nvinfer1::Dims dims = tensor_ptr->getDimensions();
   int nbDims = dims.nbDims;
   OnnxAttrs attrs(node);
-  ASSERT(attrs.count("axes"), ErrorCode::kINVALID_NODE);
+  // We don't support implicit indexing due to
+  // inability to deal with batch dim slicing
+  // (TRT doesn't support batch dim slicing)
+  ASSERT(attrs.count("axes"), ErrorCode::kUNSUPPORTED_NODE);
   auto axes = attrs.get<std::vector<int>>("axes");
   auto starts = attrs.get<std::vector<int>>("starts");
   auto ends = attrs.get<std::vector<int>>("ends");
@@ -1545,12 +1548,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   bool need_to_expand_dims = nbDims < 3;
 
   // Argument validation
-
-  // We don't support implicit indexing due to
-  // inability to deal with batch dim slicing
-  // (TRT doesn't support batch dim slicing)
-  ASSERT(axes.size() != 0, ErrorCode::kUNSUPPORTED_NODE);
-
   // Since indexing is explicit, there must be
   // equal number of axis, start and end indices
   ASSERT((axes.size() == starts.size())
