@@ -1534,14 +1534,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   nvinfer1::Dims dims = tensor_ptr->getDimensions();
   int nbDims = dims.nbDims;
   OnnxAttrs attrs(node);
+  ASSERT(attrs.count("axes"), ErrorCode::kINVALID_NODE);
   auto axes = attrs.get<std::vector<int>>("axes");
   auto starts = attrs.get<std::vector<int>>("starts");
   auto ends = attrs.get<std::vector<int>>("ends");
   int H_idx = -1, W_idx = -1;
   // This will be modified to contain expanded dims metadata,
   // if needed (e.g. input tensor is 2D)
-  int artificial_dims = 0;
-  bool need_to_expand_dims = dims.nbDims < 3;
+  int num_artificial_dims = 0;
+  bool need_to_expand_dims = nbDims < 3;
 
   // Argument validation
 
@@ -1557,18 +1558,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
 
   for (size_t i = 0; i < axes.size(); ++i)
   {
+    int axis = axis[i];
     // We don't allow slicing batch dim, due to TRT limitations
-    ASSERT(axes[i] > 0 && axes[i] <= nbDims, ErrorCode::kUNSUPPORTED_NODE);
+    TRT_CHECK(convert_axis(axis, nbDims));
 
-    starts[i] = slice_clip_index(dims.d[axes[i]-1], starts[i]);
-    ends[i] = slice_clip_index(dims.d[axes[i]-1], ends[i]);
+    starts[i] = slice_clip_index(dims.d[axis], starts[i]);
+    ends[i] = slice_clip_index(dims.d[axis], ends[i]);
 
     // TRT only supports slicing HW dims when using padding layer,
     // so if user wants to slice some other axis, we check whether
     // slice contains full dimension
     if (axes[i] != nbDims-1 && axes[i] != nbDims)
     {
-      ASSERT((ends[i] - starts[i]) == dims.d[axes[i]-1], ErrorCode::kUNSUPPORTED_NODE);
+      ASSERT((ends[i] - starts[i]) == dims.d[axis], ErrorCode::kUNSUPPORTED_NODE);
     }
     else
     {
@@ -1590,23 +1592,23 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   {
     nvinfer1::Dims expanded_dims;
     expanded_dims.nbDims = 3;
-    artificial_dims = 3 - dims.nbDims;
-    for (int i = 0; i < artificial_dims; ++i)
+    num_artificial_dims = 3 - nbDims;
+    for (int i = 0; i < num_artificial_dims; ++i)
     {
       expanded_dims.d[i] = 1;
     }
-    for (int i = 0; i < dims.nbDims; ++i)
+    for (int i = 0; i < nbDims; ++i)
     {
-      expanded_dims.d[artificial_dims + i] = dims.d[i];
+      expanded_dims.d[num_artificial_dims + i] = dims.d[i];
     }
     tensor_ptr = reshape_tensor(ctx, *tensor_ptr, expanded_dims);
   }
 
   nvinfer1::DimsHW start_pad, end_pad;
   start_pad.h() = (H_idx != -1) ? starts[H_idx] : 0;
-  end_pad.h() = (H_idx != -1) ? dims.d[dims.nbDims - 2] - ends[H_idx] : 0;
+  end_pad.h() = (H_idx != -1) ? dims.d[nbDims - 2] - ends[H_idx] : 0;
   start_pad.w() = (W_idx != -1) ? starts[W_idx] : 0;
-  end_pad.w() = (W_idx != -1) ? dims.d[dims.nbDims - 1] - ends[W_idx] : 0;
+  end_pad.w() = (W_idx != -1) ? dims.d[nbDims - 1] - ends[W_idx] : 0;
 
   auto layer_ptr = ctx->network()->addPadding(*tensor_ptr, -start_pad, -end_pad);
   ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
@@ -1616,13 +1618,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   if (need_to_expand_dims)
   {
     nvinfer1::Dims expanded_dims;
-    int original_dims_nb = dims.nbDims;
+    int original_dims_nb = nbDims;
     nvinfer1::Dims squeezed_dims;
     expanded_dims = layer_out->getDimensions();
     squeezed_dims.nbDims = original_dims_nb;
     for (int i = 0; i < original_dims_nb; ++i)
     {
-      squeezed_dims.d[i] = expanded_dims.d[artificial_dims + i];
+      squeezed_dims.d[i] = expanded_dims.d[num_artificial_dims + i];
     }
     tensor_ptr = reshape_tensor(ctx, *layer_out, squeezed_dims);
   }
