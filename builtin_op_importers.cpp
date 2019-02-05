@@ -1643,7 +1643,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
 
   for (size_t i = 0; i < axes.size(); ++i)
   {
-    int axis = axis[i];
+    int axis = axes[i];
     // We don't allow slicing batch dim, due to TRT limitations
     TRT_CHECK(convert_axis(axis, nbDims));
 
