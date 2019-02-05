@@ -247,8 +247,42 @@ inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tenso
   return true;
 }
 
+// Returns the input if it is already a tensor. If it is of type ShapedWeights, adds a new
+// constant layer to the TRT network and returns its output.
+inline nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx)
+{
+    if (input.is_tensor())
+    {
+        return input.tensor();
+    }
+    else
+    {
+        // Handle non-tensor indices input by adding a new constant layer to the network.
+        const ShapedWeights& weights = input.weights();
+        return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+    }
+
+}
+
 inline int div_ceil(int n, int d) {
   return (n - 1) / d + 1;
+}
+
+// Convert an ONNX axis into a TRT axis
+inline Status convert_axis(int& axis, int nbDims)
+{
+  // Support negative indexing
+  if (axis < 0)
+  {
+    axis += nbDims;
+  }
+  // If axis was positive, subtract 1 to strip batch dimension
+  else
+  {
+    axis = axis - 1;
+  }
+  ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+  return Status::success();
 }
 
 inline int get_conv_output_size(int input_size, int filter_size,

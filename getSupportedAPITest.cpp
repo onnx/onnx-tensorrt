@@ -24,7 +24,6 @@
 #include <fstream>
 #include <unistd.h> // For ::getopt
 #include <string>
-
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
 #include "common.hpp"
@@ -73,7 +72,6 @@ int main(int argc, char* argv[]) {
     size_t max_batch_size = 32;
     size_t max_workspace_size = 1 << 30;
     int verbosity = (int)nvinfer1::ILogger::Severity::kWARNING;
-
     while ((c = getopt (argc, argv, "m:e:")) != -1)
     {
         switch(c)

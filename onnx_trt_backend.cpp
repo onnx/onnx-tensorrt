@@ -791,7 +791,6 @@ onnxGetBackendCompatibility(onnxBackendID backendID, size_t onnxModelSize,
     if (onnxModelSize == 0) {
       return ONNXIFI_STATUS_INVALID_SIZE;
     }
-
     common::TRT_Logger trt_logger;
     auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
     auto trt_network = common::infer_object(trt_builder->createNetwork());
