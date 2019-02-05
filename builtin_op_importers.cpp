@@ -36,6 +36,16 @@ namespace {
 
 enum { BATCH_DIM = 0 };
 
+// Takes idx from [MIN_INT, MAX_INT] to [0, ax_size] (for Slice op)
+int slice_clip_index(int ax_size, int idx)
+{
+  if (idx < 0)
+  {
+    idx += ax_size;
+  }
+  return std::min(std::max(idx, 0), ax_size);
+}
+
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 bool is_transpose_required(nvinfer1::Dims const& shape,
                            nvinfer1::Permutation const& perm) {
@@ -313,7 +323,7 @@ Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs,
     bool broadcast = attrs.get<int>("broadcast");
     ASSERT(broadcast || dims.nbDims == 1, ErrorCode::kINVALID_NODE);
     int axis = attrs.get<int>("axis", -1);
-    TRT_CHECK(convert_tensor(axis, dims.nbDims, true));
+    TRT_CHECK(convert_axis(axis, dims.nbDims));
     ASSERT(axis == 0, ErrorCode::kUNSUPPORTED_NODE);
   }
   return Status::success();
@@ -937,6 +947,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
   ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
   return {{tensor_ptr}};
 }
+
+#if NV_TENSORRT_MAJOR >= 4
+DEFINE_BUILTIN_OP_IMPORTER(Gather) {
+    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
+    OnnxAttrs attrs(node);
+    int axis = attrs.get<int>("axis", 0);
+    int nbDims = inputs.at(0).shape().nbDims;
+    TRT_CHECK(convert_axis(axis, nbDims));
+    RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
+}
+#endif // NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
@@ -1594,6 +1616,110 @@ DEFINE_BUILTIN_OP_IMPORTER(Size) {
   return {{weights}};
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Slice) {
+  ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+  nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+  int nbDims = dims.nbDims;
+  OnnxAttrs attrs(node);
+  // We don't support implicit indexing due to
+  // inability to deal with batch dim slicing
+  // (TRT doesn't support batch dim slicing)
+  ASSERT(attrs.count("axes"), ErrorCode::kUNSUPPORTED_NODE);
+  auto axes = attrs.get<std::vector<int>>("axes");
+  auto starts = attrs.get<std::vector<int>>("starts");
+  auto ends = attrs.get<std::vector<int>>("ends");
+  int H_idx = -1, W_idx = -1;
+  // This will be modified to contain expanded dims metadata,
+  // if needed (e.g. input tensor is 2D)
+  int num_artificial_dims = 0;
+  bool need_to_expand_dims = nbDims < 3;
+
+  // Argument validation
+  // Since indexing is explicit, there must be
+  // equal number of axis, start and end indices
+  ASSERT((axes.size() == starts.size())
+    && (starts.size() == ends.size()), ErrorCode::kUNSUPPORTED_NODE);
+
+  for (size_t i = 0; i < axes.size(); ++i)
+  {
+    int axis = axis[i];
+    // We don't allow slicing batch dim, due to TRT limitations
+    TRT_CHECK(convert_axis(axis, nbDims));
+
+    starts[i] = slice_clip_index(dims.d[axis], starts[i]);
+    ends[i] = slice_clip_index(dims.d[axis], ends[i]);
+
+    // TRT only supports slicing HW dims when using padding layer,
+    // so if user wants to slice some other axis, we check whether
+    // slice contains full dimension
+    if (axes[i] != nbDims-1 && axes[i] != nbDims)
+    {
+      ASSERT((ends[i] - starts[i]) == dims.d[axis], ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+      if (axes[i] == nbDims-1)
+      {
+        H_idx = i;
+      }
+      else if (axes[i] == nbDims)
+      {
+        W_idx = i;
+      }
+    }
+  }
+
+  // This case requires hack where you unsqueeze input tensor
+  // before running TRT padding layer, since it accepts tensors
+  // of dimension >= 3 [not counting batch dim]
+  if (need_to_expand_dims)
+  {
+    nvinfer1::Dims expanded_dims;
+    expanded_dims.nbDims = 3;
+    num_artificial_dims = 3 - nbDims;
+    for (int i = 0; i < num_artificial_dims; ++i)
+    {
+      expanded_dims.d[i] = 1;
+    }
+    for (int i = 0; i < nbDims; ++i)
+    {
+      expanded_dims.d[num_artificial_dims + i] = dims.d[i];
+    }
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, expanded_dims);
+  }
+
+  nvinfer1::DimsHW start_pad, end_pad;
+  start_pad.h() = (H_idx != -1) ? starts[H_idx] : 0;
+  end_pad.h() = (H_idx != -1) ? dims.d[nbDims - 2] - ends[H_idx] : 0;
+  start_pad.w() = (W_idx != -1) ? starts[W_idx] : 0;
+  end_pad.w() = (W_idx != -1) ? dims.d[nbDims - 1] - ends[W_idx] : 0;
+
+  auto layer_ptr = ctx->network()->addPadding(*tensor_ptr, -start_pad, -end_pad);
+  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  auto layer_out = layer_ptr->getOutput(0);
+
+  // Squeeze back artificial dimensions introduced earlier
+  if (need_to_expand_dims)
+  {
+    nvinfer1::Dims expanded_dims;
+    int original_dims_nb = nbDims;
+    nvinfer1::Dims squeezed_dims;
+    expanded_dims = layer_out->getDimensions();
+    squeezed_dims.nbDims = original_dims_nb;
+    for (int i = 0; i < original_dims_nb; ++i)
+    {
+      squeezed_dims.d[i] = expanded_dims.d[num_artificial_dims + i];
+    }
+    tensor_ptr = reshape_tensor(ctx, *layer_out, squeezed_dims);
+  }
+  else // No squeezing required, we'll just return padding layer result
+  {
+    tensor_ptr = layer_out;
+  }
+  return {{tensor_ptr}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
@@ -1856,35 +1982,44 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
 
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
   nvinfer1::Dims old_shape = tensor.getDimensions();
   int ndim_in = old_shape.nbDims;
   OnnxAttrs attrs(node);
   auto axes = attrs.get<std::vector<int>>("axes");
-  // Note: Can't handle batch dim as it is implicit in TRT
-  for( auto& axis : axes ) {
-    ASSERT(axis >= 0, ErrorCode::kUNSUPPORTED_NODE);
-    TRT_CHECK(convert_axis(axis,ndim_in));
-  }
   std::set<int> axes_set(axes.begin(), axes.end());
   int ndim_out = ndim_in + axes_set.size();
-  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS,
-         ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims new_shape;
   new_shape.nbDims = ndim_out;
-  for( int i=0,j=0; j<new_shape.nbDims; ++j ) {
-    if( !axes_set.count(j) ) {
-      new_shape.d[j] = old_shape.d[i++];
-    } else {
-      new_shape.d[j] = 1;
-    }
+
+  // If the input was already a tensor, then we're dealing with a TRT shape,
+  // so subtract 1 from the axes. Otherwise, this is an ONNX shape.
+  if (inputs.at(0).is_tensor())
+  {
+      for (auto& axis : axes)
+      {
+          ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+          --axis;
+      }
+  }
+
+  for (int i = 0, j = 0; j < new_shape.nbDims; ++j )
+  {
+      if( !axes_set.count(j) )
+      {
+          new_shape.d[j] = old_shape.d[i++];
+      }
+      else
+      {
+          new_shape.d[j] = 1;
+      }
   }
   nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   layer->setReshapeDimensions(new_shape);
-  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
-         get_shape_size(old_shape), ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) == get_shape_size(old_shape),
+      ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(layer);
 }
 #endif // NV_TENSORRT_MAJOR >= 4
