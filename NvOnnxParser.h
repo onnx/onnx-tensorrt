@@ -100,6 +100,10 @@ class IParser
 {
 public:
     /** \brief Parse a serialized ONNX model into the TensorRT network.
+     *         This method has very limited diagnostic. If parsing the serialized model
+     *         fails for any reason (e.g. unsupported IR version, unsupported opset, etc.)
+     *         it the user responsibility to intercept and report the error.
+     *         To obtain a better diagnostic, use the parseFromFile method below. 
      *
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
@@ -108,7 +112,19 @@ public:
      * \see getNbErrors() getError()
      */
     virtual bool parse(void const* serialized_onnx_model,
-                       size_t      serialized_onnx_model_size) = 0;
+                       size_t serialized_onnx_model_size)
+        = 0;
+
+    /** \brief Parse an onnx model file, can be a binary protobuf or a text onnx model 
+     *         calls parse method inside.  
+     *
+     * \param File name
+     * \param Verbosity Level
+     *        
+     * \return true if the model was parsed successfully
+     * 
+     */
+    virtual bool parseFromFile(const char* onnxModelFile, int verbosity) = 0;
 
     /** \brief Check whether TensorRT supports a particular ONNX model
      *
@@ -199,11 +215,11 @@ namespace
  * \return a new parser object or NULL if an error occurred
  * \see IParser
  */
-inline IParser* createParser(nvinfer1::INetworkDefinition* network,
+inline IParser* createParser(nvinfer1::INetworkDefinition& network,
                              nvinfer1::ILogger& logger)
 {
     return static_cast<IParser*>(
-        createNvOnnxParser_INTERNAL(network, &logger, NV_ONNX_PARSER_VERSION));
+        createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
 }
 
 } // namespace
