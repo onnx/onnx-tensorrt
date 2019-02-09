@@ -102,14 +102,11 @@ class TensorRTBackendRep(BackendRep):
             self.builder.set_max_batch_size(max_batch_size)
             self.builder.set_max_workspace_size(max_workspace_size)
 
-        # for layer in self.network:
-        #     print(layer.name)
-        print ()
-        print ("Running Test: ")
-        #print (model)
-        print (model.graph.name)
+        for layer in self.network:
+            print(layer.name)
 
         print(self.network[-1].get_output(0).shape)
+        import pdb; pdb.set_trace()
             
         trt_engine = self.builder.build_cuda_engine(self.network)
         if trt_engine is None:
@@ -150,8 +147,6 @@ class TensorRTBackendRep(BackendRep):
         """
         if isinstance(inputs, np.ndarray):
             inputs = [inputs]
-        print ("Inputs: ")
-        print (inputs)
         outputs = self.engine.run(inputs)
         output_names = [output.name for output in self.engine.outputs]
         for i, (name, array) in enumerate(zip(output_names, outputs)):
@@ -172,8 +167,6 @@ class TensorRTBackendRep(BackendRep):
                 # HACK WAR replace fixed batch dim with variable
                 output_shape = (-1,) + output_shape[1:]
                 outputs[i] = array.reshape(output_shape)
-        print ("Outputs:")
-        print (outputs)
         outputs_tuple = namedtupledict('Outputs', output_names)(*outputs)
         return namedtupledict('Outputs', output_names)(*outputs)
 
