@@ -236,7 +236,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)  {
     << common::onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << ")." << endl;
   }
 
-  //...Read input file, parse it
+  // Read input file
   std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
   std::streamsize file_size = onnx_file.tellg();
   onnx_file.seekg(0, std::ios::beg);
@@ -248,6 +248,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)  {
     cerr << "ERROR: Failed to read from file " << onnxModelFile << endl;
     return false;
   }
+  // If the parsing hits an assertion, print failure information
   if (!parse(onnx_buf.data(), onnx_buf.size())) 
   {
     int nerror = getNbErrors();
