@@ -122,8 +122,13 @@ list(APPEND GPU_ARCHS
     53
     61
     70
-    75
     )
+
+# Add SM 75 for CUDA versions >= 10.0
+if (NOT ("${CUDA_VERSION}" VERSION_LESS "10.0"))
+  list(APPEND GPU_ARCHS
+    75)
+endif()
 
 set(CUDA_VERBOSE_BUILD ON)
 
