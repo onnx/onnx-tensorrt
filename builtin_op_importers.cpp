@@ -1339,21 +1339,24 @@ DEFINE_BUILTIN_OP_IMPORTER(Pow) {
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
 }
 
-DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
-  ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-  ShapedWeights weights = inputs.at(1).weights();
-  ASSERT(weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
-         ErrorCode::kUNSUPPORTED_NODE);
-  // TODO: Add support for per-channel scale factor
-  nvinfer1::Dims scalar_shape{1, {1}};
-  ASSERT(weights.shape == scalar_shape, ErrorCode::kUNSUPPORTED_NODE);
-  float alpha = *reinterpret_cast<float const*>(weights.values);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
-         new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
-         {&inputs.at(0).tensor()}));
-}
+// TODO: Prelu is currently ONLY supported with a constant scale factor, making it
+// identcal with LeakyRelu. Removing the op from the registry until it is fully supported.
+
+// DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
+//   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
+//   ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+//   ShapedWeights weights = inputs.at(1).weights();
+//   ASSERT(weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
+//          ErrorCode::kUNSUPPORTED_NODE);
+//   // TODO: Add support for per-channel scale factor
+//   nvinfer1::Dims scalar_shape{1, {1}};
+//   ASSERT(weights.shape == scalar_shape, ErrorCode::kUNSUPPORTED_NODE);
+//   float alpha = *reinterpret_cast<float const*>(weights.values);
+//   RETURN_FIRST_OUTPUT(
+//       ctx->addPlugin(
+//          new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
+//          {&inputs.at(0).tensor()}));
+// }
 
 DEFINE_BUILTIN_OP_IMPORTER(Reciprocal) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kRECIP);
