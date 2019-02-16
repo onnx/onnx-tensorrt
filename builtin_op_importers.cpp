@@ -1339,8 +1339,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Pow) {
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
 }
 
-// TODO: Prelu is currently supported with a constant scale factor (aka LeakyRelu) 
-// Removing the op from the registry until it is fully supported.
+// TODO: Prelu is currently ONLY supported with a constant scale factor, making it
+// identcal with LeakyRelu. Removing the op from the registry until it is fully supported.
 
 // DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
 //   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
