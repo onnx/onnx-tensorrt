@@ -25,15 +25,22 @@
 #include <unistd.h> // For ::getopt
 #include <string>
 
+
 #include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
-#include "api_utils.h"
-
+#include "common.hpp"
 
 using std::cout;
 using std::cerr;
 using std::endl;
+
+void print_usage() {
+  cout << "This program will determine whether or not an ONNX model is compatible with TensorRT. " 
+       << "If it isn't, a list of supported subgraphs and unsupported operations will be printed." << endl;
+  cout << "Usage: getSupportedAPITest -m onnx_model.pb" << endl;
+  cout << "Optional argument: -e TRT_engine" << endl;
+}
 
 void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
 {
@@ -68,7 +75,6 @@ int main(int argc, char* argv[]) {
     size_t max_batch_size = 32;
     size_t max_workspace_size = 1 << 30;
     int verbosity = (int)nvinfer1::ILogger::Severity::kWARNING;
-
     while ((c = getopt (argc, argv, "m:e:")) != -1)
     {
         switch(c)
@@ -88,13 +94,13 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
-    auto trt_builder = infer_object(nvinfer1::createInferBuilder(trt_logger));
-    auto trt_network = infer_object(trt_builder->createNetwork());
-    auto trt_parser  = infer_object(nvonnxparser::createParser(trt_network.get(), trt_logger));
+    common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
+    auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
+    auto trt_network = common::infer_object(trt_builder->createNetwork());
+    auto trt_parser  = common::infer_object(nvonnxparser::createParser(trt_network.get(), trt_logger));
 
     cout << "Parsing model: " << onnx_filename << endl;
-
+    
     std::ifstream onnx_file(onnx_filename.c_str(),
                             std::ios::binary | std::ios::ate);
     std::streamsize file_size = onnx_file.tellg();
@@ -107,7 +113,7 @@ int main(int argc, char* argv[]) {
     }
 
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
+    common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
 
     SubGraphCollection_t SubGraphCollection;
 
@@ -130,12 +136,12 @@ int main(int argc, char* argv[]) {
         cout << "num layers: " << trt_network->getNbLayers() << endl;
         cout << "outputs: " << trt_network->getNbOutputs() << endl;
 
-        auto trt_engine = infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
+        auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
     
         if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {
             cout << "Writing TensorRT engine to " << engine_filename << endl;
         }
-        auto engine_plan = infer_object(trt_engine->serialize());
+        auto engine_plan = common::infer_object(trt_engine->serialize());
         std::ofstream engine_file(engine_filename.c_str(), std::ios::binary);
         engine_file.write(reinterpret_cast<const char*>(engine_plan->data()), engine_plan->size());
         engine_file.close();
@@ -146,3 +152,4 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
