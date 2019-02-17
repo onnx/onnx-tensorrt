@@ -124,8 +124,13 @@ list(APPEND GPU_ARCHS
     53
     61
     70
-    75
     )
+
+# Add SM 75 for CUDA versions >= 10.0
+if (NOT ("${CUDA_VERSION}" VERSION_LESS "10.0"))
+  list(APPEND GPU_ARCHS
+    75)
+endif()
 
 set(CUDA_VERBOSE_BUILD ON)
 
@@ -278,6 +283,16 @@ add_library(getSupportedAPITest STATIC ${API_TESTS_SOURCES}) ##
 target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
 target_link_libraries(getSupportedAPITest PUBLIC protobuf::libprotobuf nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) ##
+
+
+# --------------------------------
+# API Tests
+# --------------------------------
+
+add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
+target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
+
+target_link_libraries(getSupportedAPITest PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 
 # --------------------------------
