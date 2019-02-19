@@ -286,16 +286,6 @@ target_link_libraries(getSupportedAPITest PUBLIC protobuf::libprotobuf nvonnxpar
 
 
 # --------------------------------
-# API Tests
-# --------------------------------
-
-add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
-target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
-
-target_link_libraries(getSupportedAPITest PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
-
-
-# --------------------------------
 # Installation
 # --------------------------------
 install(TARGETS onnx2trt
