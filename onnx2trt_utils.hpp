@@ -294,6 +294,22 @@ inline int get_conv_output_size(int input_size, int filter_size,
   return div_ceil(effective_input_size - (effective_filter_size - 1), stride);
 }
 
+// Helper function to help extract the index of a potential -1 dimension in the reshape node
+inline Status get_infer_dim(int& infer_dim, nvinfer1::Dims const& new_shape) {
+  for (int i = 0; i < new_shape.nbDims; ++i) {
+    if (new_shape.d[i] < 0) {
+      // -1 bears special meaning, which means the current dimension can
+      // be inferred while keepin the total number of elements the same.
+      // https://github.com/onnx/onnx/blob/9b9f595107e3fc0295d50f6294d43879df17552f/onnx/defs/tensor/defs.cc#L73-L75
+      ASSERT(new_shape.d[i] == -1, ErrorCode::kUNSUPPORTED_NODE);
+      // We can only one dimension that has -1
+      ASSERT(infer_dim == -1, ErrorCode::kUNSUPPORTED_NODE);
+      infer_dim = i;
+    }
+  }
+  return Status::success();
+}
+
 void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
                        nvinfer1::DimsHW const& input_shape,
                        nvinfer1::DimsHW* kernel_size,
