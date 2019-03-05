@@ -1217,9 +1217,42 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   get_kernel_params(node, get_DimsHW_from_CHW(dims),
                     &kernel_size, &strides, &beg_padding, &end_padding);
   if( beg_padding != end_padding ) {
+
     auto* layer = ctx->network()->addPadding(*tensor_ptr, beg_padding, end_padding);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
     tensor_ptr = layer->getOutput(0);
+    ASSERT(tensor_ptr->getType() == nvinfer1::DataType::kFLOAT, ErrorCode::kUNSUPPORTED_NODE);
+
+    // TODO: Since TensorRT only 0 pads, need to do an elementwise ADD with
+    // -INFINITY on the padded dimensions to ensure max pooling functions as expected.
+    // This negatively impacts performance. Update when non-zero padding is supported in a 
+    // future TRT version.
+
+    nvinfer1::Dims padded_dims = tensor_ptr->getDimensions();
+    ASSERT(padded_dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Scale channel down to 1.
+    padded_dims.d[0] = 1;
+    // Create values for weights object.
+    std::vector<float>pad_values(get_shape_size(padded_dims),0.0f);
+    // Populate values for weights object
+    update_padded_values(pad_values, beg_padding, end_padding, padded_dims, -INFINITY);
+
+    ShapedWeights pad_scale = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, padded_dims);
+
+    // Populate pad_scale with values.
+    std::copy(pad_values.begin(), pad_values.end(), static_cast<float*>(pad_scale.values));
+
+    // Add constant layer to populate the Weights down the network.
+    auto* constant_layer = ctx->network()->addConstant(padded_dims, pad_scale);
+    ASSERT(constant_layer, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* scale_constant = constant_layer->getOutput(0);
+
+    // Add elementwise sum layer to do a "-INFINITY" pad.
+    auto* sum_layer = ctx->network()->addElementWise(*tensor_ptr, *scale_constant,
+      nvinfer1::ElementWiseOperation::kSUM);
+    ASSERT(sum_layer, ErrorCode::kUNSUPPORTED_NODE);
+    tensor_ptr = sum_layer->getOutput(0);
   }
   nvinfer1::IPoolingLayer* layer = ctx->network()->addPooling(
     *tensor_ptr, nvinfer1::PoolingType::kMAX, kernel_size);
@@ -1518,7 +1551,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
          get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(layer);
 #endif // NV_TENSORRT_MAJOR >= 4
-  }
 }
 
 //DEFINE_BUILTIN_OP_IMPORTER(RNN) {

@@ -316,4 +316,58 @@ inline nvinfer1::ScaleMode get_scale_mode(nvinfer1::Dims const& weights_shape) {
   }
 }
 
+inline void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW beg_padding,
+  const nvinfer1::DimsHW end_padding, const nvinfer1::Dims padded_shape, const float pad_value)
+{
+  int pad_h = padded_shape.d[1];
+  int pad_w = padded_shape.d[2];
+  int num_elements = pad_values.size();
+
+  // Handle H padding. First beg_padding.h * pad_w and last end_padding.h * pad_w
+  // elements need to be updated to pad_value
+  if (beg_padding.h() != 0)
+  {
+    int end = beg_padding.h() * pad_w;
+    for (int i = 0; i < end; i++)
+    {
+      pad_values[i] = pad_value;
+    }
+  }
+  if (end_padding.h() != 0)
+  {
+    for (int start = (pad_h - end_padding.h()) * pad_w; 
+        start < num_elements; start++)
+    {
+      pad_values[start] = pad_value;
+    }
+
+  }
+  // Handle W padding. First beg_padding.w() and last end_padding.w() 
+  // elements of each row needs to be updated to pad_value
+  if (beg_padding.w() != 0)
+  {
+    for (int h_dim = 0; h_dim < pad_h; h_dim++)
+    {
+      for (int w_dim = 0; w_dim < beg_padding.w(); w_dim++)
+      {
+        int row_base_index = h_dim*pad_h;
+        pad_values[row_base_index + w_dim] = pad_value;
+      }
+    }
+  }
+  if (end_padding.w() != 0)
+  {
+    for (int h_dim = 0; h_dim < pad_h; h_dim++)
+    {
+      for (int w_dim = pad_w - end_padding.w();
+          w_dim < pad_w; w_dim++)
+      {
+        int row_base_index = h_dim*pad_h;
+        pad_values[row_base_index + w_dim] = pad_value;
+      }
+    }
+  }
+}
+
+
 } // namespace onnx2trt
