@@ -106,8 +106,7 @@ class TensorRTBackendRep(BackendRep):
             print(layer.name)
 
         print(self.network[-1].get_output(0).shape)
-        import pdb; pdb.set_trace()
-            
+
         trt_engine = self.builder.build_cuda_engine(self.network)
         if trt_engine is None:
             raise RuntimeError("Failed to build TensorRT engine from network")

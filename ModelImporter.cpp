@@ -136,7 +136,8 @@ Status importInputs(ImporterContext* importer_ctx,
 }
 
 NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& node,
-                                           std::vector<TensorOrWeights>& inputs) {
+                                           std::vector<TensorOrWeights>& inputs,
+                                           std::vector<std::string>& output_names) {
   if( !_op_importers.count(node.op_type()) ) {
     return MAKE_ERROR("No importer registered for op: " + node.op_type(),
                       ErrorCode::kUNSUPPORTED_NODE);
@@ -146,6 +147,21 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
   std::vector<TensorOrWeights> outputs;
   GET_VALUE(node_importer(&_importer_ctx, node, inputs), &outputs);
   ASSERT(outputs.size() <= (size_t)node.output().size(), ErrorCode::kINTERNAL_ERROR);
+
+  // Check if output's node name is a graph's output.
+  bool is_graph_output = false;
+  for (size_t i = 0; i < (size_t)node.output().size(); i++)
+  {
+    for (size_t j = 0; j < output_names.size(); j++)
+    {
+      if (node.output(i) == output_names[j])
+      {
+        is_graph_output = true;
+        break;
+      }
+    }
+  }
+
   for( size_t i=0; i<outputs.size(); ++i ) {
     std::string node_output_name = node.output(i);
     TensorOrWeights& output = outputs.at(i);
@@ -153,6 +169,15 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
       if( output.is_tensor() ) {
         output.tensor().setName(node_output_name.c_str());
       }
+      else
+        {
+          if (is_graph_output)
+          {
+            outputs.at(i) = TensorOrWeights(&convertToTensor(output, &_importer_ctx));
+            TensorOrWeights& output = outputs.at(i);
+            output.tensor().setName(node_output_name.c_str());
+          }
+        }
       //// TODO: Remove when done testing
       //cout << "Imported " << node.op_type()
       //     << " output tensor '" << node_output_name;
@@ -295,6 +320,14 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     _importer_ctx.addOpset(domain, version);
   }
   ::ONNX_NAMESPACE::GraphProto const& graph = model.graph();
+
+  std::vector<std::string>output_names;
+  int num_outputs = model.graph().output_size();
+  for (int i = 0; i < num_outputs; i++)
+  {
+    output_names.push_back(model.graph().output(i).name());
+  }
+
   string_map<TensorOrWeights> tensors;
   TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors, weight_count,
                          weight_descriptors));
@@ -309,7 +342,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
       inputs.push_back(tensors.at(input_name));
     }
     std::vector<TensorOrWeights> outputs;
-    GET_VALUE(this->importNode(node, inputs), &outputs);
+    GET_VALUE(this->importNode(node, inputs, output_names), &outputs);
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);
