@@ -1129,9 +1129,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LRN) {
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   OnnxAttrs attrs(node);
   int   size  = attrs.get<int>("size");
-  float alpha = attrs.get<float>("alpha");
-  float beta  = attrs.get<float>("beta");
-  float bias  = attrs.get<float>("bias");
+  float alpha = attrs.get<float>("alpha", 0.0001f);
+  float beta  = attrs.get<float>("beta", 0.75f);
+  float bias  = attrs.get<float>("bias", 1.0f);
   RETURN_FIRST_OUTPUT(
     ctx->network()->addLRN(tensor, size, alpha, beta, bias));
 }
