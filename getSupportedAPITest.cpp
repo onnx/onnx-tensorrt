@@ -114,7 +114,6 @@ int main(int argc, char* argv[]) {
     {
         cout << "Failure while parsing ONNX file" << endl;
         return -1;
-
     }
 
     SubGraphCollection_t SubGraphCollection;
