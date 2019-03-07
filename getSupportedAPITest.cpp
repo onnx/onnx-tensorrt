@@ -106,15 +106,14 @@ int main(int argc, char* argv[]) {
 
     if( !onnx_file.read(onnx_buf.data(), onnx_buf.size()) ) {
         cerr << "ERROR: Failed to read from file " << onnx_filename << endl;
-        return 1;
+        return -1;
     }
 
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    if (!trt_parser->parseFromFile(onnx_buf.data(), verbosity))
+    if (!common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str()))
     {
         cout << "Failure while parsing ONNX file" << endl;
-        return 1;
-
+        return -1;
     }
 
     SubGraphCollection_t SubGraphCollection;

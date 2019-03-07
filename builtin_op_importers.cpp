@@ -1207,9 +1207,42 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   get_kernel_params(node, get_DimsHW_from_CHW(dims),
                     &kernel_size, &strides, &beg_padding, &end_padding);
   if( beg_padding != end_padding ) {
+
     auto* layer = ctx->network()->addPadding(*tensor_ptr, beg_padding, end_padding);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
     tensor_ptr = layer->getOutput(0);
+    ASSERT(tensor_ptr->getType() == nvinfer1::DataType::kFLOAT, ErrorCode::kUNSUPPORTED_NODE);
+
+    // TODO: Since TensorRT only 0 pads, need to do an elementwise ADD with
+    // -INFINITY on the padded dimensions to ensure max pooling functions as expected.
+    // This negatively impacts performance. Update when non-zero padding is supported in a 
+    // future TRT version.
+
+    nvinfer1::Dims padded_dims = tensor_ptr->getDimensions();
+    ASSERT(padded_dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Scale channel down to 1.
+    padded_dims.d[0] = 1;
+    // Create values for weights object.
+    std::vector<float>pad_values(get_shape_size(padded_dims),0.0f);
+    // Populate values for weights object
+    update_padded_values(pad_values, beg_padding, end_padding, padded_dims, -INFINITY);
+
+    ShapedWeights pad_scale = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, padded_dims);
+
+    // Populate pad_scale with values.
+    std::copy(pad_values.begin(), pad_values.end(), static_cast<float*>(pad_scale.values));
+
+    // Add constant layer to populate the Weights down the network.
+    auto* constant_layer = ctx->network()->addConstant(padded_dims, pad_scale);
+    ASSERT(constant_layer, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* scale_constant = constant_layer->getOutput(0);
+
+    // Add elementwise sum layer to do a "-INFINITY" pad.
+    auto* sum_layer = ctx->network()->addElementWise(*tensor_ptr, *scale_constant,
+      nvinfer1::ElementWiseOperation::kSUM);
+    ASSERT(sum_layer, ErrorCode::kUNSUPPORTED_NODE);
+    tensor_ptr = sum_layer->getOutput(0);
   }
   nvinfer1::IPoolingLayer* layer = ctx->network()->addPooling(
     *tensor_ptr, nvinfer1::PoolingType::kMAX, kernel_size);
@@ -1329,21 +1362,24 @@ DEFINE_BUILTIN_OP_IMPORTER(Pow) {
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
 }
 
-DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
-  ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-  ShapedWeights weights = inputs.at(1).weights();
-  ASSERT(weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
-         ErrorCode::kUNSUPPORTED_NODE);
-  // TODO: Add support for per-channel scale factor
-  nvinfer1::Dims scalar_shape{1, {1}};
-  ASSERT(weights.shape == scalar_shape, ErrorCode::kUNSUPPORTED_NODE);
-  float alpha = *reinterpret_cast<float const*>(weights.values);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
-         new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
-         {&inputs.at(0).tensor()}));
-}
+// TODO: Prelu is currently ONLY supported with a constant scale factor, making it
+// identcal with LeakyRelu. Removing the op from the registry until it is fully supported.
+
+// DEFINE_BUILTIN_OP_IMPORTER(PRelu) {
+//   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
+//   ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+//   ShapedWeights weights = inputs.at(1).weights();
+//   ASSERT(weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
+//          ErrorCode::kUNSUPPORTED_NODE);
+//   // TODO: Add support for per-channel scale factor
+//   nvinfer1::Dims scalar_shape{1, {1}};
+//   ASSERT(weights.shape == scalar_shape, ErrorCode::kUNSUPPORTED_NODE);
+//   float alpha = *reinterpret_cast<float const*>(weights.values);
+//   RETURN_FIRST_OUTPUT(
+//       ctx->addPlugin(
+//          new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
+//          {&inputs.at(0).tensor()}));
+// }
 
 DEFINE_BUILTIN_OP_IMPORTER(Reciprocal) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kRECIP);
@@ -1465,54 +1501,65 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     OnnxAttrs attrs(node);
     new_shape = attrs.get<nvinfer1::Dims>("shape");
   }
-  if( input.is_weights() ) {
-    auto weights = input.weights();
-    ASSERT(get_shape_size(new_shape) == get_shape_size(weights.shape),
-           ErrorCode::kUNSUPPORTED_NODE);
-    weights.shape = new_shape;
-    return {{weights}};
-  } else {
-    nvinfer1::ITensor& tensor = input.tensor();
-    new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
     int infer_dim = -1;
-    for (int i = 0; i < new_shape.nbDims; ++i) {
-      if (new_shape.d[i] < 0) {
-        // -1 bears special meaning, which means the current dimension can
-        // be inferred while keepin the total number of elements the same.
-        // https://github.com/onnx/onnx/blob/9b9f595107e3fc0295d50f6294d43879df17552f/onnx/defs/tensor/defs.cc#L73-L75
-        ASSERT(new_shape.d[i] == -1, ErrorCode::kUNSUPPORTED_NODE);
-        // We can only one dimension that has -1
-        ASSERT(infer_dim == -1, ErrorCode::kUNSUPPORTED_NODE);
-        infer_dim = i;
+    if( input.is_weights() ) {
+      auto weights = input.weights();
+      TRT_CHECK(get_infer_dim(infer_dim,new_shape));
+      cout << node.output(0) << endl;
+      if (infer_dim >= 0)
+      {
+        // Check that the -1 Dimension is correct.
+        ASSERT(get_shape_size(weights.shape) % (-1*get_shape_size(new_shape)) == 0,
+          ErrorCode::kINVALID_NODE);
+
+        // Update the dim to the correct value
+        int new_dim = get_shape_size(weights.shape) / (-1*get_shape_size(new_shape));
+        new_shape.d[infer_dim] = new_dim;
+        weights.shape = new_shape;
+        ASSERT(get_shape_size(new_shape) == get_shape_size(weights.shape),
+           ErrorCode::kUNSUPPORTED_NODE);
+        return {{weights}};
+      }
+      else
+      {
+        weights.shape = new_shape;
+        return {{weights}};
       }
     }
-    if (infer_dim < 0) {
-      ASSERT(get_shape_size(new_shape) ==
-                 get_shape_size(tensor.getDimensions()),
-             ErrorCode::kUNSUPPORTED_NODE);
-    }
+    else
+    {
+      nvinfer1::ITensor& tensor = input.tensor();
+      new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
+      // Check for -1 dimension in new shape
+      TRT_CHECK(get_infer_dim(infer_dim,new_shape));
+      
+      if (infer_dim < 0) {
+        ASSERT(get_shape_size(new_shape) ==
+                   get_shape_size(tensor.getDimensions()),
+               ErrorCode::kUNSUPPORTED_NODE);
+      }
 #if NV_TENSORRT_MAJOR < 4
-    if( new_shape.nbDims == 1 ) {
-      // Note: TRT implicitly flattens the input to FC layers, and in fact
-      //       requires that it still has 4D shape, so in this case we
-      //       simply ignore the reshape.
-      RETURN_IDENTITY(inputs.at(0));
-    } else {
-      ASSERT(new_shape.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+      if( new_shape.nbDims == 1 ) {
+        // Note: TRT implicitly flattens the input to FC layers, and in fact
+        //       requires that it still has 4D shape, so in this case we
+        //       simply ignore the reshape.
+        RETURN_IDENTITY(inputs.at(0));
+      } else {
+        ASSERT(new_shape.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+        nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+        layer->setReshapeDimensions(new_shape);
+        ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
+               get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
+        RETURN_FIRST_OUTPUT(layer);
+      }
+#else // NV_TENSORRT_MAJOR >= 4
       nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
       ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
       layer->setReshapeDimensions(new_shape);
       ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
              get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
       RETURN_FIRST_OUTPUT(layer);
-    }
-#else // NV_TENSORRT_MAJOR >= 4
-    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    layer->setReshapeDimensions(new_shape);
-    ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
-           get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(layer);
 #endif // NV_TENSORRT_MAJOR >= 4
   }
 }
