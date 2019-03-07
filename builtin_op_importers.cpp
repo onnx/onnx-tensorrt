@@ -36,6 +36,16 @@ namespace {
 
 enum { BATCH_DIM = 0 };
 
+// Takes idx from [MIN_INT, MAX_INT] to [0, ax_size] (for Slice op)
+int slice_clip_index(int ax_size, int idx)
+{
+  if (idx < 0)
+  {
+    idx += ax_size;
+  }
+  return std::min(std::max(idx, 0), ax_size);
+}
+
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 bool is_transpose_required(nvinfer1::Dims const& shape,
                            nvinfer1::Permutation const& perm) {
