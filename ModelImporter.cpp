@@ -348,7 +348,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     } else 
     {
       // This is not a supported node, reset the newSubGraph
-      cout << "Found unsupported node: " << node.op_type().c_str() << endl;
       newSubGraph = true;
       allSupported = false;
     }

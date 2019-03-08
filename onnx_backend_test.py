@@ -87,7 +87,7 @@ backend_test.exclude(r'test_flatten_axis3_cuda')
 backend_test.exclude(r'[a-z,_]*softmax_axis_0_cuda[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*argmax_default_axis[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*argmin_default_axis[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*test_concat[a-z,_]*_axis_0[a-z,_]*')
+backend_test.exclude(r'[a-z,_]*test_concat.*_axis_0[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*gather_0[a-z,_]*')
 backend_test.exclude(r'test_reduce_log_sum_asc_axes_cuda')
 backend_test.exclude(r'test_reduce_log_sum_default_cuda')
@@ -102,6 +102,8 @@ backend_test.exclude(r'[a-z,_]*transpose_all_permutations[a-z,_]*')
 backend_test.exclude(r'test_transpose_default_cuda')
 backend_test.exclude(r'test_PoissonNLLLLoss_no_reduce_cuda')
 backend_test.exclude(r'test_operator_params_cuda')
+# No slice of batch dim
+backend_test.exclude(r'test_operator_chunk_cuda')
 # No fancy padding
 backend_test.exclude(r'test_constant_pad_cuda')
 backend_test.exclude(r'test_reflect_pad_cuda')
@@ -111,8 +113,6 @@ backend_test.exclude(r'[a-z,_]*ReflectionPad2d[a-z,_]*')
 # No non-zero padding
 backend_test.exclude(r'test_ConstantPad2d_cuda')
 backend_test.exclude(r'test_operator_pad_cuda')
-# No slice of batch dim
-backend_test.exclude(r'test_operator_chunk_cuda')
 # No RNNs yet
 backend_test.exclude(r'[a-z,_]*_rnn_[a-z,_]*')
 backend_test.exclude(r'[a-z,_]*_lstm_[a-z,_]*')
