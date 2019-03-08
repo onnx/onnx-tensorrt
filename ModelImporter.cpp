@@ -20,7 +20,6 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include "NvOnnxParserTypedefs.h"
 #include "ModelImporter.hpp"
 #include "toposort.hpp"
 #include "onnx_utils.hpp"
@@ -171,20 +170,14 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
       }
       else
         {
+          // If a Weights object is a graph output, convert it into a tensor.
           if (is_graph_output)
           {
-            outputs.at(i) = TensorOrWeights(&convertToTensor(output, &_importer_ctx));
+            outputs.at(i) = TensorOrWeights(&convert_output_weight_to_tensor(output, &_importer_ctx));
             TensorOrWeights& output = outputs.at(i);
             output.tensor().setName(node_output_name.c_str());
           }
         }
-      //// TODO: Remove when done testing
-      //cout << "Imported " << node.op_type()
-      //     << " output tensor '" << node_output_name;
-      //if( output.is_tensor() ) {
-      //  cout << "' (" << output.tensor().getType()  << ")";
-      //}
-      //cout << endl;
     }
   }
   return outputs;
@@ -226,6 +219,96 @@ Status deserialize_onnx_model(int fd,
            ErrorCode::kMODEL_DESERIALIZE_FAILED);
   }
   return Status::success();
+}
+
+bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)  {
+  GOOGLE_PROTOBUF_VERIFY_VERSION;
+  ::ONNX_NAMESPACE::ModelProto onnx_model;
+
+  bool is_binary = common::ParseFromFile_WAR(&onnx_model, onnxModelFile);
+  if (!is_binary && !common::ParseFromTextFile(&onnx_model, onnxModelFile)) 
+  {
+    cerr << "Failed to parse ONNX model from file "<< onnxModelFile << endl;
+    return EXIT_FAILURE;
+  }
+
+  if (verbosity >= (int) nvinfer1::ILogger::Severity::kWARNING) 
+  {
+    int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
+    cout << "----------------------------------------------------------------" << endl;
+    cout << "Input filename:   " << onnxModelFile << endl;
+    cout << "ONNX IR version:  " << common::onnx_ir_version_string(onnx_model.ir_version()) << endl;
+    cout << "Opset version:    " << opset_version << endl;
+    cout << "Producer name:    " << onnx_model.producer_name() << endl;
+    cout << "Producer version: " << onnx_model.producer_version() << endl;
+    cout << "Domain:           " << onnx_model.domain() << endl;
+    cout << "Model version:    " << onnx_model.model_version() << endl;
+    cout << "Doc string:       " << onnx_model.doc_string() << endl;
+    cout << "----------------------------------------------------------------" << endl;
+  }
+
+  if (onnx_model.ir_version() > ::ONNX_NAMESPACE::IR_VERSION) 
+  {
+    cerr << "WARNING: ONNX model has a newer ir_version ("
+    << common::onnx_ir_version_string(onnx_model.ir_version())
+    << ") than this parser was built against ("
+    << common::onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << ")." << endl;
+  }
+
+  // Read input file
+  std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
+  std::streamsize file_size = onnx_file.tellg();
+  onnx_file.seekg(0, std::ios::beg);
+  std::vector<char> onnx_buf(file_size);
+
+  // Handle error messages when parsing has failed
+  if (!onnx_file.read(onnx_buf.data(), onnx_buf.size())) 
+  {
+    cerr << "ERROR: Failed to read from file " << onnxModelFile << endl;
+    return false;
+  }
+  // If the parsing hits an assertion, print failure information
+  if (!parse(onnx_buf.data(), onnx_buf.size())) 
+  {
+    int nerror = getNbErrors();
+    for (int i = 0; i < nerror; ++i) 
+    {
+      nvonnxparser::IParserError const* error = getError(i);
+      if (error->node() != -1) 
+      {
+        ::ONNX_NAMESPACE::NodeProto const& node = onnx_model.graph().node(error->node());
+        cerr << "While parsing node number " << error->node()
+        << " [" << node.op_type();
+        if (node.output().size() && verbosity >= (int) nvinfer1::ILogger::Severity::kINFO) 
+        {
+          cerr << " -> \"" << node.output(0) << "\"";
+        }
+        cerr << "]:" << endl;
+        cerr << (int) nvinfer1::ILogger::Severity::kINFO << endl;
+        if (verbosity >= (int) nvinfer1::ILogger::Severity::kINFO) 
+        {
+          cout << "--- Begin node ---" << endl;
+          cout << node << endl;
+          cout << "--- End node ---" << endl;
+        }
+      }
+      cerr << "ERROR: "
+      << error->file() << ":" << error->line()
+      << " In function " << error->func() << ":\n"
+      << "[" << static_cast<int>(error->code()) << "] " << error->desc()
+      << endl;
+    }
+    return false;
+  }
+
+  // Parsing success
+  if (verbosity >= (int) nvinfer1::ILogger::Severity::kINFO)
+  {
+    cout << " ----- Parsing of ONNX model " << onnxModelFile << " is Done ---- " << endl;
+  }
+
+  return true;
+
 }
 
 bool ModelImporter::supportsModel(void const *serialized_onnx_model,

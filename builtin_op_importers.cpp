@@ -1129,9 +1129,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LRN) {
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   OnnxAttrs attrs(node);
   int   size  = attrs.get<int>("size");
-  float alpha = attrs.get<float>("alpha");
-  float beta  = attrs.get<float>("beta");
-  float bias  = attrs.get<float>("bias");
+  float alpha = attrs.get<float>("alpha", 0.0001f);
+  float beta  = attrs.get<float>("beta", 0.75f);
+  float bias  = attrs.get<float>("bias", 1.0f);
   RETURN_FIRST_OUTPUT(
     ctx->network()->addLRN(tensor, size, alpha, beta, bias));
 }
@@ -1515,7 +1515,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     if( input.is_weights() ) {
       auto weights = input.weights();
       TRT_CHECK(get_infer_dim(infer_dim,new_shape));
-      cout << node.output(0) << endl;
       if (infer_dim >= 0)
       {
         // Check that the -1 Dimension is correct.
@@ -2034,12 +2033,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   int ndim_in = old_shape.nbDims;
   OnnxAttrs attrs(node);
   auto axes = attrs.get<std::vector<int>>("axes");
-  std::set<int> axes_set(axes.begin(), axes.end());
-  int ndim_out = ndim_in + axes_set.size();
-  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::Dims new_shape;
-  new_shape.nbDims = ndim_out;
-
   // If the input was already a tensor, then we're dealing with a TRT shape,
   // so subtract 1 from the axes. Otherwise, this is an ONNX shape.
   if (inputs.at(0).is_tensor())
@@ -2050,6 +2043,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
           --axis;
       }
   }
+
+  std::set<int> axes_set(axes.begin(), axes.end());
+  int ndim_out = ndim_in + axes_set.size();
+  ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
+  nvinfer1::Dims new_shape;
+  new_shape.nbDims = ndim_out;
 
   for (int i = 0, j = 0; j < new_shape.nbDims; ++j )
   {
