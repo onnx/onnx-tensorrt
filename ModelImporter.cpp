@@ -170,20 +170,14 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
       }
       else
         {
+          // If a Weights object is a graph output, convert it into a tensor.
           if (is_graph_output)
           {
-            outputs.at(i) = TensorOrWeights(&convertToTensor(output, &_importer_ctx));
+            outputs.at(i) = TensorOrWeights(&convert_output_weight_to_tensor(output, &_importer_ctx));
             TensorOrWeights& output = outputs.at(i);
             output.tensor().setName(node_output_name.c_str());
           }
         }
-      //// TODO: Remove when done testing
-      //cout << "Imported " << node.op_type()
-      //     << " output tensor '" << node_output_name;
-      //if( output.is_tensor() ) {
-      //  cout << "' (" << output.tensor().getType()  << ")";
-      //}
-      //cout << endl;
     }
   }
   return outputs;

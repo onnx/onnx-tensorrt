@@ -1515,7 +1515,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     if( input.is_weights() ) {
       auto weights = input.weights();
       TRT_CHECK(get_infer_dim(infer_dim,new_shape));
-      cout << node.output(0) << endl;
       if (infer_dim >= 0)
       {
         // Check that the -1 Dimension is correct.
