@@ -62,7 +62,7 @@ if not USE_PYBIND:
 
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device, max_batch_size=32,
-                 max_workspace_size=None, serialize_engine=True, **kwargs):
+                 max_workspace_size=None, serialize_engine=False, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)

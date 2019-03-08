@@ -169,7 +169,7 @@ int main(int argc, char* argv[]) {
   auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
   auto trt_network = common::infer_object(trt_builder->createNetwork());
   auto trt_parser  = common::infer_object(nvonnxparser::createParser(
-                                      trt_network.get(), trt_logger));
+                                      *trt_network, trt_logger));
 
   // TODO: Fix this for the new API
   //if( print_layer_info ) {

@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "NvOnnxParserTypedefs.h"
 #include "NvOnnxParser.h"
 #include "ImporterContext.hpp"
+#include "common.hpp"
 #include "utils.hpp"
 #include "builtin_op_importers.hpp"
 
@@ -54,6 +54,7 @@ public:
       onnxTensorDescriptorV1 const *weight_descriptors) override;
   bool parse(void const *serialized_onnx_model,
              size_t serialized_onnx_model_size) override;
+  bool parseFromFile(const char* onnxModelFile, int verbosity) override;
   bool supportsModel(void const *serialized_onnx_model,
                      size_t serialized_onnx_model_size,
          SubGraphCollection_t &sub_graph_collection) override;
