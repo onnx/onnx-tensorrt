@@ -68,13 +68,11 @@ Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt
     make -j8
     sudo make install
 
-### Python modules
-TensorRT version 5.0 and up create Python wrappers using pybind11. No build is necessary.
-However, since we use already existing TensorRT binding, we need to ensure that PYTHONPATH
-is set appropriately.
-If you just install TensorRT, the weels for the pybind will be located at the same location
-other TensorRT libs.
+Note that the CUDA compiler will by default generate code for the latest SM version. If you are using a GPU with a lower SM version you will have to modify
+`GPU_ARCHS` to include the SM version of your GPU in `CMakeLists.txt`.
 
+### Python modules
+Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. No extra install is necessary.
 
 For earlier versions of TensorRT, the Python wrappers are built using SWIG.
 Build the Python wrappers and modules by running:
