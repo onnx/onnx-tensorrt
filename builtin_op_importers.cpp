@@ -617,6 +617,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
                                      {&inputs.at(0).tensor()}));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Cast) {
+    // Get input node.
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    OnnxAttrs attrs(node);
+    // Check if datatype casted to is valid.
+    nvinfer1::DataType dtype = nvinfer1::DataType::kFLOAT;
+    ASSERT(convert_dtype(attrs.get<int32_t>("to"), &dtype), ErrorCode::kUNSUPPORTED_NODE);
+    // Add the layer.
+    nvinfer1::IIdentityLayer* layer = ctx->network()->addIdentity(inputs.at(0).tensor());
+    layer->setPrecision(dtype);
+    RETURN_FIRST_OUTPUT(layer);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Clip) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
