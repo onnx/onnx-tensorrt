@@ -140,12 +140,10 @@ set(CUDA_VERBOSE_BUILD ON)
 
 # Generate SASS for each architecture
 foreach(arch ${GPU_ARCHS})
-    message(STATUS "Created gencode for ${arch}")
     set(GENCODES "${GENCODES} -gencode arch=compute_${arch},code=sm_${arch}")
 endforeach()
 # Generate PTX for the last architecture
 list(GET GPU_ARCHS -1 LATEST_GPU_ARCH)
-message(STATUS "Created actual device code for ${LATEST_GPU_ARCH}")
 set(GENCODES "${GENCODES} -gencode arch=compute_${LATEST_GPU_ARCH},code=compute_${LATEST_GPU_ARCH}")
 
 if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
