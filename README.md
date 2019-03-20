@@ -60,16 +60,17 @@ Clone the code from GitHub.
 
 ### Executable and libraries
 
-Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake:
+Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake. Note that the CUDA compiler will by default generate code for the latest SM version. If you are using a GPU with a lower SM version you can specify which SMs to build for by using the optional -DGPU_ARCHS flag. For example, if you are running TensorRT on an older Pascal card such as a GTX 1080, you can specify `-DGPU_ARCHS="61"` to generate CUDA code specifically for your card.
+
+See https://developer.nvidia.com/cuda-gpus for more information on what compute capability your specific GPU supports.
 
     mkdir build
     cd build
     cmake .. -DTENSORRT_ROOT=/opt/tensorrt
+    OR
+    cmake .. -DTENSORRT_ROOT=/opt/tensorrt -DGPU_ARCHS="61"
     make -j8
     sudo make install
-
-Note that the CUDA compiler will by default generate code for the latest SM version. If you are using a GPU with a lower SM version you will have to modify
-`GPU_ARCHS` to include the SM version of your GPU in `CMakeLists.txt`.
 
 ### Python modules
 Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. No extra install is necessary.

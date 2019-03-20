@@ -116,28 +116,36 @@ if(NOT TARGET onnx_proto)
   add_subdirectory(third_party/onnx EXCLUDE_FROM_ALL)
 endif()
 
-
-list(APPEND GPU_ARCHS
-    35
-    53
-    61
-    70
-    )
-
-# Add SM 75 for CUDA versions >= 10.0
-if (NOT ("${CUDA_VERSION}" VERSION_LESS "10.0"))
+# If GPU_ARCHS is user defined, build specifically for specified SM
+if (DEFINED GPU_ARCHS)
+  message(STATUS "GPU_ARCH defined as ${GPU_ARCHS}. Generating CUDA code for SM ${GPU_ARCHS}")
+  separate_arguments(GPU_ARCHS)
+# Else list out default SMs to build for.
+else()
+  message(STATUS "GPU_ARCH is not defined. Generating CUDA code for default SMs.")
   list(APPEND GPU_ARCHS
-    75)
+      35
+      53
+      61
+      70
+      )
+  # Add SM 75 for CUDA versions >= 10.0
+  if (NOT ("${CUDA_VERSION}" VERSION_LESS "10.0"))
+    list(APPEND GPU_ARCHS
+      75)
+  endif()
 endif()
 
 set(CUDA_VERBOSE_BUILD ON)
 
 # Generate SASS for each architecture
 foreach(arch ${GPU_ARCHS})
+    message(STATUS "Created gencode for ${arch}")
     set(GENCODES "${GENCODES} -gencode arch=compute_${arch},code=sm_${arch}")
 endforeach()
 # Generate PTX for the last architecture
 list(GET GPU_ARCHS -1 LATEST_GPU_ARCH)
+message(STATUS "Created actual device code for ${LATEST_GPU_ARCH}")
 set(GENCODES "${GENCODES} -gencode arch=compute_${LATEST_GPU_ARCH},code=compute_${LATEST_GPU_ARCH}")
 
 if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
@@ -208,8 +216,7 @@ MESSAGE(STATUS "Find TensorRT libs at ${TENSORRT_LIBRARY}")
 find_package_handle_standard_args(
   TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
 if(NOT TENSORRT_FOUND)
-  message(ERROR
-    "Cannot find TensorRT library.")
+  message(ERROR "Cannot find TensorRT library.")
 endif()
 
 
