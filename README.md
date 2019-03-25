@@ -62,7 +62,7 @@ Clone the code from GitHub.
 
 Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake. Note that `onnx-tensorrt` will by default tell the CUDA compiler generate code for the latest SM version. If you are using a GPU with a lower SM version you can specify which SMs to build for by using the optional `-DGPU_ARCHS` flag. For example, if you are running TensorRT on an older Pascal card such as a GTX 1080, you can specify `-DGPU_ARCHS="61"` to generate CUDA code specifically for your card.
 
-See https://developer.nvidia.com/cuda-gpus for more information on what compute capability your specific GPU supports.
+See [here](https://developer.nvidia.com/cuda-gpus) for finding what maximum compute capability your specific GPU supports.
 
     mkdir build
     cd build
