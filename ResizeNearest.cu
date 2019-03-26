@@ -20,9 +20,10 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include "ResizeNearest.hpp"
 #include <cuda_fp16.h>
 #include <cassert>
+#include <algorithm>
+#include "ResizeNearest.hpp"
 
 // TODO: Move this to a common header
 inline bool is_CHW(nvinfer1::Dims const& dims) {
@@ -101,7 +102,7 @@ int ResizeNearestPlugin::enqueue(int batchSize,
     dim3 grid((osize.x - 1) / block.x + 1,
               (osize.y - 1) / block.y + 1,
               std::min(batchSize * nchan, 65535));
-    if (getDataType()==nvinfer1::DataType::kFLOAT) {				
+    if (getDataType()==nvinfer1::DataType::kFLOAT) {        
       resize_nearest_kernel_2d<<<grid, block, 0, stream>>>
         (batchSize * nchan, scale, osize,
          static_cast<float const*>( inputs[0]), istride, ibatchstride,

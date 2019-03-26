@@ -21,6 +21,7 @@
  */
 
 #pragma once
+#include <NvInfer.h>
 
 #include "plugin.hpp"
 #include "serialize.hpp"
@@ -32,7 +33,12 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
-class FancyActivationPlugin final : public onnx2trt::Plugin {
+namespace {
+    constexpr const char* FANCY_PLUGIN_VERSION{"001"};
+    constexpr const char* FANCY_PLUGIN_NAME{"FancyActivation"};
+}
+
+class FancyActivationPlugin final : public onnx2trt::PluginV2 {
 public:
   enum ActivationType : int {
     LEAKY_RELU,
@@ -50,32 +56,43 @@ public:
 private:
   ActivationType _activation_type;
   float _alpha;
-  float _gamma;
+  float _beta;
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
     deserialize_value(&serialData, &serialLength, &_activation_type);
     deserialize_value(&serialData, &serialLength, &_alpha);
-    deserialize_value(&serialData, &serialLength, &_gamma);
+    deserialize_value(&serialData, &serialLength, &_beta);
   }
-  size_t getSerializationSize() override {
+  size_t getSerializationSize() const override {
     return (serialized_size(_activation_type) +
             serialized_size(_alpha) +
-            serialized_size(_gamma)) + getBaseSerializationSize();
+            serialized_size(_beta)) + getBaseSerializationSize();
   }
-  void serialize(void *buffer) override {
+  void serialize(void *buffer) const override {
     serializeBase(buffer);
     serialize_value(&buffer, (int)_activation_type);
     serialize_value(&buffer, _alpha);
-    serialize_value(&buffer, _gamma);
+    serialize_value(&buffer, _beta);
   }
 public:
-  FancyActivationPlugin(ActivationType activation_type, float alpha=0., float gamma=0.)
-    : _activation_type(activation_type), _alpha(alpha), _gamma(gamma) {}
+  FancyActivationPlugin(ActivationType activation_type, float alpha=0., float beta=0.)
+    : _activation_type(activation_type), _alpha(alpha), _beta(beta) {}
   FancyActivationPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
-  virtual const char* getPluginType() const override { return "FancyActivation"; }
+  virtual const char* getPluginType() const override { return FANCY_PLUGIN_NAME; }
+
+  virtual void destroy() override { delete this; }
+
+  virtual nvinfer1::IPluginV2* clone() const override { return new FancyActivationPlugin{_activation_type, _alpha, _beta}; }
+
+  virtual void setPluginNamespace(const char* pluginNamespace) override {}
+
+  virtual const char* getPluginNamespace() const override { return ""; }
+
+  virtual const char* getPluginVersion() const override { return FANCY_PLUGIN_VERSION; }
+
   virtual int getNbOutputs() const override { return 1; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputDims,
@@ -91,8 +108,35 @@ public:
   int enqueue(int batchSize,
               const void *const *inputs, void **outputs,
               void *workspace, cudaStream_t stream) override;
+
   template <typename Data>
-    int doEnqueue(int batchSize,
-                  const void *const *inputs, void **outputs,
-                  void *workspace, cudaStream_t stream);
+  int doEnqueue(int batchSize,
+                const void *const *inputs, void **outputs,
+                void *workspace, cudaStream_t stream);
 };
+
+class FancyActivationPluginCreator : public nvinfer1::IPluginCreator
+{
+public:
+  FancyActivationPluginCreator() {}
+
+  ~FancyActivationPluginCreator() {}
+
+  const char* getPluginName() const { return FANCY_PLUGIN_NAME; }
+
+  const char* getPluginVersion() const { return FANCY_PLUGIN_VERSION; }
+
+  const nvinfer1::PluginFieldCollection* getFieldNames() { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* createPlugin(const char* name, const nvinfer1::PluginFieldCollection* fc) { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* deserializePlugin(const char* name, const void* serialData, size_t serialLength) { return new FancyActivationPlugin{serialData, serialLength}; }
+
+  void setPluginNamespace(const char* libNamespace) { mNamespace = libNamespace; }
+
+  const char* getPluginNamespace() const { return mNamespace.c_str(); }
+private:
+    std::string mNamespace;
+};
+
+REGISTER_TENSORRT_PLUGIN(FancyActivationPluginCreator);

@@ -50,16 +50,14 @@ public:
     weights.values = _temp_bufs.back().data();
     return weights;
   }
-  virtual nvinfer1::IPluginLayer* addPlugin(Plugin* plugin,
+  virtual nvinfer1::IPluginV2Layer* addPluginV2(PluginV2* plugin,
                                             std::vector<nvinfer1::ITensor*> const& inputs) override {
     // Note: Plugins are wrapped here to make them work with
     // onnx2trt::PluginFactory.
     auto* wrapped_plugin = new TypeSerializingPlugin(plugin);
     _owned_plugin_instances.emplace_back(wrapped_plugin);
-#if NV_TENSORRT_MAJOR < 4
-    return _network->addPlugin(inputs.data(), inputs.size(), *wrapped_plugin);
-#else
-    return _network->addPluginExt(inputs.data(), inputs.size(), *wrapped_plugin);
+#if NV_TENSORRT_MAJOR > 4
+    return _network->addPluginV2(inputs.data(), inputs.size(), *wrapped_plugin);
 #endif
   }
   bool setUserInput(const char* name, nvinfer1::ITensor* input) {

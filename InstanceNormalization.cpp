@@ -63,7 +63,7 @@ inline float half_to_float_fast(unsigned short value) {
 InstanceNormalizationPlugin::InstanceNormalizationPlugin(float epsilon,
                                                          nvinfer1::Weights const& scale,
                                                          nvinfer1::Weights const& bias)
-  : _epsilon(epsilon), _nchan(scale.count),  _initialized(false) {
+  : _epsilon(epsilon), _nchan(scale.count),  _initialized(false), _scale(scale), _bias(bias) {
   assert(scale.count == bias.count);
   if( scale.type == nvinfer1::DataType::kFLOAT ) {
     _h_scale.assign((float*)scale.values, (float*)scale.values + scale.count);
