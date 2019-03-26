@@ -1686,8 +1686,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   // (TRT doesn't support batch dim slicing)
   ASSERT(attrs.count("axes"), ErrorCode::kUNSUPPORTED_NODE);
   auto axes = attrs.get<std::vector<int>>("axes");
-  auto starts = attrs.get<std::vector<int>>("starts");
-  auto ends = attrs.get<std::vector<int>>("ends");
+  auto starts = attrs.get<std::vector<long long>>("starts");
+  auto ends = attrs.get<std::vector<long long>>("ends");
   int H_idx = -1, W_idx = -1;
   // This will be modified to contain expanded dims metadata,
   // if needed (e.g. input tensor is 2D)
@@ -1703,6 +1703,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   for (size_t i = 0; i < axes.size(); ++i)
   {
     int axis = axes[i];
+    
+    // ignore slicing over batch dim
+    if (axis == 0)
+    {
+      // assert(batch_size == end-start);
+      continue;
+    }
     // We don't allow slicing batch dim, due to TRT limitations
     TRT_CHECK(convert_axis(axis, nbDims));
 
