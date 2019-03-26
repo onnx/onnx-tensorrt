@@ -50,8 +50,9 @@ PluginFactory::createPlugin(const char* layerName,
   }
   auto create_plugin_func = _plugin_registry.at(plugin_type);
   Plugin* plugin = create_plugin_func(serialData, serialLength);
-  _owned_plugin_instances.emplace_back(plugin);
-  return plugin;
+  auto* wrapped_plugin = new TypeSerializingPlugin(plugin);
+  _owned_plugin_instances.emplace_back(wrapped_plugin);
+  return wrapped_plugin;
 }
 
 } // namespace onnx2trt
