@@ -1010,4 +1010,3 @@ onnxReleaseGraph(onnxGraph graph) {
     return ONNXIFI_STATUS_SUCCESS;
   });
 }
-
