@@ -60,21 +60,20 @@ Clone the code from GitHub.
 
 ### Executable and libraries
 
-Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake:
+Suppose your TensorRT library is located at `/opt/tensorrt`. Build the `onnx2trt` executable and the `libnvonnxparser*` libraries using CMake. Note that `onnx-tensorrt` will by default tell the CUDA compiler generate code for the latest SM version. If you are using a GPU with a lower SM version you can specify which SMs to build for by using the optional `-DGPU_ARCHS` flag. For example, if you are running TensorRT on an older Pascal card such as a GTX 1080, you can specify `-DGPU_ARCHS="61"` to generate CUDA code specifically for your card.
+
+See [here](https://developer.nvidia.com/cuda-gpus) for finding what maximum compute capability your specific GPU supports.
 
     mkdir build
     cd build
     cmake .. -DTENSORRT_ROOT=/opt/tensorrt
+    OR
+    cmake .. -DTENSORRT_ROOT=/opt/tensorrt -DGPU_ARCHS="61"
     make -j8
     sudo make install
 
 ### Python modules
-TensorRT version 5.0 and up create Python wrappers using pybind11. No build is necessary.
-However, since we use already existing TensorRT binding, we need to ensure that PYTHONPATH
-is set appropriately.
-If you just install TensorRT, the weels for the pybind will be located at the same location
-other TensorRT libs.
-
+Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. No extra install is necessary.
 
 For earlier versions of TensorRT, the Python wrappers are built using SWIG.
 Build the Python wrappers and modules by running:
@@ -105,4 +104,4 @@ You can use `-v` flag to make output more verbose.
 
 ## Pre-trained models
 
-Pre-trained Caffe2 models in ONNX format can be found at https://github.com/onnx/models
+Pre-trained models in ONNX format can be found at the [ONNX Model Zoo](https://github.com/onnx/models)
