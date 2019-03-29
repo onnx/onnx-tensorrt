@@ -4,6 +4,10 @@ Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/te
 
 See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
 
+## Supported Operators
+
+Current supported operators are found here:
+
 ## ONNX Python backend usage
 
 The TensorRT backend for ONNX can be used in Python as follows:
