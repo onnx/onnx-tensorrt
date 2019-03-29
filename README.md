@@ -6,7 +6,7 @@ See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#
 
 ## Supported Operators
 
-Current supported operators are found here:
+Current supported operators are found [here](operators.md)
 
 ## ONNX Python backend usage
 

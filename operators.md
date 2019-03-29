@@ -1,6 +1,6 @@
 # Supported ONNX Operators
 
-In general, TensorRT does not support operations across the batch dimension (dimension or axis 0). TensorRT supports operators up to Opset 9.
+In general, TensorRT does not support operations across the batch dimension (dimension/axis 0). TensorRT supports operators up to Opset 9. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 ## Support Matrix
 
