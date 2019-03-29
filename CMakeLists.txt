@@ -97,6 +97,7 @@ set(EXECUTABLE_SOURCES
 
 set(API_TESTS_SOURCES
   getSupportedAPITest.cpp
+  ModelImporter.cpp
 )
 
 
@@ -291,7 +292,7 @@ target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CUDA
 # --------------------------------
 # API Tests
 # --------------------------------
-add_executable(getSupportedAPITest ${API_TESTS_SOURCES} ${IMPORTER_SOURCES})
+add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
 target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
 target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
