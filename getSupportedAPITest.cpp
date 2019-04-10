@@ -41,7 +41,7 @@ void print_usage() {
 
 void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
 {
-    if (subGraphs.size() > 1)
+    if (subGraphs.size() != 1)
     {
         cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs." << endl;
         cout << "There are "<< subGraphs.size() << " supported subGraphs: " << endl;
