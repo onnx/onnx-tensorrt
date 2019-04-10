@@ -319,6 +319,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   Status status =
       deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
                              is_serialized_as_text, &model);
+
   if (status.is_error()) {
     _errors.push_back(status);
     return false;
@@ -345,14 +346,32 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       }
       // We add the new node to the last graph
       sub_graph_collection.back().emplace_back(node_idx);
-    } else 
+    } 
+    else 
     {
       // This is not a supported node, reset the newSubGraph
       newSubGraph = true;
       allSupported = false;
     }
   }
-  return allSupported; 
+
+  if (!allSupported) return allSupported;
+
+  cout << "All nodes have an importer function. Checking for functional completeness..." << endl;
+
+  allSupported = true;
+  try 
+  {
+    allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
+    cout << "===========FULLY PARSED=========" << endl;
+  }
+  catch (...)
+  {
+    cout << "what" << endl;
+    //cout << e.what() << endl;
+    return allSupported;
+  }
+  return allSupported;
 }
 
 bool ModelImporter::supportsOperator(const char* op_name) const {
