@@ -89,6 +89,22 @@ transpose_tensor(IImporterContext* ctx,
 }
 
 nvinfer1::ITensor*
+reshape_tensor(IImporterContext* ctx,
+               nvinfer1::ITensor& tensor,
+               nvinfer1::Dims shape) {
+  if( shape == tensor.getDimensions() ) {
+    return &tensor;
+  }
+  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+  if( !layer ) {
+    return nullptr;
+  }
+  layer->setReshapeDimensions(shape);
+  return layer->getOutput(0);
+}
+
+#if NV_TENSORRT_MAJOR < 4
+nvinfer1::ITensor*
 move_tensor_dimension(IImporterContext* ctx,
                       nvinfer1::ITensor& tensor,
                       int from, int to) {
@@ -108,21 +124,6 @@ move_tensor_dimension(IImporterContext* ctx,
 }
 
 nvinfer1::ITensor*
-reshape_tensor(IImporterContext* ctx,
-               nvinfer1::ITensor& tensor,
-               nvinfer1::Dims shape) {
-  if( shape == tensor.getDimensions() ) {
-    return &tensor;
-  }
-  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-  if( !layer ) {
-    return nullptr;
-  }
-  layer->setReshapeDimensions(shape);
-  return layer->getOutput(0);
-}
-
-nvinfer1::ITensor*
 flatten_tensor(IImporterContext* ctx,
                nvinfer1::ITensor& tensor,
                int axis=0) {
@@ -134,6 +135,7 @@ flatten_tensor(IImporterContext* ctx,
   }
   return reshape_tensor(ctx, tensor, new_shape);
 }
+#endif
 
 NodeImportResult
 addScale(IImporterContext*   ctx,
@@ -1786,6 +1788,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
   int ndim = inputs.at(0).shape().nbDims;
   TRT_CHECK(convert_axis(axis, ndim));
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
+#if NV_TENSORRT_MAJOR < 4
   nvinfer1::Dims shape = tensor_ptr->getDimensions();
   // Reshape the tensor so that the softmax axis is 0
   if (axis > 0)
@@ -1793,15 +1796,23 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
     ASSERT(tensor_ptr = flatten_tensor(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, axis, 0), ErrorCode::kUNSUPPORTED_NODE);
   }
+#endif
   auto* layer = ctx->network()->addSoftMax(*tensor_ptr);
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   tensor_ptr = layer->getOutput(0);
+#if NV_TENSORRT_MAJOR < 4
   // Reshape the tensor back if it was reshaped above
   if (axis > 0)
   {
     ASSERT(tensor_ptr = move_tensor_dimension(ctx, *tensor_ptr, 0, axis), ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(tensor_ptr = reshape_tensor(ctx, *tensor_ptr, shape), ErrorCode::kUNSUPPORTED_NODE);
   }
+#else
+  if (axis > 0)
+  {
+      layer->setAxes(1 << axis);
+  }
+#endif
   return {{tensor_ptr}};
 }
 
