@@ -144,6 +144,7 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
   NodeImporter const& node_importer = _op_importers.at(node.op_type());
 
   std::vector<TensorOrWeights> outputs;
+
   GET_VALUE(node_importer(&_importer_ctx, node, inputs), &outputs);
   ASSERT(outputs.size() <= (size_t)node.output().size(), ErrorCode::kINTERNAL_ERROR);
 
@@ -332,11 +333,27 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   }
 
   bool newSubGraph(true), allSupported(true);
+  int error_node = -1;
 
-  for( size_t node_idx : topological_order ) 
+  if (!parse(serialized_onnx_model, serialized_onnx_model_size))
+  {
+    // We hit some errors when parsing. Iterate through them to find the failing node.
+    int nerror = getNbErrors();
+    for (int i = 0; i < nerror; ++i) 
+    {
+      nvonnxparser::IParserError const* error = getError(i);
+      if (error->node() != -1) 
+      {
+        error_node = error->node();
+        allSupported = false;
+      }
+    }
+  }
+
+  for (int node_idx : topological_order) 
   {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
-    if (this->supportsOperator(node.op_type().c_str())) 
+    if (this->supportsOperator(node.op_type().c_str()) && node_idx != error_node) 
     {
       if (newSubGraph) 
       {
@@ -355,22 +372,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     }
   }
 
-  if (!allSupported) return allSupported;
-
-  cout << "All nodes have an importer function. Checking for functional completeness..." << endl;
-
-  allSupported = true;
-  try 
-  {
-    allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
-    cout << "===========FULLY PARSED=========" << endl;
-  }
-  catch (...)
-  {
-    cout << "what" << endl;
-    //cout << e.what() << endl;
-    return allSupported;
-  }
   return allSupported;
 }
 
@@ -444,6 +445,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     std::vector<TensorOrWeights> outputs;
     GET_VALUE(this->importNode(node, inputs, output_names), &outputs);
+    ASSERT(outputs.size() > 0, ErrorCode::kINVALID_GRAPH);
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);
@@ -456,11 +458,11 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     if( node.output().size() > 0 ) {
       std::stringstream ss;
-      ss << node.output(0) << ":"
+      cout << node.output(0) << ":"
          << node.op_type() << " -> "
-         << outputs.at(0).shape();
-      _importer_ctx.logger().log(
-          nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
+         << outputs.at(0).shape() << endl;
+      // _importer_ctx.logger().log(
+      //     nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
     }
   }
   _current_node = -1;

@@ -118,6 +118,7 @@ int main(int argc, char* argv[]) {
 
     SubGraphCollection_t SubGraphCollection;
 
+    // supportsModel() parses the graph and returns a list of supported subgraphs.
     if (!trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), SubGraphCollection))
     {
         cout << "Model cannot be fully parsed by TensorRT!" << endl;
@@ -127,10 +128,11 @@ int main(int argc, char* argv[]) {
 
     printSubGraphs(SubGraphCollection, onnx_model);
     
+    // If -e was specified, create and save the TensorRT engine to disk.
+    // Note we do not call trt_parser->parse() here since it's already done above in parser->supportsModel()
     if( !engine_filename.empty() ) {
         trt_builder->setMaxBatchSize(max_batch_size);
         trt_builder->setMaxWorkspaceSize(max_workspace_size);
-        trt_parser->parse(onnx_buf.data(), onnx_buf.size());
 
         cout << "input name: " << trt_network->getInput(0)->getName() << endl;
         cout << "output name: " << trt_network->getOutput(0)->getName() << endl;
