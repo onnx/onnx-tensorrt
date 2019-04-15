@@ -326,15 +326,10 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     return false;
   }
 
-  NodesContainer_t topological_order;
-  if (!toposort(model.graph().node(), &topological_order)) {
-    cout << "Failed to sort model topologically, exiting ..." << endl;
-    return false;
-  }
-
   bool newSubGraph(true), allSupported(true);
   int error_node = -1;
 
+  // Parse the graph and see if we hit any parsing errors
   if (!parse(serialized_onnx_model, serialized_onnx_model_size))
   {
     // We hit some errors when parsing. Iterate through them to find the failing node.
@@ -350,6 +345,12 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     }
   }
 
+  // Sort and partition supported subgraphs
+  NodesContainer_t topological_order;
+  if (!toposort(model.graph().node(), &topological_order)) {
+    cout << "Failed to sort model topologically, exiting ..." << endl;
+    return false;
+  }
   for (int node_idx : topological_order) 
   {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
@@ -445,7 +446,6 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     std::vector<TensorOrWeights> outputs;
     GET_VALUE(this->importNode(node, inputs, output_names), &outputs);
-    ASSERT(outputs.size() > 0, ErrorCode::kINVALID_GRAPH);
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);
@@ -458,11 +458,11 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     if( node.output().size() > 0 ) {
       std::stringstream ss;
-      cout << node.output(0) << ":"
+      ss << node.output(0) << ":"
          << node.op_type() << " -> "
-         << outputs.at(0).shape() << endl;
-      // _importer_ctx.logger().log(
-      //     nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
+         << outputs.at(0).shape();
+      _importer_ctx.logger().log(
+           nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
     }
   }
   _current_node = -1;
