@@ -343,7 +343,15 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       {
         // If it is the beginning of a new subGraph, we start a new vector
         sub_graph_collection.emplace_back();
-        sub_graph_collection.back().second = true;
+        // Mark the first graph as supported. 
+        if (sub_graph_collection.size() == 1)
+        {
+          sub_graph_collection.back().second = true;
+        }
+        else
+        {
+          sub_graph_collection.back().second = false;
+        }
         newSubGraph = false;
       }
       // We add the new node to the last graph
@@ -375,27 +383,41 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
     {
       NodesContainer_t subgraph = sub_graph_collection[graph_index].first;
+      // Mark this subgraph as supported in case we do not touch it. 
+      sub_graph_collection[graph_index].second = true;
       for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
       {
         // Split the graph at the node we hit an assertion at when parsing.
         if (subgraph[node_index] == error_node)
         {
-          NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
-          NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
-          cout << "split before" << endl;
-          for (auto node : split_before)
+          // Case where subgraph has only one node and it's unsupported, simply delete it.
+          if (node_index == 0 && subgraph.size() == 1)
           {
-            cout << node << endl;
+            sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
           }
-          cout << "split after" << endl;
-          for (auto node : split_after)
+          // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
+          else if (node_index == 0)
           {
-            cout << node << endl;
+            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
+            sub_graph_collection[graph_index].first = split_after;
           }
-
-          sub_graph_collection[graph_index].first = split_before;
-          sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
-
+          // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
+          else if (node_index == subgraph.size())
+          {
+            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
+            sub_graph_collection[graph_index].first = split_before;
+            sub_graph_collection[graph_index].second = true;
+          }
+          // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
+          else
+          {
+            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
+            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
+            sub_graph_collection[graph_index].first = split_before;
+            sub_graph_collection[graph_index].second = true;
+            sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
+          }
+          break;
         }
       }
     }
