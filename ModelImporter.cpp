@@ -327,8 +327,36 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   }
 
   bool newSubGraph(true), allSupported(true);
-  int error_node = -1;
 
+  // Sort and partition supported subgraphs
+  NodesContainer_t topological_order;
+  if (!toposort(model.graph().node(), &topological_order)) {
+    cout << "Failed to sort model topologically, exiting ..." << endl;
+    return false;
+  }
+  for (int node_idx : topological_order) 
+  {
+    ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
+    if (this->supportsOperator(node.op_type().c_str())) 
+    {
+      if (newSubGraph) 
+      {
+        // If it is the beginning of a new subGraph, we start a new vector
+        sub_graph_collection.emplace_back();
+        sub_graph_collection.back().second = true;
+        newSubGraph = false;
+      }
+      // We add the new node to the last graph
+      sub_graph_collection.back().first.emplace_back(node_idx);
+    } 
+    else 
+    {
+      // This is not a supported node, reset the newSubGraph
+      newSubGraph = true;
+      allSupported = false;
+    }
+  }
+  size_t error_node = std::numeric_limits<size_t>::max();
   // Parse the graph and see if we hit any parsing errors
   if (!parse(serialized_onnx_model, serialized_onnx_model_size))
   {
@@ -343,33 +371,33 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         allSupported = false;
       }
     }
-  }
-
-  // Sort and partition supported subgraphs
-  NodesContainer_t topological_order;
-  if (!toposort(model.graph().node(), &topological_order)) {
-    cout << "Failed to sort model topologically, exiting ..." << endl;
-    return false;
-  }
-  for (int node_idx : topological_order) 
-  {
-    ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
-    if (this->supportsOperator(node.op_type().c_str()) && node_idx != error_node) 
+    // Update the subgraph collection.
+    for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
     {
-      if (newSubGraph) 
+      NodesContainer_t subgraph = sub_graph_collection[graph_index].first;
+      for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
       {
-        // If it is the beginning of a new subGraph, we start a new vector
-        sub_graph_collection.emplace_back();
-        newSubGraph = false;
+        // Split the graph at the node we hit an assertion at when parsing.
+        if (subgraph[node_index] == error_node)
+        {
+          NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
+          NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
+          cout << "split before" << endl;
+          for (auto node : split_before)
+          {
+            cout << node << endl;
+          }
+          cout << "split after" << endl;
+          for (auto node : split_after)
+          {
+            cout << node << endl;
+          }
+
+          sub_graph_collection[graph_index].first = split_before;
+          sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
+
+        }
       }
-      // We add the new node to the last graph
-      sub_graph_collection.back().emplace_back(node_idx);
-    } 
-    else 
-    {
-      // This is not a supported node, reset the newSubGraph
-      newSubGraph = true;
-      allSupported = false;
     }
   }
 

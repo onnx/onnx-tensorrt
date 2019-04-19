@@ -54,8 +54,9 @@ void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProt
     for (auto subGraph: subGraphs) 
     {
         cout << "\t{";
-        for (auto idx: subGraph) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
+        for (auto idx: subGraph.first) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
         cout << "\t}"<<endl;
+        cout << subGraph.second << endl;
     }
 }
 
