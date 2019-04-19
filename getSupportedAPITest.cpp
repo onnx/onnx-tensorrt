@@ -45,6 +45,8 @@ void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProt
     {
         cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs." << endl;
         cout << "There are "<< subGraphs.size() << " supported subGraphs: " << endl;
+        cout << "NOTE: Due to some limitations with the parser, the support of specific subgraphs may not have been determined."
+        << " Please refer to the printed subgraphs to see if they are truly supported or not." << endl;
     }
     else 
     {
@@ -55,8 +57,15 @@ void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProt
     {
         cout << "\t{";
         for (auto idx: subGraph.first) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
-        cout << "\t}"<<endl;
-        cout << subGraph.second << endl;
+        cout << "\t}\t - ";
+        if (subGraph.second)
+        {
+            cout << "Fully supported" << endl;
+        }
+        else
+        {
+            cout << "UNKNOWN whether this is fully supported." << endl; 
+        }
     }
 }
 
