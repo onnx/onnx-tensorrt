@@ -37,13 +37,13 @@ namespace {
 enum { BATCH_DIM = 0 };
 
 // Takes idx from [MIN_INT, MAX_INT] to [0, ax_size] (for Slice op)
-long long slice_clip_index(long long ax_size, long long idx)
+int64_t slice_clip_index(int64_t ax_size, int64_t idx)
 {
   if (idx < 0)
   {
     idx += ax_size;
   }
-  return std::min(std::max(idx, 0LL), ax_size);
+  return std::min(std::max(idx, INT64_C(0)), ax_size);
 }
 
 
