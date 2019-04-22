@@ -343,15 +343,8 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       {
         // If it is the beginning of a new subGraph, we start a new vector
         sub_graph_collection.emplace_back();
-        // Mark the first graph as supported. 
-        if (sub_graph_collection.size() == 1)
-        {
-          sub_graph_collection.back().second = true;
-        }
-        else
-        {
-          sub_graph_collection.back().second = false;
-        }
+        // Mark all new graphs as "unknown"
+        sub_graph_collection.back().second = false;
         newSubGraph = false;
       }
       // We add the new node to the last graph
@@ -383,6 +376,12 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
     {
       NodesContainer_t subgraph = sub_graph_collection[graph_index].first;
+
+      // If we've already iterated past the error_node, all future graphs are unknown, so break
+      if (subgraph[0] > error_node)
+      {
+        break;
+      }
       // Mark this subgraph as supported in case we do not touch it. 
       sub_graph_collection[graph_index].second = true;
       for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
