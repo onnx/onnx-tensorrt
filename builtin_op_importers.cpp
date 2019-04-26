@@ -295,7 +295,7 @@ combineTensorsElementwise(IImporterContext* ctx,
         nvinfer1::Dims new_dims = expand_dims(tensor_ptr->getDimensions(), tensors_ndim_max);
         tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_dims);
       }
-      ASSERT(input.shape().nbDims == tensors_ndim_max,
+      ASSERT(tensor_ptr->getDimensions().nbDims == tensors_ndim_max,
              ErrorCode::kUNSUPPORTED_NODE);
     }
 #endif
