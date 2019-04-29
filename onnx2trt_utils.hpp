@@ -140,19 +140,22 @@ inline bool convert_dtype(int32_t onnx_dtype,
 }
 
 template<typename OnnxDims>
-inline nvinfer1::Dims convert_dims(OnnxDims const& onnx_dims) {
+inline Status convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) {
   enum { BATCH_DIM = 0 };
   std::vector<int> onnx_dims_vector;
   for( auto const& onnx_dim : onnx_dims ) {
     // TODO: Unknown dimensions are represented using onnx_dim.dim_param
+    // Dynamically sized inputs are currently not supported. Catch it as
+    // onnx_dim.dim_value() == 0 and throw an error.
+    ASSERT(onnx_dim.dim_value() != 0, ErrorCode::kUNSUPPORTED_GRAPH);
     onnx_dims_vector.push_back(onnx_dim.dim_value());
   }
-  nvinfer1::Dims trt_dims;
   trt_dims.nbDims = onnx_dims_vector.size();
-  assert(trt_dims.nbDims <= nvinfer1::Dims::MAX_DIMS);
+  ASSERT(trt_dims.nbDims <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_GRAPH);
   std::copy(onnx_dims_vector.begin(), onnx_dims_vector.end(), trt_dims.d);
+  // Remove batch dimension from trt_dims.
   trt_dims = set_dims_CHW(remove_dim(trt_dims, BATCH_DIM));
-  return trt_dims;
+  return Status::success();
 }
 
 inline bool convert_weight_descriptor(onnxTensorDescriptorV1 const &desc,
