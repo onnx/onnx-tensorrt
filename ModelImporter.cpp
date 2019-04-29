@@ -54,7 +54,8 @@ Status importInput(ImporterContext* importer_ctx,
          ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(onnx_tensor_type.shape().dim().size() > 0,
          ErrorCode::kUNSUPPORTED_NODE);
-  auto trt_dims = convert_dims(onnx_tensor_type.shape().dim());
+  nvinfer1::Dims trt_dims;
+  TRT_CHECK(convert_dims(onnx_tensor_type.shape().dim(), trt_dims));
   nvinfer1::ITensor* user_input = importer_ctx->getUserInput(input.name().c_str());
   if( user_input ) {
     ASSERT(user_input, ErrorCode::kINVALID_VALUE);
@@ -371,6 +372,12 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         error_node = error->node();
         allSupported = false;
       }
+      // The node that we failed on is one of the input nodes (-1). Since TRT cannot parse the
+      // inputs the support for the partitioned subgraphs are unknown, so return false here.
+      else
+      {
+        return false;
+      }
     }
     // Update the subgraph collection.
     for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
@@ -420,6 +427,12 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         }
       }
     }
+  }
+
+  // After everything if allSupported is true, there is only one subgraph so mark it as supported.
+  if (allSupported)
+  {
+    sub_graph_collection.back().second = true;
   }
 
   return allSupported;
