@@ -372,8 +372,8 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         error_node = error->node();
         allSupported = false;
       }
-      // The node that we failed on is "-1", AKA the input node. Due to various reasons
-      // such as unsupported data type or dynamically sized inputs, the rest of the graph is UNKNOWN.
+      // The node that we failed on is one of the input nodes (-1). Since TRT cannot parse the
+      // inputs the support for the partitioned subgraphs are unknown, so return false here.
       else
       {
         return false;
@@ -429,7 +429,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     }
   }
 
-  // After everything, if allSupported is true, there is only one subgraph so mark it as true.
+  // After everything if allSupported is true, there is only one subgraph so mark it as supported.
   if (allSupported)
   {
     sub_graph_collection.back().second = true;
