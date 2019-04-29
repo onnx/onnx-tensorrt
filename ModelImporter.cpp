@@ -54,7 +54,8 @@ Status importInput(ImporterContext* importer_ctx,
          ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(onnx_tensor_type.shape().dim().size() > 0,
          ErrorCode::kUNSUPPORTED_NODE);
-  auto trt_dims = convert_dims(onnx_tensor_type.shape().dim());
+  nvinfer1::Dims trt_dims;
+  TRT_CHECK(convert_dims(onnx_tensor_type.shape().dim(), trt_dims));
   nvinfer1::ITensor* user_input = importer_ctx->getUserInput(input.name().c_str());
   if( user_input ) {
     ASSERT(user_input, ErrorCode::kINVALID_VALUE);
@@ -144,6 +145,7 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
   NodeImporter const& node_importer = _op_importers.at(node.op_type());
 
   std::vector<TensorOrWeights> outputs;
+
   GET_VALUE(node_importer(&_importer_ctx, node, inputs), &outputs);
   ASSERT(outputs.size() <= (size_t)node.output().size(), ErrorCode::kINTERNAL_ERROR);
 
@@ -319,20 +321,21 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   Status status =
       deserialize_onnx_model(serialized_onnx_model, serialized_onnx_model_size,
                              is_serialized_as_text, &model);
+
   if (status.is_error()) {
     _errors.push_back(status);
     return false;
   }
 
+  bool newSubGraph(true), allSupported(true);
+
+  // Sort and partition supported subgraphs
   NodesContainer_t topological_order;
   if (!toposort(model.graph().node(), &topological_order)) {
     cout << "Failed to sort model topologically, exiting ..." << endl;
     return false;
   }
-
-  bool newSubGraph(true), allSupported(true);
-
-  for( size_t node_idx : topological_order ) 
+  for (int node_idx : topological_order) 
   {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
     if (this->supportsOperator(node.op_type().c_str())) 
@@ -341,18 +344,98 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       {
         // If it is the beginning of a new subGraph, we start a new vector
         sub_graph_collection.emplace_back();
+        // Mark all new graphs as "unknown"
+        sub_graph_collection.back().second = false;
         newSubGraph = false;
       }
       // We add the new node to the last graph
-      sub_graph_collection.back().emplace_back(node_idx);
-    } else 
+      sub_graph_collection.back().first.emplace_back(node_idx);
+    } 
+    else 
     {
       // This is not a supported node, reset the newSubGraph
       newSubGraph = true;
       allSupported = false;
     }
   }
-  return allSupported; 
+  size_t error_node = std::numeric_limits<size_t>::max();
+  // Parse the graph and see if we hit any parsing errors
+  if (!parse(serialized_onnx_model, serialized_onnx_model_size))
+  {
+    // We hit some errors when parsing. Iterate through them to find the failing node.
+    int nerror = getNbErrors();
+    for (int i = 0; i < nerror; ++i) 
+    {
+      nvonnxparser::IParserError const* error = getError(i);
+      if (error->node() != -1) 
+      {
+        error_node = error->node();
+        allSupported = false;
+      }
+      // The node that we failed on is one of the input nodes (-1). Since TRT cannot parse the
+      // inputs the support for the partitioned subgraphs are unknown, so return false here.
+      else
+      {
+        return false;
+      }
+    }
+    // Update the subgraph collection.
+    for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
+    {
+      NodesContainer_t subgraph = sub_graph_collection[graph_index].first;
+
+      // If we've already iterated past the error_node, all future graphs are unknown, so break
+      if (subgraph[0] > error_node)
+      {
+        break;
+      }
+      // Mark this subgraph as supported in case we do not touch it. 
+      sub_graph_collection[graph_index].second = true;
+      for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
+      {
+        // Split the graph at the node we hit an assertion at when parsing.
+        if (subgraph[node_index] == error_node)
+        {
+          // Case where subgraph has only one node and it's unsupported, simply delete it.
+          if (node_index == 0 && subgraph.size() == 1)
+          {
+            sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
+          }
+          // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
+          else if (node_index == 0)
+          {
+            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
+            sub_graph_collection[graph_index].first = split_after;
+          }
+          // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
+          else if (node_index == subgraph.size())
+          {
+            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
+            sub_graph_collection[graph_index].first = split_before;
+            sub_graph_collection[graph_index].second = true;
+          }
+          // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
+          else
+          {
+            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
+            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
+            sub_graph_collection[graph_index].first = split_before;
+            sub_graph_collection[graph_index].second = true;
+            sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // After everything if allSupported is true, there is only one subgraph so mark it as supported.
+  if (allSupported)
+  {
+    sub_graph_collection.back().second = true;
+  }
+
+  return allSupported;
 }
 
 bool ModelImporter::supportsOperator(const char* op_name) const {
@@ -441,7 +524,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
          << node.op_type() << " -> "
          << outputs.at(0).shape();
       _importer_ctx.logger().log(
-          nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
+           nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
     }
   }
   _current_node = -1;

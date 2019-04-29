@@ -41,10 +41,12 @@ void print_usage() {
 
 void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
 {
-    if (subGraphs.size() > 1)
+    if (subGraphs.size() != 1)
     {
         cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs." << endl;
         cout << "There are "<< subGraphs.size() << " supported subGraphs: " << endl;
+        cout << "NOTE: Due to some limitations with the parser, the support of specific subgraphs may not have been determined."
+        << " Please refer to the printed subgraphs to see if they are truly supported or not." << endl;
     }
     else 
     {
@@ -54,8 +56,16 @@ void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProt
     for (auto subGraph: subGraphs) 
     {
         cout << "\t{";
-        for (auto idx: subGraph) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
-        cout << "\t}"<<endl;
+        for (auto idx: subGraph.first) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
+        cout << "\t}\t - ";
+        if (subGraph.second)
+        {
+            cout << "Fully supported" << endl;
+        }
+        else
+        {
+            cout << "UNKNOWN whether this is fully supported." << endl; 
+        }
     }
 }
 
@@ -118,6 +128,7 @@ int main(int argc, char* argv[]) {
 
     SubGraphCollection_t SubGraphCollection;
 
+    // supportsModel() parses the graph and returns a list of supported subgraphs.
     if (!trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), SubGraphCollection))
     {
         cout << "Model cannot be fully parsed by TensorRT!" << endl;
@@ -127,10 +138,11 @@ int main(int argc, char* argv[]) {
 
     printSubGraphs(SubGraphCollection, onnx_model);
     
+    // If -e was specified, create and save the TensorRT engine to disk.
+    // Note we do not call trt_parser->parse() here since it's already done above in parser->supportsModel()
     if( !engine_filename.empty() ) {
         trt_builder->setMaxBatchSize(max_batch_size);
         trt_builder->setMaxWorkspaceSize(max_workspace_size);
-        trt_parser->parse(onnx_buf.data(), onnx_buf.size());
 
         cout << "input name: " << trt_network->getInput(0)->getName() << endl;
         cout << "output name: " << trt_network->getOutput(0)->getName() << endl;
