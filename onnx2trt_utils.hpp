@@ -146,8 +146,8 @@ inline Status convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) 
   for( auto const& onnx_dim : onnx_dims ) {
     // TODO: Unknown dimensions are represented using onnx_dim.dim_param
     // Dynamically sized inputs are currently not supported. Catch these cases
-    // as onnx_dim.dim_value() == 0 and throw an error.
-    ASSERT(onnx_dim.dim_value() != 0, ErrorCode::kUNSUPPORTED_GRAPH);
+    // as onnx_dim.dim_value() == 0 on non-batch dimensions and throw an error.
+    ASSERT(onnx_dims_vector.empty() || onnx_dim.dim_value() != 0, ErrorCode::kUNSUPPORTED_GRAPH);
     onnx_dims_vector.push_back(onnx_dim.dim_value());
   }
   trt_dims.nbDims = onnx_dims_vector.size();
