@@ -408,7 +408,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection[graph_index].first = split_after;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
-          else if (node_index == subgraph.size())
+          else if (node_index == subgraph.size() - 1)
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
             sub_graph_collection[graph_index].first = split_before;
