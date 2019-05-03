@@ -139,6 +139,23 @@ inline bool convert_dtype(int32_t onnx_dtype,
   return true;
 }
 
+inline bool convert_input_dtype(int32_t onnx_dtype,
+                          nvinfer1::DataType* trt_dtype) {
+  switch( onnx_dtype ) {
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
+  case ::ONNX_NAMESPACE::TensorProto::INT8:    *trt_dtype = nvinfer1::DataType::kINT8;  break;
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
+#if NV_TENSORRT_MAJOR >= 4
+  case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+#endif
+  default:
+    cerr << "Unsupported ONNX data type: " << get_dtype_name(onnx_dtype)
+         << " (" << std::to_string(onnx_dtype) << ")" << endl;
+    return false;
+  }
+  return true;
+}
+
 template<typename OnnxDims>
 inline Status convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) {
   enum { BATCH_DIM = 0 };
