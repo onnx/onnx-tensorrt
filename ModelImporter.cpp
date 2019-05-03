@@ -50,7 +50,7 @@ Status importInput(ImporterContext* importer_ctx,
                    nvinfer1::ITensor** tensor) {
   auto const& onnx_tensor_type = input.type().tensor_type();
   nvinfer1::DataType trt_dtype;
-  ASSERT(convert_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
+  ASSERT(convert_input_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
          ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(onnx_tensor_type.shape().dim().size() > 0,
          ErrorCode::kUNSUPPORTED_NODE);
