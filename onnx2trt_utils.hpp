@@ -120,6 +120,18 @@ inline const char* get_dtype_name(int32_t onnx_dtype) {
   }
 }
 
+inline bool check_for_input(::ONNX_NAMESPACE::NodeProto const& node, std::string const& input_node)
+{
+  for (auto input : node.input())
+  {
+    if (input_node == input)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 inline bool convert_dtype(int32_t onnx_dtype,
                           nvinfer1::DataType* trt_dtype) {
   switch( onnx_dtype ) {
