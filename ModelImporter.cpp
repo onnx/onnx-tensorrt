@@ -50,15 +50,15 @@ Status importInput(ImporterContext* importer_ctx,
                    nvinfer1::ITensor** tensor) {
   auto const& onnx_tensor_type = input.type().tensor_type();
   nvinfer1::DataType trt_dtype;
-  ASSERT(convert_input_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
-         ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(onnx_tensor_type.shape().dim().size() > 0,
-         ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT_INPUT(convert_input_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
+         ErrorCode::kUNSUPPORTED_NODE, input.name());
+  ASSERT_INPUT(onnx_tensor_type.shape().dim().size() > 0,
+         ErrorCode::kUNSUPPORTED_NODE, input.name());
   nvinfer1::Dims trt_dims;
   TRT_CHECK(convert_dims(onnx_tensor_type.shape().dim(), trt_dims));
   nvinfer1::ITensor* user_input = importer_ctx->getUserInput(input.name().c_str());
   if( user_input ) {
-    ASSERT(user_input, ErrorCode::kINVALID_VALUE);
+    ASSERT_INPUT(user_input, ErrorCode::kINVALID_VALUE, input.name());
     // Note: We intentionally don't check dimensions/dtype here so that users
     //       can change the input shape/type if they want to.
     //ASSERT(trt_dims  == user_input->getDimensions(), ErrorCode::kINVALID_VALUE);
@@ -76,11 +76,11 @@ Status importInput(ImporterContext* importer_ctx,
                         nvinfer1::DimensionType::kCHANNEL :
                         nvinfer1::DimensionType::kSPATIAL);
   }
-  ASSERT(trt_dims.nbDims <= 3, ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT_INPUT(trt_dims.nbDims <= 3, ErrorCode::kUNSUPPORTED_NODE, input.name());
 #endif // NV_TENSORRT_MAJOR < 4
-  ASSERT(*tensor = importer_ctx->network()->addInput(
+  ASSERT_INPUT(*tensor = importer_ctx->network()->addInput(
            input.name().c_str(), trt_dtype, trt_dims),
-         ErrorCode::kUNSUPPORTED_NODE);
+         ErrorCode::kUNSUPPORTED_NODE, input.name());
   return Status::success();
 }
 
@@ -111,25 +111,25 @@ Status importInputs(ImporterContext* importer_ctx,
     if( initializer_map.count(input.name()) ) {
       ::ONNX_NAMESPACE::TensorProto const& initializer = *initializer_map.at(input.name());
       ShapedWeights weights;
-      ASSERT(convert_onnx_weights(initializer, &weights),
-             ErrorCode::kUNSUPPORTED_NODE);
+      ASSERT_INPUT(convert_onnx_weights(initializer, &weights),
+             ErrorCode::kUNSUPPORTED_NODE,input.name());
       tensor = weights;
     } else if (weight_map.count(input.name())) {
       onnxTensorDescriptorV1 const& weight_desc = *weight_map.at(input.name());
       ShapedWeights weights;
       // We only support grabbing weight from CPU memory now
-      ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
-             ErrorCode::kINVALID_VALUE);
+      ASSERT_INPUT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
+             ErrorCode::kINVALID_VALUE, input.name());
 
-      ASSERT(convert_weight_descriptor(weight_desc, &weights),
-             ErrorCode::kUNSUPPORTED_NODE);
+      ASSERT_INPUT(convert_weight_descriptor(weight_desc, &weights),
+             ErrorCode::kUNSUPPORTED_NODE, input.name());
       tensor = weights;
     } else {
       nvinfer1::ITensor* tensor_ptr;
       TRT_CHECK(importInput(importer_ctx, input, &tensor_ptr));
       tensor = tensor_ptr;
     }
-    ASSERT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH);
+    ASSERT_INPUT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH,input.name());
     tensors->insert({input.name(), tensor});
   }
   return Status::success();
@@ -329,6 +329,36 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
 
   bool newSubGraph(true), allSupported(true);
 
+  // Parse the graph and see if we hit any parsing errors
+  allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
+
+  size_t error_node = std::numeric_limits<size_t>::max();
+  std::string input_node = "";
+  
+  if (!allSupported)
+  {
+    int nerror = getNbErrors();
+    for (int i = 0; i < nerror; ++i) 
+    {
+      nvonnxparser::IParserError const* error = getError(i);
+      if (error->node() != -1) 
+      {
+        cout << "Found unsupport node: " << error->node() << endl;
+        error_node = error->node();
+        allSupported = false;
+      }
+      // The node that we failed on is one of the input nodes (-1). Get the name of the input node
+      // that we failed on and remove all nodes that spawn out of it.
+      else
+      {
+        // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
+        // around MAKE_INPUT_ERROR.
+        cout << "Found unsupported input: " << error->file() << endl;
+        input_node = error->file();
+      }
+    }
+  }
+
   // Sort and partition supported subgraphs
   NodesContainer_t topological_order;
   if (!toposort(model.graph().node(), &topological_order)) {
@@ -338,7 +368,9 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   for (int node_idx : topological_order) 
   {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
-    if (this->supportsOperator(node.op_type().c_str())) 
+    // Check for connecting nodes to faulty input nodes and mark them as unsupported
+    bool contains_input = (input_node == "") ? false : check_for_input(node, input_node);
+    if (this->supportsOperator(node.op_type().c_str()) && !contains_input) 
     {
       if (newSubGraph) 
       {
@@ -358,9 +390,8 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       allSupported = false;
     }
   }
-  size_t error_node = std::numeric_limits<size_t>::max();
-  // Parse the graph and see if we hit any parsing errors
-  if (!parse(serialized_onnx_model, serialized_onnx_model_size))
+
+  if (!allSupported)
   {
     // We hit some errors when parsing. Iterate through them to find the failing node.
     int nerror = getNbErrors();
@@ -373,10 +404,10 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         allSupported = false;
       }
       // The node that we failed on is one of the input nodes (-1). Since TRT cannot parse the
-      // inputs the support for the partitioned subgraphs are unknown, so return false here.
+      // inputs return false.
       else
       {
-        return false;
+        return allSupported;
       }
     }
     // Update the subgraph collection.
