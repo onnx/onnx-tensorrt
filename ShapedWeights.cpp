@@ -75,7 +75,7 @@ return (bool)this->values;
 }
 
 ShapedWeights::operator nvinfer1::Weights() const {
-  nvinfer1::Weights w;
+  nvinfer1::Weights w {};
   // If INT64 weights, check if all the values can be cast down to INT32.
   if (this->type == ::ONNX_NAMESPACE::TensorProto::INT64)
   {
