@@ -26,6 +26,23 @@
 
 namespace onnx2trt {
 
+bool convertINT64(void* weightValues, const size_t nbWeights, std::vector<int32_t>& converted_weights)
+{
+  int64_t * weights = static_cast<int64_t *>(weightValues);
+  for (size_t i = 0; i < nbWeights; i++)
+  {
+    if (weights[i] > INT32_MAX || weights[i] < INT32_MIN)
+    {
+      return false;
+    }
+    else
+    {
+      converted_weights[i] = static_cast<int32_t>(weights[i]);
+    }
+  }
+  return true;
+}
+
 size_t ShapedWeights::count() const {
   if( this->shape.nbDims == 0 ) {
     return 0;
@@ -54,15 +71,39 @@ size_t ShapedWeights::size_bytes() const {
 }
 
 ShapedWeights::operator bool() const {
-  return (bool)this->values;
+return (bool)this->values;
 }
 
 ShapedWeights::operator nvinfer1::Weights() const {
-  nvinfer1::Weights w;
+  nvinfer1::Weights w {};
+  // If INT64 weights, check if all the values can be cast down to INT32.
+  if (this->type == ::ONNX_NAMESPACE::TensorProto::INT64)
+  {
+    cout << "WARNING: Your ONNX model has been generated with INT64 weights, "
+         << "while TensorRT does not natively support INT64. "
+         << "Attempting to cast down to INT32." << endl;
+    std::vector<int32_t> int32_weights;
+    int32_weights.resize(this->count());
+
+    if (!onnx2trt::convertINT64(this->values, this->count(), int32_weights))
+    {
+      cerr << "ERROR: Weights cannot be cast down to INT32." << endl;
+      // Return empty w on failure
+      return w;
+    }
+    else
+    {
+      w.values = static_cast<void*>(int32_weights.data());
+      cout << "Successfully casted down to INT32." << endl;
+    }
+  }
+  else
+  {
+    w.values = this->values;
+  }
   bool supported_type = convert_dtype(this->type, &w.type);
   (void)supported_type;
   assert(supported_type);
-  w.values = this->values;
   w.count = this->count();
   return w;
 }
