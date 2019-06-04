@@ -139,6 +139,31 @@ flatten_tensor(IImporterContext* ctx,
   return reshape_tensor(ctx, tensor, new_shape);
 }
 
+NodeImportResult unaryHelper(IImporterContext* ctx,
+    const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::UnaryOperation op)
+{
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::IUnaryLayer* layer = ctx->network()->addUnary(input, op);
+    return {{layer->getOutput(0)}};
+}
+
+NodeImportResult activationHelper(IImporterContext* ctx,
+    const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ActivationType op, float* alpha = nullptr, float* beta = nullptr)
+{
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::IActivationLayer* layer = ctx->network()->addActivation(input, op);
+    if (alpha)
+    {
+        layer->setAlpha(*alpha);
+    }
+    if (beta)
+    {
+        layer->setBeta(*beta);
+    }
+
+    return {{layer->getOutput(0)}};
+}
+
 // Adds a constant scalar to the network in the form of a constant layer.
 template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
@@ -496,6 +521,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Abs) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kABS);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Acos)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOS);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Acosh)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Add) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
@@ -521,6 +556,27 @@ DEFINE_BUILTIN_OP_IMPORTER(ArgMin)
     return argMinMaxHelper(ctx, node, inputs, nvinfer1::TopKOperation::kMIN);
 }
 #endif // #if NV_TENSORRT_MAJOR >= 4
+
+
+DEFINE_BUILTIN_OP_IMPORTER(Asin)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kASIN);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Asinh)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kASINH);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Atan)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kATAN);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Atanh)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kATANH);
+}
 
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -629,9 +685,7 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
-  ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::CEIL),
-                                     {&inputs.at(0).tensor()}));
+   return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kCEIL);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
@@ -650,13 +704,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
 DEFINE_BUILTIN_OP_IMPORTER(Clip) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
-  // TODO: Need to use numeric_limits<half> etc for different input types?
-  float minval = attrs.get("min", std::numeric_limits<float>::lowest());
-  float maxval = attrs.get("max", std::numeric_limits<float>::max());
-  RETURN_FIRST_OUTPUT(
-    ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::CLIP,
-                                             minval, maxval),
-                   {&inputs.at(0).tensor()}));
+  // beta is the upper bound.
+  float alpha = attrs.get("min", std::numeric_limits<float>::lowest());
+  float beta = attrs.get("max", std::numeric_limits<float>::max());
+  return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kCLIP, &alpha, &beta);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Concat) {
@@ -868,6 +919,17 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   return {{tensor_ptr}};
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Cos)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kCOS);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Cosh)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kCOSH);
+}
+
+
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -949,9 +1011,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Dropout) {
 DEFINE_BUILTIN_OP_IMPORTER(Elu) {
   OnnxAttrs attrs(node);
   float alpha = attrs.get<float>("alpha", 1.f);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::ELU, alpha),
-                     {&inputs.at(0).tensor()}));
+  return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kELU, &alpha);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Exp) {
@@ -991,9 +1051,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
 #endif // NV_TENSORRT_MAJOR >= 4
 
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
-  ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::FLOOR),
-                                     {&inputs.at(0).tensor()}));
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kFLOOR);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
@@ -1130,10 +1188,7 @@ DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid) {
   OnnxAttrs attrs(node);
   float alpha = attrs.get<float>("alpha", 0.2f);
   float beta  = attrs.get<float>("beta",  0.5f);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(
-          new FancyActivationPlugin(FancyActivationPlugin::HARD_SIGMOID, alpha, beta),
-          {&inputs.at(0).tensor()}));
+  return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kHARD_SIGMOID, &alpha, &beta);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Identity) {
@@ -1176,13 +1231,9 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(LeakyRelu) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  OnnxAttrs attrs(node);
-  float alpha = attrs.get<float>("alpha", 0.01f);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(
-         new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
-         {&inputs.at(0).tensor()}));
+    OnnxAttrs attrs(node);
+    float alpha = attrs.get<float>("alpha", 0.01f);
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kLEAKY_RELU, &alpha);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Log) {
@@ -1394,6 +1445,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad) {
   end_padding.w() = onnx_padding[7];
   RETURN_FIRST_OUTPUT(
     ctx->network()->addPadding(tensor, beg_padding, end_padding));
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus) {
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    OnnxAttrs attrs(node);
+    float alpha = attrs.get<float>("alpha");
+    float beta = attrs.get<float>("beta");
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSOFTPLUS, &alpha, &beta);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Pow) {
@@ -1650,15 +1709,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
 //  //       Return {{output 0, output 1}}, but take care of outputs being optional (i.e., check how many outputs there are, as well as output_sequence)
 //}
 
+DEFINE_BUILTIN_OP_IMPORTER(ScaledTanh) {
+  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+  OnnxAttrs attrs(node);
+  float alpha = attrs.get<float>("alpha");
+  float beta = attrs.get<float>("beta");
+  return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSCALED_TANH, &alpha, &beta);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Selu) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   OnnxAttrs attrs(node);
   float alpha = attrs.get("alpha", 1.6732f);
-  float gamma = attrs.get("gamma", 1.0507f);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(
-          new FancyActivationPlugin(FancyActivationPlugin::SELU, alpha, gamma),
-          {&inputs.at(0).tensor()}));
+  float beta = attrs.get("gamma", 1.0507f);
+  return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSELU, &alpha, &beta);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Shape) {
@@ -1682,6 +1746,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Sigmoid) {
   RETURN_FIRST_OUTPUT(
     ctx->network()->addActivation(
       inputs.at(0).tensor(), nvinfer1::ActivationType::kSIGMOID));
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Sin)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kSIN);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Sinh)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kSINH);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Size) {
@@ -1830,17 +1904,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softplus) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::SOFTPLUS),
-                     {&inputs.at(0).tensor()}));
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSOFTPLUS);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softsign) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::SOFTSIGN),
-                     {&inputs.at(0).tensor()}));
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSOFTSIGN);
 }
 
 #if NV_TENSORRT_MAJOR >= 4
@@ -1995,6 +2065,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Sum) {
     ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Tan)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kTAN);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Tanh) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(
@@ -2003,13 +2078,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Tanh) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu) {
-  ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  OnnxAttrs attrs(node);
-  float alpha = attrs.get<float>("alpha", 1.f);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(
-         new FancyActivationPlugin(FancyActivationPlugin::THRESHOLDED_RELU, alpha),
-         {&inputs.at(0).tensor()}));
+    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+    OnnxAttrs attrs(node);
+    float alpha = attrs.get<float>("alpha", 1.f);
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kTHRESHOLDED_RELU, &alpha);
 }
 
 #if NV_TENSORRT_MAJOR >= 4
