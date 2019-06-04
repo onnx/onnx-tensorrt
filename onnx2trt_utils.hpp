@@ -120,6 +120,18 @@ inline const char* get_dtype_name(int32_t onnx_dtype) {
   }
 }
 
+inline bool check_for_input(::ONNX_NAMESPACE::NodeProto const& node, std::string const& input_node)
+{
+  for (auto input : node.input())
+  {
+    if (input_node == input)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 inline bool convert_dtype(int32_t onnx_dtype,
                           nvinfer1::DataType* trt_dtype) {
   switch( onnx_dtype ) {
@@ -129,6 +141,23 @@ inline bool convert_dtype(int32_t onnx_dtype,
 #if NV_TENSORRT_MAJOR >= 4
   // See ShapedWeights.cpp for sanity check if all values can be safetly downcasted to INT32
   case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+  case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+#endif
+  default:
+    cerr << "Unsupported ONNX data type: " << get_dtype_name(onnx_dtype)
+         << " (" << std::to_string(onnx_dtype) << ")" << endl;
+    return false;
+  }
+  return true;
+}
+
+inline bool convert_input_dtype(int32_t onnx_dtype,
+                          nvinfer1::DataType* trt_dtype) {
+  switch( onnx_dtype ) {
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
+  case ::ONNX_NAMESPACE::TensorProto::INT8:    *trt_dtype = nvinfer1::DataType::kINT8;  break;
+  case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
+#if NV_TENSORRT_MAJOR >= 4
   case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
 #endif
   default:
