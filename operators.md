@@ -8,7 +8,6 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 
 ## Operator Support Matrix
 
-
 | ONNX Operator                   |  Supported   | TRT Version   | Notes                                                                      |
 |---------------------------------|--------------|---------------|----------------------------------------------------------------------------|
 | Abs                             | Y            |               |                                                                            |
@@ -22,7 +21,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 | Asinh                           | Y            | 5.1           |                                                                            |
 | Atan                            | Y            | 5.1           |                                                                            |
 | Atanh                           | Y            | 5.1           |                                                                            |
-| AveragePool                     | Y            |               |                                                                            |
+| AveragePool                     | Y            |               | 2D pooling only.                                                           |
 | BatchNormalization              | Y            |               |                                                                            |
 | Cast                            | Y            | 5.1           |                                                                            |
 | Ceil                            | Y            |               |                                                                            |
@@ -49,9 +48,9 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 | GRU                             | N            | N/A           |                                                                            |
 | Gather                          | Y            | 4.0           |                                                                            |
 | Gemm                            | Y            |               |                                                                            |
-| GlobalAveragePool               | Y            |               |                                                                            |
+| GlobalAveragePool               | Y            |               | 2D pooling only.                                                           |
 | GlobalLpPool                    | N            | N/A           |                                                                            |
-| GlobalMaxPool                   | Y            |               |                                                                            |
+| GlobalMaxPool                   | Y            |               | 2D pooling only.                                                           |
 | Greater                         | N            | N/A           |                                                                            |
 | HardSigmoid                     | Y            |               |                                                                            |
 | Hardmax                         | N            | N/A           |                                                                            |
@@ -70,7 +69,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 | LpPool                          | N            | N/A           |                                                                            |
 | MatMul                          | Y            |               |                                                                            |
 | Max                             | Y            |               |                                                                            |
-| MaxPool                         | Y            |               |                                                                            |
+| MaxPool                         | Y            |               | 2D pooling only.                                                           |
 | MaxRoiPool                      | N            | N/A           |                                                                            |
 | MaxUnpool                       | N            | N/A           |                                                                            |
 | Mean                            | Y            | 4.0           |                                                                            |
@@ -144,4 +143,3 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 | experimental Scale              | N            | N/A           |                                                                            |
 | experimental ScaledTanh         | Y            | 5.1           |                                                                            |
 | experimental ThresholdedRelu    | Y            |               |                                                                            |
-
