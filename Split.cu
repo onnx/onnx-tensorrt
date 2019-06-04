@@ -20,9 +20,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include "Split.hpp"
+#include <algorithm>
 #include <cuda_fp16.h>
 #include <cassert>
+
+#include "Split.hpp"
 
 nvinfer1::Dims SplitPlugin::getOutputDimensions(int index,
                                                 const nvinfer1::Dims *inputDims,
@@ -118,7 +120,7 @@ int SplitPlugin::enqueue(int batchSize,
   dim3 grid(std::min((_nx - 1) / block.x + 1, 65535u),
             std::min((_ny - 1) / block.y + 1, 65535u),
             std::min((_nz - 1) / block.z + 1, 65535u));
-  if (getDataType()==nvinfer1::DataType::kFLOAT) {	    
+  if (getDataType()==nvinfer1::DataType::kFLOAT) {      
     split_kernel<<<grid, block, 0, stream>>>
       (_d_segment_offsets.size(), d_segment_offsets_ptr, idata, odatas,
        _nx, _ny, nz);

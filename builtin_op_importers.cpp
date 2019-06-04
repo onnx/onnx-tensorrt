@@ -621,7 +621,7 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::CEIL),
+  RETURN_FIRST_OUTPUT(ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::CEIL),
                                      {&inputs.at(0).tensor()}));
 }
 
@@ -645,7 +645,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip) {
   float minval = attrs.get("min", std::numeric_limits<float>::lowest());
   float maxval = attrs.get("max", std::numeric_limits<float>::max());
   RETURN_FIRST_OUTPUT(
-    ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::CLIP,
+    ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::CLIP,
                                              minval, maxval),
                    {&inputs.at(0).tensor()}));
 }
@@ -677,7 +677,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
     ASSERT(inputs.at(0).shape().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
     using namespace nvinfer1::plugin;
     RETURN_FIRST_OUTPUT(
-        ctx->addPlugin(
+        ctx->addPluginV2(
             new NvPlugin(createConcatPlugin(1 + axis, false)), tensors));
   }
 #endif // NV_TENSORRT_MAJOR < 4
@@ -941,7 +941,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Elu) {
   OnnxAttrs attrs(node);
   float alpha = attrs.get<float>("alpha", 1.f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::ELU, alpha),
+      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::ELU, alpha),
                      {&inputs.at(0).tensor()}));
 }
 
@@ -983,7 +983,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Floor) {
   ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::FLOOR),
+  RETURN_FIRST_OUTPUT(ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::FLOOR),
                                      {&inputs.at(0).tensor()}));
 }
 
@@ -1076,7 +1076,7 @@ DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid) {
   float alpha = attrs.get<float>("alpha", 0.2f);
   float beta  = attrs.get<float>("beta",  0.5f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
+      ctx->addPluginV2(
           new FancyActivationPlugin(FancyActivationPlugin::HARD_SIGMOID, alpha, beta),
           {&inputs.at(0).tensor()}));
 }
@@ -1115,7 +1115,7 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization) {
   // HACK TODO: Values < ~1e-4 were found to cause corrupt output in a RTST model. Need to suss this out.
   epsilon = std::max(epsilon, 1e-4f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
+      ctx->addPluginV2(
         new InstanceNormalizationPlugin(epsilon, scale_weights, bias_weights),
         {&inputs.at(0).tensor()}));
 }
@@ -1125,7 +1125,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LeakyRelu) {
   OnnxAttrs attrs(node);
   float alpha = attrs.get<float>("alpha", 0.01f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
+      ctx->addPluginV2(
          new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
          {&inputs.at(0).tensor()}));
 }
@@ -1407,7 +1407,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Pow) {
 //   ASSERT(weights.shape == scalar_shape, ErrorCode::kUNSUPPORTED_NODE);
 //   float alpha = *reinterpret_cast<float const*>(weights.values);
 //   RETURN_FIRST_OUTPUT(
-//       ctx->addPlugin(
+//       ctx->addPluginV2(
 //          new FancyActivationPlugin(FancyActivationPlugin::LEAKY_RELU, alpha),
 //          {&inputs.at(0).tensor()}));
 // }
@@ -1640,7 +1640,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Selu) {
   float alpha = attrs.get("alpha", 1.6732f);
   float gamma = attrs.get("gamma", 1.0507f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
+      ctx->addPluginV2(
           new FancyActivationPlugin(FancyActivationPlugin::SELU, alpha, gamma),
           {&inputs.at(0).tensor()}));
 }
@@ -1816,14 +1816,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Softmax) {
 DEFINE_BUILTIN_OP_IMPORTER(Softplus) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::SOFTPLUS),
+      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::SOFTPLUS),
                      {&inputs.at(0).tensor()}));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softsign) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(new FancyActivationPlugin(FancyActivationPlugin::SOFTSIGN),
+      ctx->addPluginV2(new FancyActivationPlugin(FancyActivationPlugin::SOFTSIGN),
                      {&inputs.at(0).tensor()}));
 }
 
@@ -1902,8 +1902,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Split) {
     ASSERT(dims.d[axis] % noutput == 0, ErrorCode::kINVALID_NODE);
     output_lengths.assign(noutput, dims.d[axis] / noutput);
   }
-  nvinfer1::IPluginLayer* layer =
-      ctx->addPlugin(new SplitPlugin(axis, output_lengths),
+  nvinfer1::IPluginV2Layer* layer =
+      ctx->addPluginV2(new SplitPlugin(axis, output_lengths),
                      {&inputs.at(0).tensor()});
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(layer->getNbOutputs() == noutput, ErrorCode::kINTERNAL_ERROR);
@@ -1991,7 +1991,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu) {
   OnnxAttrs attrs(node);
   float alpha = attrs.get<float>("alpha", 1.f);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(
+      ctx->addPluginV2(
          new FancyActivationPlugin(FancyActivationPlugin::THRESHOLDED_RELU, alpha),
          {&inputs.at(0).tensor()}));
 }
@@ -2127,7 +2127,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
   auto mode = attrs.get<std::string>("mode", "nearest");
   ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
   RETURN_FIRST_OUTPUT(
-      ctx->addPlugin(new ResizeNearestPlugin(scale), {&inputs.at(0).tensor()}));
+      ctx->addPluginV2(new ResizeNearestPlugin(scale), {&inputs.at(0).tensor()}));
 }
 
 } // namespace

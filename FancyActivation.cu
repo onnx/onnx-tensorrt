@@ -54,7 +54,7 @@ int FancyActivationPlugin::doEnqueue(int batchSize,
   Data*       odata = static_cast<Data*      >(outputs[0]);
   // Note: These local-scope copies are needed for lambda capture
   float alpha = _alpha;
-  float gamma = _gamma;
+  float beta = _beta;
 
   switch( _activation_type ) {
   case LEAKY_RELU:   UNARY_TRANSFORM(CAPTURE(alpha), max(x, alpha * x)); break;
@@ -62,17 +62,17 @@ int FancyActivationPlugin::doEnqueue(int batchSize,
                                           x < 0 ?
                                           alpha * (expf(x) - 1) :
                                           x); break;
-  case SELU:         UNARY_TRANSFORM(CAPTURE(alpha, gamma),
+  case SELU:         UNARY_TRANSFORM(CAPTURE(alpha, beta),
                                           x <= 0 ?
-                                          gamma * (alpha * (expf(x) - 1.f)) :
-                                          gamma * x); break;
+                                          beta * (alpha * (expf(x) - 1.f)) :
+                                          beta * x); break;
   case SOFTPLUS:     UNARY_TRANSFORM(CAPTURE(), logf(expf(x) + 1)); break;
   case SOFTSIGN:     UNARY_TRANSFORM(CAPTURE(), x / (1.f + fabs(x))); break;
-  case HARD_SIGMOID: UNARY_TRANSFORM(CAPTURE(alpha, gamma),
-                                     max(0.f, min(1.f, alpha * x + gamma))); break;
+  case HARD_SIGMOID: UNARY_TRANSFORM(CAPTURE(alpha, beta),
+                                     max(0.f, min(1.f, alpha * x + beta))); break;
   case HARD_TANH:    UNARY_TRANSFORM(CAPTURE(), max(-1.f, min(1.f, x))); break;
-  case CLIP:         UNARY_TRANSFORM(CAPTURE(alpha, gamma),
-                                     max(alpha, min(gamma, x))); break;
+  case CLIP:         UNARY_TRANSFORM(CAPTURE(alpha, beta),
+                                     max(alpha, min(beta, x))); break;
   case FLOOR:        UNARY_TRANSFORM(CAPTURE(), floorf(x)); break;
   case CEIL:         UNARY_TRANSFORM(CAPTURE(), ceilf(x)); break;
   case THRESHOLDED_RELU: UNARY_TRANSFORM(CAPTURE(alpha), x > alpha ? x : 0); break;
@@ -84,7 +84,7 @@ int FancyActivationPlugin::doEnqueue(int batchSize,
 int FancyActivationPlugin::enqueue(int batchSize,
                                    const void *const *inputs, void **outputs,
                                    void *workspace, cudaStream_t stream) {
-  if (getDataType()==nvinfer1::DataType::kFLOAT) {				
+  if (getDataType()==nvinfer1::DataType::kFLOAT) {        
     return doEnqueue<float>(batchSize, inputs, outputs, workspace, stream);
   } else {
 #if CUDART_VERSION < 9000

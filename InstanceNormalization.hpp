@@ -21,6 +21,7 @@
  */
 
 #pragma once
+#include <NvInfer.h>
 
 #include "plugin.hpp"
 #include "serialize.hpp"
@@ -29,7 +30,12 @@
 
 typedef unsigned short half_type;
 
-class InstanceNormalizationPlugin final : public onnx2trt::Plugin {
+namespace {
+    constexpr const char* INSTANCE_PLUGIN_VERSION{"001"};
+    constexpr const char* INSTANCE_PLUGIN_NAME{"InstanceNormalization"};
+}
+
+class InstanceNormalizationPlugin final : public onnx2trt::PluginV2 {
   float _epsilon;
   int   _nchan;
   std::vector<float> _h_scale;
@@ -37,6 +43,7 @@ class InstanceNormalizationPlugin final : public onnx2trt::Plugin {
   float* _d_scale;
   float* _d_bias;
   bool _initialized;
+  nvinfer1::Weights _scale, _bias;
   cudnnHandle_t _cudnn_handle;
   cudnnTensorDescriptor_t _x_desc, _y_desc, _b_desc;
 protected:
@@ -47,13 +54,13 @@ protected:
     deserialize_value(&serialData, &serialLength, &_h_scale);
     deserialize_value(&serialData, &serialLength, &_h_bias);
   }
-  size_t getSerializationSize() override {
+  size_t getSerializationSize() const override {
     return (serialized_size(_epsilon) +
             serialized_size(_nchan) +
             serialized_size(_h_scale) +
             serialized_size(_h_bias)) + getBaseSerializationSize();
   }
-  void serialize(void *buffer) override {
+  void serialize(void *buffer) const override {
     serializeBase(buffer);
     serialize_value(&buffer, _epsilon);
     serialize_value(&buffer, _nchan);
@@ -67,7 +74,18 @@ public:
   InstanceNormalizationPlugin(void const* serialData, size_t serialLength) : _initialized(false) {
     this->deserialize(serialData, serialLength);
   }
-  const char* getPluginType() const override { return "InstanceNormalization"; }
+  const char* getPluginType() const override { return INSTANCE_PLUGIN_NAME; }
+
+  virtual void destroy() override { delete this; }
+
+  virtual nvinfer1::IPluginV2* clone() const override { return new InstanceNormalizationPlugin{_epsilon, _scale, _bias}; }
+
+  virtual const char* getPluginVersion() const override { return INSTANCE_PLUGIN_VERSION; }
+
+  virtual void setPluginNamespace(const char* pluginNamespace) override {}
+
+  virtual const char* getPluginNamespace() const override { return ""; }
+
   bool supportsFormat(nvinfer1::DataType type,
                       nvinfer1::PluginFormat format) const override;
   int getNbOutputs() const override { return 1; }
@@ -87,3 +105,29 @@ public:
   size_t getWorkspaceSize(int maxBatchSize) const override;
   ~InstanceNormalizationPlugin();
 };
+
+class InstanceNormalizationPluginCreator : public nvinfer1::IPluginCreator
+{
+public:
+  InstanceNormalizationPluginCreator() {}
+
+  ~InstanceNormalizationPluginCreator() {}
+
+  const char* getPluginName() const { return INSTANCE_PLUGIN_NAME; }
+
+  const char* getPluginVersion() const { return INSTANCE_PLUGIN_VERSION; }
+
+  const nvinfer1::PluginFieldCollection* getFieldNames() { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* createPlugin(const char* name, const nvinfer1::PluginFieldCollection* fc) { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* deserializePlugin(const char* name, const void* serialData, size_t serialLength) { return new InstanceNormalizationPlugin{serialData, serialLength}; }
+
+  void setPluginNamespace(const char* libNamespace) { mNamespace = libNamespace; }
+
+  const char* getPluginNamespace() const { return mNamespace.c_str(); }
+private:
+    std::string mNamespace;
+};
+
+REGISTER_TENSORRT_PLUGIN(InstanceNormalizationPluginCreator);

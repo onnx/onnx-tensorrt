@@ -38,8 +38,13 @@ namespace onnx2trt {
 // Adapts a plugin so that its type is automatically serialized, enabling it
 // to be identified when deserializing.
 class Plugin : public nvinfer1::IPluginExt, public IOwnable {
+
 public:
   virtual const char* getPluginType() const = 0;
+
+#if NV_TENSORRT_MAJOR > 4
+  virtual const char* getPluginVersion() const = 0;
+#endif
 
   nvinfer1::Dims const&  getInputDims(int index) const { return _input_dims.at(index); }
   size_t                 getMaxBatchSize()       const { return _max_batch_size; }
@@ -72,22 +77,65 @@ protected:
   virtual ~Plugin() {}
 };
 
-class PluginAdapter : public Plugin {
-protected:
-  nvinfer1::IPlugin*     _plugin;
-  nvinfer1::IPluginExt*  _ext;
+class PluginV2 : public nvinfer1::IPluginV2, public IOwnable {
+
 public:
-  PluginAdapter(nvinfer1::IPlugin* plugin) :
-    _plugin(plugin), _ext(dynamic_cast<IPluginExt*>(plugin)) {}
+  virtual const char* getPluginType() const = 0;
+
+  virtual const char* getPluginVersion() const = 0;
+
+  nvinfer1::Dims const&  getInputDims(int index) const { return _input_dims.at(index); }
+  size_t                 getMaxBatchSize()       const { return _max_batch_size; }
+  nvinfer1::DataType     getDataType()           const { return _data_type; }
+  nvinfer1::PluginFormat getDataFormat()         const { return _data_format; }
+
+  size_t getWorkspaceSize(int) const override { return 0; }
+
+  int         initialize()           override { return 0;}
+  void        terminate()            override {}
+
+  bool supportsFormat(nvinfer1::DataType type,
+                      nvinfer1::PluginFormat format) const override;
+
+  void configureWithFormat(const nvinfer1::Dims* inputDims, int nbInputs,
+                           const nvinfer1::Dims* outputDims, int nbOutputs,
+                           nvinfer1::DataType type,
+                           nvinfer1::PluginFormat format,
+                           int maxBatchSize) override;
+  void destroy() override { delete this; }
+protected:
+  void   deserializeBase(void const*& serialData, size_t& serialLength);
+  size_t getBaseSerializationSize() const;
+  void   serializeBase(void*& buffer) const;
+
+  std::vector<nvinfer1::Dims> _input_dims;
+  size_t                      _max_batch_size;
+  nvinfer1::DataType          _data_type;
+  nvinfer1::PluginFormat      _data_format;
+  virtual ~PluginV2() {}
+};
+
+class PluginAdapter : public PluginV2 {
+protected:
+  nvinfer1::IPluginV2*     _pluginV2;
+public:
+  PluginAdapter(nvinfer1::IPluginV2* pluginV2) :
+    _pluginV2(pluginV2) {}
   virtual int getNbOutputs() const override;
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputDims,
                                              int nbInputs) override ;
-  virtual void serialize(void* buffer) override;
-  virtual size_t getSerializationSize() override;
+  virtual void serialize(void* buffer) const override;
+  virtual size_t getSerializationSize() const override;
 
   virtual int  initialize() override;
   virtual void terminate() override;
+
+  virtual void destroy() override;
+  virtual nvinfer1::IPluginV2* clone() const override;
+  virtual const char* getPluginVersion() const override;
+  virtual const char* getPluginNamespace() const override;
+  virtual void setPluginNamespace(const char* pluginNamespace) override;
 
   virtual bool supportsFormat(nvinfer1::DataType type, nvinfer1::PluginFormat format) const override;
   virtual void configureWithFormat(const nvinfer1::Dims *inputDims, int nbInputs,
@@ -105,17 +153,17 @@ public:
 // its plugin type.
 class TypeSerializingPlugin : public PluginAdapter {
   UniqueOwnable _owned_plugin;
-  Plugin* _plugin;
+  PluginV2* _plugin;
 public:
-  TypeSerializingPlugin(Plugin* plugin)
+  TypeSerializingPlugin(PluginV2* plugin)
     : PluginAdapter(plugin), _owned_plugin(plugin), _plugin(plugin) {}
-  void serialize(void* buffer) override {
+  void serialize(void* buffer) const override {
     const char* plugin_type = _plugin->getPluginType();
     serialize_value(&buffer, (const char*)REGISTERABLE_PLUGIN_MAGIC_STRING);
     serialize_value(&buffer, plugin_type);
     return _plugin->serialize(buffer);
   }
-  size_t getSerializationSize() override {
+  size_t getSerializationSize() const override {
     const char* plugin_type = _plugin->getPluginType();
     // Note: +1 for NULL-terminated string
     return (sizeof(REGISTERABLE_PLUGIN_MAGIC_STRING) + 1 +
@@ -125,18 +173,11 @@ public:
   const char* getPluginType() const override {
     return _plugin->getPluginType();
   }
-  void destroy() override { delete this; }
-};
+#if NV_TENSORRT_MAJOR > 4
+  const char* getPluginVersion() const override { return _plugin->getPluginType(); }
+#endif
 
-// Adapts nvinfer1::plugin::INvPlugin into onnx2trt::Plugin
-// (This enables existing NV plugins to be used in this plugin infrastructure)
-class NvPlugin : public PluginAdapter {
-  nvinfer1::plugin::INvPlugin*  _plugin;
-public:
-  NvPlugin(nvinfer1::plugin::INvPlugin* plugin)
-    : PluginAdapter(plugin), _plugin(plugin) {}
-  virtual const char* getPluginType() const override;
-  virtual void destroy() override;
+  void destroy() override { delete this; }
 };
 
 } // namespace onnx2trt
