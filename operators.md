@@ -10,7 +10,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, 
 
 
 | ONNX Operator                  |  Supported   | TRT Version   |
-|--------------------------------+--------------+---------------|
+|--------------------------------|--------------|---------------|
 | Abs                            | Y            |               |
 | Acos                           | Y            | 5.1           |
 | Acosh                          | Y            | 5.1           |
