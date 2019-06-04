@@ -4,11 +4,11 @@ Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/te
 
 See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
 
-## Supported TensorRT Versions:
+## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of TensorRT [5.1](https://developer.nvidia.com/nvidia-tensorrt-download)
+Development on the Master branch is for the latest version of [TensorRT (5.1)](https://developer.nvidia.com/nvidia-tensorrt-download)
 
-For versions < 5.1, clone and build from the [5.0](https://github.com/onnx/onnx-tensorrt/tree/v5.0) branch. 
+For versions < 5.1, clone and build from the [5.0 branch](https://github.com/onnx/onnx-tensorrt/tree/v5.0)
 
 
 ## Supported Operators
@@ -85,7 +85,9 @@ libnvonnxparser_runtime.so, which has its C++ API declared in this header:
     NvOnnxParserRuntime.h
 
 ### Python modules
-Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. No extra install is necessary.
+Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. Install them with
+
+    pip install <tensorrt_install_dir>/python/tensorrt-5.1.6.0-cp27-none-linux_x86_64.whl
 
 For earlier versions of TensorRT, the Python wrappers are built using SWIG.
 Build the Python wrappers and modules by running:
