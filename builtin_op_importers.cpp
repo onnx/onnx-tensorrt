@@ -74,17 +74,21 @@ transpose_tensor(IImporterContext* ctx,
     return nullptr;
   }
   nvinfer1::Dims shape = tensor.getDimensions();
-  nvinfer1::Dims new_shape;
-  new_shape.nbDims = shape.nbDims;
-  for( int i=0; i<new_shape.nbDims; ++i ) {
-    new_shape.d[i] = 0; // 0 => copy from source
-    new_shape.type[i] = shape.type[permute_dim_types ? perm.order[i] : i];
-  }
-  // TODO: Why do we get incorrect results when this condition is removed?
+  // Check if we need to transpose the data
   if( !is_transpose_required(shape, perm) ) {
     layer->setFirstTranspose(perm);
   }
-  layer->setReshapeDimensions(new_shape);
+  // Transpose can be simplified to be a reshape if no data re-ordering is required.
+  else
+  {
+    nvinfer1::Dims new_shape;
+    new_shape.nbDims = shape.nbDims;
+    for (int i = 0; i < new_shape.nbDims; i++)
+    {
+      new_shape.d[i] = shape.d[perm.order[i]];
+    }
+    layer->setReshapeDimensions(new_shape);
+  }
   return layer->getOutput(0);
 }
 
@@ -289,9 +293,13 @@ combineTensorsElementwise(IImporterContext* ctx,
       tensor_ptr = layer->getOutput(0);
     } else {
       tensor_ptr = &input.tensor();
-      // Note: TRT supports broadcasting, but ranks must match
-      // We can't expand the dims because the batch dim is always the left-most
-      ASSERT(input.shape().nbDims == tensors_ndim_max,
+      // Support broadcasting for tensor inputs by expanding dimensions.
+      if (tensor_ptr->getDimensions().nbDims != tensors_ndim_max)
+      {
+        nvinfer1::Dims new_dims = expand_dims(tensor_ptr->getDimensions(), tensors_ndim_max);
+        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_dims);
+      }
+      ASSERT(tensor_ptr->getDimensions().nbDims == tensors_ndim_max,
              ErrorCode::kUNSUPPORTED_NODE);
     }
 #endif

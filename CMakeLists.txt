@@ -97,6 +97,7 @@ set(EXECUTABLE_SOURCES
 
 set(API_TESTS_SOURCES
   getSupportedAPITest.cpp
+  ModelImporter.cpp
 )
 
 
@@ -105,7 +106,11 @@ set(HEADERS
   NvOnnxParserRuntime.h
 )
 
-FIND_PACKAGE(Protobuf REQUIRED)
+if (NOT TARGET protobuf::libprotobuf)
+  FIND_PACKAGE(Protobuf REQUIRED)
+else()
+  set(PROTOBUF_LIB "protobuf::libprotobuf")
+endif()
 
 if(NOT TARGET onnx_proto)
   # Note: This avoids libprotobuf.so complaining about name collisions at runtime
@@ -147,28 +152,32 @@ list(GET GPU_ARCHS -1 LATEST_GPU_ARCH)
 set(GENCODES "${GENCODES} -gencode arch=compute_${LATEST_GPU_ARCH},code=compute_${LATEST_GPU_ARCH}")
 
 if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
+  if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-cudart" )
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -cudart static")
+  endif()
   set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} \
-    -cudart static \
     -lineinfo \
     -g \
     --expt-extended-lambda \
     ${GENCODES} \
     ")
   
-  if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
+  if((NOT CXX_VERSION_DEFINED) AND (NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11"))
     list(APPEND CUDA_NVCC_FLAGS -std=c++11)
   endif()
 
 else()
+  if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-cudart" )
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -cudart static")
+  endif()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} \
-    -cudart static \
     -lineinfo \
     -g \
     --expt-extended-lambda \
     ${GENCODES} \
     ")
 
-  if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+11" )
+  if((NOT CXX_VERSION_DEFINED) AND (NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+11"))
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++11")
   endif()
 
@@ -278,7 +287,7 @@ target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} $
 add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
-target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 # --------------------------------
 # API Tests
@@ -287,7 +296,7 @@ target_link_libraries(onnx2trt PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CM
 add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
 target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
 
-target_link_libraries(getSupportedAPITest PUBLIC nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 
 # --------------------------------
