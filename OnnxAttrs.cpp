@@ -42,6 +42,12 @@ template<> std::vector<int> OnnxAttrs::get<std::vector<int>>(std::string key) co
   auto attr = this->at(key)->ints();
   return std::vector<int>(attr.begin(), attr.end());
 }
+
+template<> std::vector<int64_t> OnnxAttrs::get<std::vector<int64_t>>(std::string key) const {
+  auto attr = this->at(key)->ints();
+  return std::vector<int64_t>(attr.begin(), attr.end());
+}
+
 template<> std::vector<float> OnnxAttrs::get<std::vector<float>>(std::string key) const {
   auto attr = this->at(key)->floats();
   return std::vector<float>(attr.begin(), attr.end());
