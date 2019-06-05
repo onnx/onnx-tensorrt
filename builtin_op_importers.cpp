@@ -1256,13 +1256,42 @@ DEFINE_BUILTIN_OP_IMPORTER(Max) {
 
 DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
-  nvinfer1::Dims dims = tensor.getDimensions();
+  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
+  nvinfer1::Dims dims = tensor_ptr->getDimensions();
+  ASSERT(dims.nbDims >= 2, ErrorCode::kINVALID_NODE);
+#if NV_TENSORRT_MAJOR >= 4
+  bool need_to_expand_dims = (dims.nbDims == 2);
+  if( need_to_expand_dims ) {
+    // Expand spatial dims from 1D to 2D
+    nvinfer1::DimsCHW new_shape(dims.d[0], dims.d[1], 1);
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+    dims = tensor_ptr->getDimensions();
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::DimsHW kernel_size(dims.d[1], dims.d[2]);
-  RETURN_FIRST_OUTPUT(
-    ctx->network()->addPooling(
-      tensor, nvinfer1::PoolingType::kMAX, kernel_size));
+  nvinfer1::DimsHW kernel_size(1, 1), strides(1, 1), beg_padding(0, 0), end_padding(0, 0);
+  nvinfer1::PaddingMode paddingMode;
+  get_kernel_params(node, get_DimsHW_from_CHW(dims),
+                    &kernel_size, &strides, &beg_padding, &end_padding, paddingMode);
+  nvinfer1::IPoolingLayer* layer = ctx->network()->addPooling(
+    *tensor_ptr, nvinfer1::PoolingType::kMAX, kernel_size);
+  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+  layer->setStride(strides);
+  layer->setPaddingMode(paddingMode);
+  layer->setPrePadding(beg_padding);
+  layer->setPostPadding(end_padding);
+  tensor_ptr = layer->getOutput(0);
+  dims = tensor_ptr->getDimensions();
+#if NV_TENSORRT_MAJOR >= 4
+  if( need_to_expand_dims ) {
+    // Un-expand spatial dims back to 1D
+    nvinfer1::Dims new_shape{2, {dims.d[0], dims.d[1]}};
+    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+  }
+#endif // NV_TENSORRT_MAJOR >= 4
+  return {{tensor_ptr}};
 }
 
 #if NV_TENSORRT_MAJOR >= 4
