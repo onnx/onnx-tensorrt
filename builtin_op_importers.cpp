@@ -594,8 +594,9 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
 #endif // NV_TENSORRT_MAJOR >= 4
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::DimsHW kernel_size(1, 1), strides(1, 1), beg_padding(0, 0), end_padding(0, 0);
+  nvinfer1::PaddingMode paddingMode;
   get_kernel_params(node, get_DimsHW_from_CHW(dims),
-                    &kernel_size, &strides, &beg_padding, &end_padding);
+                    &kernel_size, &strides, &beg_padding, &end_padding, paddingMode);
   nvinfer1::IPoolingLayer* pooling_layer = ctx->network()->addPooling(
     *tensor_ptr, nvinfer1::PoolingType::kAVERAGE, kernel_size);
   nvinfer1::ILayer* layer = pooling_layer;
@@ -750,78 +751,75 @@ DEFINE_BUILTIN_OP_IMPORTER(Constant) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Conv) {
-  ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
-  auto kernel_weights = inputs.at(1).weights();
-  nvinfer1::Dims dims = tensor_ptr->getDimensions();
-#if NV_TENSORRT_MAJOR >= 4
-  bool need_to_expand_dims = (dims.nbDims == 2);
-  if( need_to_expand_dims ) {
-    // Expand spatial dims from 1D to 2D
-    nvinfer1::DimsCHW new_shape(dims.d[0], dims.d[1], 1);
-    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-    dims = tensor_ptr->getDimensions();
-  }
-  if( kernel_weights.shape.nbDims == 3 ) {
-    kernel_weights.shape.nbDims = 4;
-    kernel_weights.shape.d[3] = 1;
-  }
-#endif // NV_TENSORRT_MAJOR >= 4
-  ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-  ASSERT(kernel_weights.shape.nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::Weights bias_weights;
-  if( inputs.size() == 3 ) {
-    ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    auto shaped_bias_weights = inputs.at(2).weights();
-    ASSERT(shaped_bias_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-    ASSERT(shaped_bias_weights.shape.d[0] == kernel_weights.shape.d[0], ErrorCode::kINVALID_NODE);
-    bias_weights = shaped_bias_weights;
-  } else {
-    bias_weights = ShapedWeights::empty(kernel_weights.type);
-  }
-  nvinfer1::DimsHW kernel_size;
-  kernel_size.h() = kernel_weights.shape.d[2];
-  kernel_size.w() = kernel_weights.shape.d[3];
-  nvinfer1::DimsHW strides(1, 1);
-  nvinfer1::DimsHW beg_padding(0, 0), end_padding(0, 0);
-  nvinfer1::DimsHW dilations(1, 1);
-  get_kernel_params(node, get_DimsHW_from_CHW(dims),
-                    &kernel_size, &strides,
-                    &beg_padding, &end_padding, &dilations);
-  ASSERT(kernel_size.h() == kernel_weights.shape.d[2], ErrorCode::kINVALID_NODE);
-  ASSERT(kernel_size.w() == kernel_weights.shape.d[3], ErrorCode::kINVALID_NODE);
-  int nchan = dims.d[0];
-  int noutput = kernel_weights.shape.d[0]; // Note: Weights order is KCRS
-  if( beg_padding != end_padding ) {
-    auto* layer = ctx->network()->addPadding(*tensor_ptr, beg_padding, end_padding);
+    ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
+    auto kernel_weights = inputs.at(1).weights();
+    nvinfer1::Dims dims = tensor_ptr->getDimensions();
+    #if NV_TENSORRT_MAJOR >= 4
+    bool need_to_expand_dims = (dims.nbDims == 2);
+    if( need_to_expand_dims ) {
+        // Expand spatial dims from 1D to 2D
+        nvinfer1::DimsCHW new_shape(dims.d[0], dims.d[1], 1);
+        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+        dims = tensor_ptr->getDimensions();
+    }
+    if( kernel_weights.shape.nbDims == 3 ) {
+        kernel_weights.shape.nbDims = 4;
+        kernel_weights.shape.d[3] = 1;
+    }
+    #endif // NV_TENSORRT_MAJOR >= 4
+    ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(kernel_weights.shape.nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::Weights bias_weights;
+    if( inputs.size() == 3 ) {
+        ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        auto shaped_bias_weights = inputs.at(2).weights();
+        ASSERT(shaped_bias_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
+        ASSERT(shaped_bias_weights.shape.d[0] == kernel_weights.shape.d[0], ErrorCode::kINVALID_NODE);
+        bias_weights = shaped_bias_weights;
+    } else {
+        bias_weights = ShapedWeights::empty(kernel_weights.type);
+    }
+    nvinfer1::DimsHW kernel_size;
+    kernel_size.h() = kernel_weights.shape.d[2];
+    kernel_size.w() = kernel_weights.shape.d[3];
+    nvinfer1::DimsHW strides(1, 1);
+    nvinfer1::DimsHW beg_padding(0, 0), end_padding(0, 0);
+    nvinfer1::DimsHW dilations(1, 1);
+    nvinfer1::PaddingMode paddingMode;
+    get_kernel_params(node, get_DimsHW_from_CHW(dims), &kernel_size,
+        &strides, &beg_padding, &end_padding, paddingMode, &dilations);
+    ASSERT(kernel_size.h() == kernel_weights.shape.d[2], ErrorCode::kINVALID_NODE);
+    ASSERT(kernel_size.w() == kernel_weights.shape.d[3], ErrorCode::kINVALID_NODE);
+    int nchan = dims.d[0];
+    int noutput = kernel_weights.shape.d[0]; // Note: Weights order is KCRS
+    nvinfer1::IConvolutionLayer* layer = ctx->network()->addConvolution(
+        *tensor_ptr, noutput, kernel_size, kernel_weights, bias_weights);
+
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+    layer->setStride(strides);
+    layer->setPaddingMode(paddingMode);
+    layer->setPrePadding(beg_padding);
+    layer->setPostPadding(end_padding);
+    layer->setDilation(dilations);
+    OnnxAttrs attrs(node);
+    int ngroup = attrs.get("group", 1);
+    ASSERT(kernel_weights.shape.d[1] * ngroup == nchan, ErrorCode::kINVALID_NODE);
+    layer->setNbGroups(ngroup);
     tensor_ptr = layer->getOutput(0);
-  }
-  nvinfer1::IConvolutionLayer* layer = ctx->network()->addConvolution(
-    *tensor_ptr, noutput, kernel_size, kernel_weights, bias_weights);
-  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-  layer->setStride(strides);
-  if( beg_padding == end_padding ) {
-    layer->setPadding(beg_padding);
-  }
-  layer->setDilation(dilations);
-  OnnxAttrs attrs(node);
-  int ngroup = attrs.get("group", 1);
-  ASSERT(kernel_weights.shape.d[1] * ngroup == nchan, ErrorCode::kINVALID_NODE);
-  layer->setNbGroups(ngroup);
-  tensor_ptr = layer->getOutput(0);
-  dims = tensor_ptr->getDimensions();
-#if NV_TENSORRT_MAJOR >= 4
-  if( need_to_expand_dims ) {
-    // Un-expand spatial dims back to 1D
-    nvinfer1::Dims new_shape{2, {dims.d[0], dims.d[1]}};
-    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-  }
-#endif // NV_TENSORRT_MAJOR >= 4
-  return {{tensor_ptr}};
+    dims = tensor_ptr->getDimensions();
+    #if NV_TENSORRT_MAJOR >= 4
+    if( need_to_expand_dims ) {
+        // Un-expand spatial dims back to 1D
+        nvinfer1::Dims new_shape{2, {dims.d[0], dims.d[1]}};
+        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+    }
+    #endif // NV_TENSORRT_MAJOR >= 4
+    return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
@@ -860,14 +858,11 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   OnnxAttrs attrs(node);
   nvinfer1::DimsHW input_shape = get_DimsHW_from_CHW(dims);
   nvinfer1::DimsHW output_shape;
-  bool enable_padding_trick = true;
   if( attrs.count("output_shape") ) {
     output_shape = attrs.get<nvinfer1::DimsHW>("output_shape");
   } else {
     ASSERT(attrs.get("auto_pad", std::string("VALID")) == "VALID",
            ErrorCode::kINVALID_NODE);
-    // Can't use asym->sym padding trick if no output shape provided
-    enable_padding_trick = false;
   }
   nvinfer1::DimsHW kernel_size;
   kernel_size.h() = kernel_weights.shape.d[2];
@@ -875,12 +870,12 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
   nvinfer1::DimsHW strides(1, 1);
   nvinfer1::DimsHW beg_padding(0, 0), end_padding(0, 0);
   nvinfer1::DimsHW dilations(1, 1);
+  nvinfer1::PaddingMode paddingMode;
   // Note: output_shape/input_shape are swapped here so that the padding
   //       calculations operate as if it were a regular forward convolution.
   get_kernel_params(node, output_shape,
                     &kernel_size, &strides,
-                    &beg_padding, &end_padding, &dilations, &input_shape,
-                    enable_padding_trick);
+                    &beg_padding, &end_padding, paddingMode, &dilations, &input_shape);
   ASSERT(kernel_size.h() == kernel_weights.shape.d[2], ErrorCode::kINVALID_NODE);
   ASSERT(kernel_size.w() == kernel_weights.shape.d[3], ErrorCode::kINVALID_NODE);
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
@@ -897,12 +892,9 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
     end_padding.h() -= output_padding.h();
     end_padding.w() -= output_padding.w();
   }
-  if( beg_padding == end_padding ) {
-    deconv_layer->setPadding(beg_padding);
-  } else {
-    layer = ctx->network()->addPadding(*deconv_layer->getOutput(0),
-                                       -beg_padding, -end_padding);
-  }
+  deconv_layer->setPaddingMode(paddingMode);
+  deconv_layer->setPrePadding(beg_padding);
+  deconv_layer->setPostPadding(end_padding);
   ASSERT(dilations.h() == 1 && dilations.w() == 1, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(kernel_weights.shape.d[0] == nchan, ErrorCode::kINVALID_NODE);
   deconv_layer->setNbGroups(ngroup);
@@ -915,7 +907,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose) {
     tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
     ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
   }
-#endif // NV_TENSORRT_MAJOR >= 4
+  #endif // NV_TENSORRT_MAJOR >= 4
   return {{tensor_ptr}};
 }
 
@@ -1287,79 +1279,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Max) {
 
 DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
-  nvinfer1::Dims dims = tensor_ptr->getDimensions();
-  ASSERT(dims.nbDims >= 2, ErrorCode::kINVALID_NODE);
-#if NV_TENSORRT_MAJOR >= 4
-  bool need_to_expand_dims = (dims.nbDims == 2);
-  if( need_to_expand_dims ) {
-    // Expand spatial dims from 1D to 2D
-    nvinfer1::DimsCHW new_shape(dims.d[0], dims.d[1], 1);
-    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-    dims = tensor_ptr->getDimensions();
-  }
-#endif // NV_TENSORRT_MAJOR >= 4
+  nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+  nvinfer1::Dims dims = tensor.getDimensions();
   ASSERT(dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-  nvinfer1::DimsHW kernel_size(1, 1), strides(1, 1), beg_padding(0, 0), end_padding(0, 0);
-  get_kernel_params(node, get_DimsHW_from_CHW(dims),
-                    &kernel_size, &strides, &beg_padding, &end_padding);
-  if( beg_padding != end_padding ) {
-
-    auto* layer = ctx->network()->addPadding(*tensor_ptr, beg_padding, end_padding);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    tensor_ptr = layer->getOutput(0);
-    ASSERT(tensor_ptr->getType() == nvinfer1::DataType::kFLOAT, ErrorCode::kUNSUPPORTED_NODE);
-
-    // TODO: Since TensorRT only 0 pads, need to do an elementwise ADD with
-    // -INFINITY on the padded dimensions to ensure max pooling functions as expected.
-    // This negatively impacts performance. Update when non-zero padding is supported in a 
-    // future TRT version.
-
-    nvinfer1::Dims padded_dims = tensor_ptr->getDimensions();
-    ASSERT(padded_dims.nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-
-    // Scale channel down to 1.
-    padded_dims.d[0] = 1;
-    // Create values for weights object.
-    std::vector<float>pad_values(get_shape_size(padded_dims),0.0f);
-    // Populate values for weights object
-    update_padded_values(pad_values, beg_padding, end_padding, padded_dims, -INFINITY);
-
-    ShapedWeights pad_scale = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, padded_dims);
-
-    // Populate pad_scale with values.
-    std::copy(pad_values.begin(), pad_values.end(), static_cast<float*>(pad_scale.values));
-
-    // Add constant layer to populate the Weights down the network.
-    auto* constant_layer = ctx->network()->addConstant(padded_dims, pad_scale);
-    ASSERT(constant_layer, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::ITensor* scale_constant = constant_layer->getOutput(0);
-
-    // Add elementwise sum layer to do a "-INFINITY" pad.
-    auto* sum_layer = ctx->network()->addElementWise(*tensor_ptr, *scale_constant,
-      nvinfer1::ElementWiseOperation::kSUM);
-    ASSERT(sum_layer, ErrorCode::kUNSUPPORTED_NODE);
-    tensor_ptr = sum_layer->getOutput(0);
-  }
-  nvinfer1::IPoolingLayer* layer = ctx->network()->addPooling(
-    *tensor_ptr, nvinfer1::PoolingType::kMAX, kernel_size);
-  ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-  layer->setStride(strides);
-  if( beg_padding == end_padding ) {
-    layer->setPadding(beg_padding);
-  }
-  tensor_ptr = layer->getOutput(0);
-  dims = tensor_ptr->getDimensions();
-#if NV_TENSORRT_MAJOR >= 4
-  if( need_to_expand_dims ) {
-    // Un-expand spatial dims back to 1D
-    nvinfer1::Dims new_shape{2, {dims.d[0], dims.d[1]}};
-    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-  }
-#endif // NV_TENSORRT_MAJOR >= 4
-  return {{tensor_ptr}};
+  nvinfer1::DimsHW kernel_size(dims.d[1], dims.d[2]);
+  RETURN_FIRST_OUTPUT(
+    ctx->network()->addPooling(
+      tensor, nvinfer1::PoolingType::kMAX, kernel_size));
 }
 
 #if NV_TENSORRT_MAJOR >= 4
