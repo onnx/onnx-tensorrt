@@ -523,14 +523,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Acosh)
 
 DEFINE_BUILTIN_OP_IMPORTER(Add) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
-#if NV_TENSORRT_MAJOR < 4
-  if (inputs.at(0).is_tensor() != inputs.at(1).is_tensor()) {
-    // One input is a tensor, the other is weights
-    return importScaleOp(
-        ctx, node, inputs.at(0), inputs.at(1), ScaleOp::kSHIFT);
-  }
-#endif
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM, true);
 }
@@ -943,20 +935,6 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace) {
 DECLARE_BUILTIN_OP_IMPORTER(Mul);
 DEFINE_BUILTIN_OP_IMPORTER(Div) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
-#if NV_TENSORRT_MAJOR < 4
-  if( inputs.at(0).is_tensor() && inputs.at(1).is_weights() ) {
-    auto weights = inputs.at(1).weights();
-    auto inv_weights = ctx->createTempWeights(weights.type, weights.shape);
-    auto status = apply_unary_function(
-        weights, &inv_weights, nvinfer1::UnaryOperation::kRECIP);
-    if (status.is_error()) {
-      return status;
-    }
-    std::vector<TensorOrWeights> new_inputs = {inputs.at(0), inv_weights};
-    return importMul(ctx, node, new_inputs);
-  }
-#endif
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kDIV, true);
 }
@@ -1328,14 +1306,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Min) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Mul) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
-#if NV_TENSORRT_MAJOR < 4
-  if (inputs.at(0).is_tensor() != inputs.at(1).is_tensor()) {
-    // One input is a tensor, the other is weights
-    return importScaleOp(
-        ctx, node, inputs.at(0), inputs.at(1), ScaleOp::kSCALE);
-  }
-#endif
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD, true);
 }
@@ -1389,13 +1359,6 @@ DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus) {
 
 DEFINE_BUILTIN_OP_IMPORTER(Pow) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
-#if NV_TENSORRT_MAJOR < 4
-  if (inputs.at(0).is_tensor() && inputs.at(1).is_weights()) {
-    return importScaleOp(
-        ctx, node, inputs.at(0), inputs.at(1), ScaleOp::kPOWER);
-  }
-#endif
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
 }
@@ -1843,21 +1806,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Split) {
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.size() == 1, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims dims = inputs.at(0).shape();
+  int nbDims = dims.nbDims;
   OnnxAttrs attrs(node);
   int axis = attrs.get<int>("axis", 0);
-  ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-  if( axis < 0 ) {
-    axis += dims.nbDims;
-#if NV_TENSORRT_MAJOR < 4
-    // HACK TODO: This is a (bad) WAR for the fact that the input dims may
-    // have been padded to 4D and we no longer know how many dims there were
-    // originally.
-    axis = 0;
-#endif // NV_TENSORRT_MAJOR < 4
-  } else {
-    --axis; // Don't include batch dim
-  }
-  ASSERT(0 <= axis && axis < dims.nbDims, ErrorCode::kINVALID_NODE);
+  TRT_CHECK(convert_axis(axis, nbDims));
   std::vector<int> output_lengths;
   int noutput = node.output().size();
   if( attrs.count("split") ) {
@@ -1893,8 +1845,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze) {
   auto axes = attrs.get<std::vector<int>>("axes");
   // Note: Can't handle batch dim as it is implicit in TRT
   for( auto& axis : axes ) {
-    ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-    --axis;
+    TRT_CHECK(convert_axis(axis, ndim_in));
   }
   std::set<int> axes_set(axes.begin(), axes.end());
   int ndim_out = ndim_in - axes_set.size();
@@ -1921,20 +1872,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze) {
 DECLARE_BUILTIN_OP_IMPORTER(Add);
 DEFINE_BUILTIN_OP_IMPORTER(Sub) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  // Note: As of TRT 4, ElementWise + Constant is preferred over Scale
-#if NV_TENSORRT_MAJOR < 4
-  if( inputs.at(0).is_tensor() && inputs.at(1).is_weights() ) {
-    auto weights = inputs.at(1).weights();
-    auto neg_weights = ctx->createTempWeights(weights.type, weights.shape);
-    auto status = apply_unary_function(
-        weights, &neg_weights, nvinfer1::UnaryOperation::kNEG);
-    if (status.is_error()) {
-      return status;
-    }
-    std::vector<TensorOrWeights> new_inputs = {inputs.at(0), neg_weights};
-    return importAdd(ctx, node, new_inputs);
-  }
-#endif
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUB, true);
 }
