@@ -36,16 +36,6 @@ namespace {
 
 enum { BATCH_DIM = 0 };
 
-// Takes idx from [MIN_INT, MAX_INT] to [0, ax_size] (for Slice op)
-int slice_clip_index(int ax_size, int idx)
-{
-  if (idx < 0)
-  {
-    idx += ax_size;
-  }
-  return std::min(std::max(idx, 0), ax_size);
-}
-
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 bool is_transpose_required(nvinfer1::Dims const& shape,
                            nvinfer1::Permutation const& perm) {
@@ -724,23 +714,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
   int nbDims = inputs.at(0).shape().nbDims;
   int axis = attrs.get<int>("axis");
   TRT_CHECK(convert_axis(axis, nbDims));
-#if NV_TENSORRT_MAJOR >= 4
   auto* layer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   layer->setAxis(axis);
   RETURN_FIRST_OUTPUT(layer);
-#else // NV_TENSORRT_MAJOR < 4
-  if( axis == 0 ) {
-    RETURN_FIRST_OUTPUT(
-      ctx->network()->addConcatenation(tensors.data(), tensors.size()));
-  } else {
-    ASSERT(inputs.at(0).shape().nbDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-    using namespace nvinfer1::plugin;
-    RETURN_FIRST_OUTPUT(
-        ctx->addPluginV2(
-            new NvPlugin(createConcatPlugin(1 + axis, false)), tensors));
-  }
-#endif // NV_TENSORRT_MAJOR < 4
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Constant) {
