@@ -120,16 +120,29 @@ bool transposeWeights(ShapedWeights const& weights,
   }
   // TODO: Need to generalize this transpose implementation
   assert(perm.order[0] == 1 && perm.order[1] == 0);
-  if( shape.nbDims == 2 &&
-      weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT ) {
-    for( int i=0; i<new_shape.d[0]; ++i ) {
-      for( int j=0; j<new_shape.d[1]; ++j ) {
-        float const* src = (float*)weights.values;
-        float*       dst = (float*)result->values;
-        int src_stride = weights.shape.d[1];
-        int dst_stride = result->shape.d[1];
-        dst[i * dst_stride + j] = src[j * src_stride + i];
+  if( shape.nbDims == 2 ) {
+    if( weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT ) {
+      for( int i=0; i<new_shape.d[0]; ++i ) {
+        for( int j=0; j<new_shape.d[1]; ++j ) {
+          float const* src = (float*)weights.values;
+          float*       dst = (float*)result->values;
+          int src_stride = weights.shape.d[1];
+          int dst_stride = result->shape.d[1];
+          dst[i * dst_stride + j] = src[j * src_stride + i];
+        }
       }
+    } else if ( weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16 ) {
+      for( int i=0; i<new_shape.d[0]; ++i) {
+        for( int j=0; j<new_shape.d[1]; ++j) {
+          uint16_t const* src = (uint16_t*)weights.values;
+          uint16_t*       dst = (uint16_t*)result->values;
+          int src_stride = weights.shape.d[1];
+          int dst_stride = result->shape.d[1];
+          dst[i * dst_stride + j] = src[j * src_stride + i];
+        }
+      }
+    } else {
+      return false;
     }
   } else {
     // TODO: Implement general transposes and multiple data types
