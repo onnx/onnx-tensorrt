@@ -1689,28 +1689,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   const nvinfer1::Dims sliceStride = makeDims(1); // ONNX has no support for strides in Slice
   for (size_t i = 0; i < axes.size(); i++){
     int axis = axes[i];
-    // Special pass through for no-ops (slice across the whole dimension, [:])
-    if (starts[i] == 0 && ends[i] >= dims.d[i])
-    {
+    if (axis == 0) {
+      // We can only check that starts is properly 0
+      // but can't check end as we don't know batch size
+      ASSERT(starts[i] == 0; ErrorCode::kINVALID_VALUE);
       continue;
     }
-    // Convert the axis if it passes the no-op check, we catch actual slices across batch dimension here
     TRT_CHECK(convert_axis(axis, nbDims));
-
-    sliceStart.d[axis] = starts[i];
-
-    // If ends[i] is within dims.d[axis], this is a "normal" slice, set the size to ends[i] - starts[i]
-    if (ends[i] <= dims.d[axis] && ends[i] > 0)
-    {
-      sliceSize.d[axis] = ends[i] - starts[i];
-    }
-    // Else, ends[i] is some very high number, set the slice size to the difference between the
-    // actual dimension size and the start index.
-    else
-    {
-      sliceSize.d[axis] = dims.d[axis] - starts[i];
-    }
+    int dim = dims.d[axis];
+    int start = starts[i] >= 0 ? starts[i] : dim + starts[i];
+    int end = ends[i] >= 0 ? ends[i] : dim + ends[i];
+    sliceStart.d[axis] = start;
+    sliceSize.d[axis] = end < dim + start ? end - start : dim - start;
   }
+
   // If entire slice op was a no-op, simply return the input tensor
   if (sliceStart == makeDims(0) && sliceSize == dims)
   {
