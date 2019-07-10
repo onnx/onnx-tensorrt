@@ -29,6 +29,7 @@
 #include "InstanceNormalization.hpp"
 
 #include <numeric> // For std::iota
+#include <iostream>
 
 namespace onnx2trt {
 
@@ -1693,6 +1694,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
       // We can only check that starts is properly 0
       // but can't check end as we don't know batch size
       ASSERT(starts[i] == 0; ErrorCode::kINVALID_VALUE);
+      std::cerr << "Warning: slice with starts=0 on batch axis is ignored" << std::endl;
       continue;
     }
     TRT_CHECK(convert_axis(axis, nbDims));
@@ -1700,7 +1702,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
     int start = starts[i] >= 0 ? starts[i] : dim + starts[i];
     int end = ends[i] >= 0 ? ends[i] : dim + ends[i];
     sliceStart.d[axis] = start;
-    sliceSize.d[axis] = end < dim + start ? end - start : dim - start;
+    sliceSize.d[axis] = end < dim ? end - start : dim - start;
   }
 
   // If entire slice op was a no-op, simply return the input tensor
