@@ -1693,7 +1693,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
     if (axis == 0) {
       // We can only check that starts is properly 0
       // but can't check end as we don't know batch size
-      ASSERT(starts[i] == 0; ErrorCode::kINVALID_VALUE);
+      ASSERT(starts[i] == 0, ErrorCode::kINVALID_VALUE);
       std::cerr << "Warning: slice with starts=0 on batch axis is ignored" << std::endl;
       continue;
     }
