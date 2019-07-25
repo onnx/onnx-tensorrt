@@ -562,6 +562,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Atanh)
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool) {
+  // TensorRT 5.1 only supports up to opset 9.
+  ASSERT(ctx->getOpsetVersion() < 10, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   nvinfer1::Dims dims = tensor_ptr->getDimensions();
@@ -941,6 +943,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Div) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Dropout) {
+  // TensorRT 5.1 only supports up to opset 9.
+  ASSERT(ctx->getOpsetVersion() < 10, ErrorCode::kUNSUPPORTED_NODE);
   int noutputs = node.output().size();
   if (noutputs == 1)
   {
@@ -1234,6 +1238,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Max) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
+  // TensorRT 5.1 only supports up to opset 9.
+  ASSERT(ctx->getOpsetVersion() < 10, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor* tensor_ptr = &inputs.at(0).tensor();
   nvinfer1::Dims dims = tensor_ptr->getDimensions();
@@ -1670,6 +1676,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Size) {
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Slice) {
+  // TensorRT 5.1 only supports up to opset 9.
+  ASSERT(ctx->getOpsetVersion() < 10, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();;
   OnnxAttrs attrs(node);
@@ -1896,6 +1904,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu) {
 
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(TopK) {
+  // TensorRT 5.1 only supports up to opset 9.
+  ASSERT(ctx->getOpsetVersion() < 10, ErrorCode::kUNSUPPORTED_NODE);
   ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::ITensor& tensor = inputs.at(0).tensor();
   ASSERT(tensor.getType() != nvinfer1::DataType::kINT32,
