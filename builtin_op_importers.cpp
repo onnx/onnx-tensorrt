@@ -1689,7 +1689,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
   OnnxAttrs attrs(node);
   const auto starts = attrs.get<std::vector<int64_t>>("starts");
   const auto ends = attrs.get<std::vector<int64_t>>("ends");
-  const auto axes = attrs.get<std::vector<int64_t>>("axes");
+  auto axes = attrs.get<std::vector<int64_t>>("axes");
+  // If axes are empty, follow the ONNX spec and populate it with [0, 1, ..., len(starts) - 1]
+  if (axes.size() == 0)
+  {
+    for (size_t i = 0; i < starts.size(); i++)
+    {
+      axes.push_back(i);
+    }
+  }
   ASSERT(axes.size() == starts.size() && axes.size() == ends.size(), ErrorCode::kINVALID_VALUE);
 
   const nvinfer1::Dims dims = tensor.getDimensions();
