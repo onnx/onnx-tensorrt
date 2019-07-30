@@ -55,7 +55,7 @@ Status importInput(ImporterContext* importer_ctx,
   ASSERT_INPUT(onnx_tensor_type.shape().dim().size() > 0,
          ErrorCode::kUNSUPPORTED_NODE, input.name());
   nvinfer1::Dims trt_dims;
-  TRT_CHECK(convert_dims(onnx_tensor_type.shape().dim(), trt_dims));
+  ASSERT_INPUT(convert_dims(onnx_tensor_type.shape().dim(), trt_dims), ErrorCode::kUNSUPPORTED_GRAPH, input.name() + "_TRT_DYNAMIC_SHAPES");
   nvinfer1::ITensor* user_input = importer_ctx->getUserInput(input.name().c_str());
   if( user_input ) {
     ASSERT_INPUT(user_input, ErrorCode::kINVALID_VALUE, input.name());
@@ -352,9 +352,16 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       else
       {
         // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-        // around MAKE_INPUT_ERROR.
-        cout << "Found unsupported input: " << error->file() << endl;
+        // around MAKE_INPUT_ERROR. Check for dynamic input and set entire graph as unsupported if found.
         input_node = error->file();
+        auto found = input_node.find("_TRT_DYNAMIC_SHAPES");
+        if (found != std::string::npos)
+        {
+          cout << "Found dynamic input: " << input_node.substr(0, found) << endl;
+          cout << "Marking entire graph as unsupported." << endl;
+          return false;
+        }
+
       }
     }
   }
