@@ -361,6 +361,10 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
           cout << "Marking entire graph as unsupported." << endl;
           return false;
         }
+        else
+        {
+          cout << "Found unsupported input: " << input_node << endl;
+        }
 
       }
     }
