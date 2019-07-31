@@ -93,7 +93,9 @@ ShapedWeights::operator nvinfer1::Weights() const {
     }
     else
     {
-      w.values = static_cast<void*>(int32_weights.data());
+      void * int32_weights_ptr = static_cast<void *>(int32_weights.data());
+      std::memcpy(this->values, int32_weights_ptr, int32_weights.size() * sizeof(int32_t));
+      w.values = this->values;
       cout << "Successfully casted down to INT32." << endl;
     }
   }
