@@ -296,15 +296,6 @@ combineTensorsElementwise(IImporterContext* ctx,
     }
   }
   for( auto input : inputs ) {
-    if (binary_op == nvinfer1::ElementWiseOperation::kPROD)
-    {
-      std::cout << "NODE: " << node.name() << std::endl;
-      std::cout << "INPUT SHAPE: " << input.shape() << std::endl;
-      std::cout << "ISTENSOR?: " <<input.is_tensor() << std::endl;
-      std::cout << "ndim: " << ndim_max << std::endl;
-      std::cout << "tensors_ndim: " << tensors_ndim_max << std::endl;
-    }
-
     nvinfer1::ITensor* tensor_ptr;
 #if NV_TENSORRT_MAJOR < 4
     ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
