@@ -296,6 +296,15 @@ combineTensorsElementwise(IImporterContext* ctx,
     }
   }
   for( auto input : inputs ) {
+    if (binary_op == nvinfer1::ElementWiseOperation::kPROD)
+    {
+      std::cout << "NODE: " << node.name() << std::endl;
+      std::cout << "INPUT SHAPE: " << input.shape() << std::endl;
+      std::cout << "ISTENSOR?: " <<input.is_tensor() << std::endl;
+      std::cout << "ndim: " << ndim_max << std::endl;
+      std::cout << "tensors_ndim: " << tensors_ndim_max << std::endl;
+    }
+
     nvinfer1::ITensor* tensor_ptr;
 #if NV_TENSORRT_MAJOR < 4
     ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -678,12 +687,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Get input node.
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
-    // Check if datatype casted to is valid.
-    nvinfer1::DataType dtype = nvinfer1::DataType::kFLOAT;
-    ASSERT(convert_dtype(attrs.get<int32_t>("to"), &dtype), ErrorCode::kUNSUPPORTED_NODE);
+    auto cast_dtype = attrs.get<int32_t>("to");
+    auto * tensor_ptr = &inputs.at(0).tensor();
+    auto trt_dtype = tensor_ptr->getType();
+    // TensorRT only supports the following conversion: FP16 -> FP32.
+    ASSERT(trt_dtype == nvinfer1::DataType::kHALF && cast_dtype == ::ONNX_NAMESPACE::TensorProto::FLOAT,
+          ErrorCode::kUNSUPPORTED_NODE);
     // Add the layer.
     nvinfer1::IIdentityLayer* layer = ctx->network()->addIdentity(inputs.at(0).tensor());
-    layer->setPrecision(dtype);
+    layer->setPrecision(nvinfer1::DataType::kFLOAT);
     RETURN_FIRST_OUTPUT(layer);
 }
 
