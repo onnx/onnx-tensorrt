@@ -436,7 +436,6 @@ bool registerBuiltinOpImporter(std::string op,
 
 #define RETURN_FIRST_OUTPUT(layer) do { \
   nvinfer1::ILayer* layer_ptr = layer; \
-  cout << layer_ptr << endl; \
   ASSERT(layer_ptr != nullptr, ErrorCode::kUNSUPPORTED_NODE); \
   return {{layer_ptr->getOutput(0)}}; \
 } while(0)
@@ -996,10 +995,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
     nvinfer1::ITensor& inputA = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB{nullptr};
     nvinfer1::ITensor& inputC = convertToTensor(inputs.at(2), ctx);
-
-    std::cout << "inputA " << inputs.at(0).shape() << std::endl;
-    std::cout << "inputB " << inputs.at(1).shape() << std::endl;
-    std::cout << "inputC " << inputs.at(2).shape() << std::endl;
+    
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights()
         && inputs.at(2).is_weights() && alpha == 1.f && beta == 1.f && inputs.at(0).tensor().getDimensions().nbDims == 3
