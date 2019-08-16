@@ -995,7 +995,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
     nvinfer1::ITensor& inputA = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB{nullptr};
     nvinfer1::ITensor& inputC = convertToTensor(inputs.at(2), ctx);
-    
+
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights()
         && inputs.at(2).is_weights() && alpha == 1.f && beta == 1.f && inputs.at(0).tensor().getDimensions().nbDims == 3
@@ -1097,7 +1097,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
         nvinfer1::IElementWiseLayer* scaledBias = ctx->network()->addElementWise(*betaConstant->getOutput(0), *biasTensor, nvinfer1::ElementWiseOperation::kPROD);
         biasTensor = scaledBias->getOutput(0);
     }
-    
+
     broadcast_tensors(ctx, matmulTensor, biasTensor);
     RETURN_FIRST_OUTPUT(ctx->network()->addElementWise(*matmulTensor, *biasTensor, nvinfer1::ElementWiseOperation::kSUM));
 }
