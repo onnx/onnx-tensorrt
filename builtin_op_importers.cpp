@@ -103,21 +103,6 @@ move_tensor_dimension(IImporterContext* ctx,
 }
 
 nvinfer1::ITensor*
-reshape_tensor(IImporterContext* ctx,
-               nvinfer1::ITensor& tensor,
-               nvinfer1::Dims shape) {
-  if( shape == tensor.getDimensions() ) {
-    return &tensor;
-  }
-  nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-  if( !layer ) {
-    return nullptr;
-  }
-  layer->setReshapeDimensions(shape);
-  return layer->getOutput(0);
-}
-
-nvinfer1::ITensor*
 flatten_tensor(IImporterContext* ctx,
                nvinfer1::ITensor& tensor,
                int axis=0) {
@@ -451,7 +436,8 @@ bool registerBuiltinOpImporter(std::string op,
 
 #define RETURN_FIRST_OUTPUT(layer) do { \
   nvinfer1::ILayer* layer_ptr = layer; \
-  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); \
+  cout << layer_ptr << endl; \
+  ASSERT(layer_ptr != nullptr, ErrorCode::kUNSUPPORTED_NODE); \
   return {{layer_ptr->getOutput(0)}}; \
 } while(0)
 
@@ -1011,6 +997,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
     nvinfer1::ITensor* inputB{nullptr};
     nvinfer1::ITensor& inputC = convertToTensor(inputs.at(2), ctx);
 
+    std::cout << "inputA " << inputs.at(0).shape() << std::endl;
+    std::cout << "inputB " << inputs.at(1).shape() << std::endl;
+    std::cout << "inputC " << inputs.at(2).shape() << std::endl;
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights()
         && inputs.at(2).is_weights() && alpha == 1.f && beta == 1.f && inputs.at(0).tensor().getDimensions().nbDims == 3
@@ -1097,6 +1086,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
     if (alpha != 1.f)
     {
         nvinfer1::IConstantLayer* alphaConstant = addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
+        nvinfer1::ITensor* alphaConstantTensor = alphaConstant->getOutput(0);
+        broadcast_tensors(ctx, alphaConstantTensor, matmulTensor);
         nvinfer1::IElementWiseLayer* scaledMatmul = ctx->network()->addElementWise(*alphaConstant->getOutput(0), *matmulTensor, nvinfer1::ElementWiseOperation::kPROD);
         matmulTensor = scaledMatmul->getOutput(0);
     }
@@ -1105,10 +1096,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm) {
     if (beta != 1.f)
     {
         nvinfer1::IConstantLayer* betaConstant = addConstantScalar(ctx, beta, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
+        nvinfer1::ITensor* betaConstantTensor = betaConstant->getOutput(0);
+        broadcast_tensors(ctx, betaConstantTensor, biasTensor);
         nvinfer1::IElementWiseLayer* scaledBias = ctx->network()->addElementWise(*betaConstant->getOutput(0), *biasTensor, nvinfer1::ElementWiseOperation::kPROD);
         biasTensor = scaledBias->getOutput(0);
     }
-
+    
+    broadcast_tensors(ctx, matmulTensor, biasTensor);
     RETURN_FIRST_OUTPUT(ctx->network()->addElementWise(*matmulTensor, *biasTensor, nvinfer1::ElementWiseOperation::kSUM));
 }
 
