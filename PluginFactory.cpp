@@ -48,6 +48,7 @@ PluginFactory::createPlugin(const char* layerName,
     std::cerr << "ERROR: No plugin registered for op: " << plugin_type << std::endl;
     return nullptr;
   }
+  //sds:_plugin_registry is null! 
   auto create_plugin_func = _plugin_registry.at(plugin_type);
   Plugin* plugin = create_plugin_func(serialData, serialLength);
   _owned_plugin_instances.emplace_back(plugin);

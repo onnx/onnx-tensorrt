@@ -26,6 +26,8 @@
 
 #include "Split.hpp"
 
+//sds:对于这个split来说，这里的index必须是0
+//sds: index,The index of the output tensor.
 nvinfer1::Dims SplitPlugin::getOutputDimensions(int index,
                                                 const nvinfer1::Dims *inputDims,
                                                 int nbInputs) {
@@ -99,6 +101,10 @@ void split_kernel(int nsegment,
   }
 }
 
+//sds:这里的inputs是在显存，outputs是在内存。
+//sds:每个plugin进入enqueue，带过来的inputs有可能在内存或者显存，由addPluginV2时传入的inputs决定
+//    inputs是一个指针，维度信息需要自己初始化，比如在initialize中或者enqueue中。
+//    outputs? outputs已经按照getOutputDims指定的初始化，应该都是gpu指针吧?
 int SplitPlugin::enqueue(int batchSize,
                          const void *const *inputs, void **outputs,
                          void *workspace, cudaStream_t stream) {

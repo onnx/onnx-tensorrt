@@ -135,6 +135,9 @@ Status importInputs(ImporterContext* importer_ctx,
   return Status::success();
 }
 
+//sds:这里node是网络结构信息。inputs是输入或者权重参数
+//node是通过解析onnx未proto圆形获得的。
+//inputs是怎么获得的?对于某一层比如有3个input，2个weight，应该按照怎么样的顺序存储?(需要看pytorch->onnx)
 NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& node,
                                            std::vector<TensorOrWeights>& inputs,
                                            std::vector<std::string>& output_names) {
@@ -146,6 +149,8 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
 
   std::vector<TensorOrWeights> outputs;
 
+  //sds:node_importer是函数指针，指向在built_in里注册的importer.
+  //TensorOrWeights是指的输入或者权重
   GET_VALUE(node_importer(&_importer_ctx, node, inputs), &outputs);
   ASSERT(outputs.size() <= (size_t)node.output().size(), ErrorCode::kINTERNAL_ERROR);
 
@@ -163,6 +168,8 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
     }
   }
 
+  //sds,对于普通输出，为tensor设置名称，weights不动
+  //    对于graph输出，为tensor设置名称，weights转成tensor且设置名称
   for( size_t i=0; i<outputs.size(); ++i ) {
     std::string node_output_name = node.output(i);
     TensorOrWeights& output = outputs.at(i);
@@ -535,21 +542,29 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     output_names.push_back(model.graph().output(i).name());
   }
 
+  //sds:把所有的权重和输入Tensor保存到tensors: name + value
+  //sds:输入Tensor 从模型中只能读到原始输入，后面每处理完一层，会增加output到tensors。而下一层会从新的tensors时寻找
   string_map<TensorOrWeights> tensors;
   TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors, weight_count,
                          weight_descriptors));
   std::vector<size_t> topological_order;
   ASSERT(toposort(graph.node(), &topological_order), ErrorCode::kINVALID_GRAPH);
+  //sds:遍历每一个node，构建tensorrt网络
   for( size_t node_idx : topological_order ) {
     _current_node = node_idx;
     ::ONNX_NAMESPACE::NodeProto const& node = graph.node(node_idx);
     std::vector<TensorOrWeights> inputs;
+	//sds:为每一个node找到它的inputs,包含输入和权重
+	//sds:可见，inputs内部存储的顺序和node.input()中保持一致
     for( auto const& input_name : node.input() ) {
       ASSERT(tensors.count(input_name), ErrorCode::kINVALID_GRAPH);
       inputs.push_back(tensors.at(input_name));
     }
     std::vector<TensorOrWeights> outputs;
+	//sds:inputs和outputs内的数据顺序和node.input() ,node.ouput()一致。
     GET_VALUE(this->importNode(node, inputs, output_names), &outputs);
+	//sds:把这一层的输出加入到tensors
+	//sds:这里，ouput的存储顺序也要和node.ouput()中的一致
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);

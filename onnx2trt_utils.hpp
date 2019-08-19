@@ -373,6 +373,7 @@ inline nvinfer1::ITensor& convert_output_weight_to_tensor(TensorOrWeights& input
         // Convert weight output to tensor output. Strip batch dimension here.
         const ShapedWeights& weights = input.weights();
         nvinfer1::Dims tensor_shape = weights.shape;
+		//sds£¬DCHW->CHW, È¥³ýÁËbatch dimension.
         tensor_shape= set_dims_CHW(remove_dim(tensor_shape, 0));
         return *(ctx->network()->addConstant(tensor_shape, weights)->getOutput(0));
     }

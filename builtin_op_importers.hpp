@@ -28,5 +28,6 @@
 namespace onnx2trt {
 
 string_map<NodeImporter>& getBuiltinOpImporterMap();
+string_map<PluginV2>& getMyPluginMap();
 
 } // namespace onnx2trt

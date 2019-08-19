@@ -30,6 +30,7 @@
 
 namespace onnx2trt {
 
+//sds, final是c++11关键字，表明ModelImporter不能被继承。如果用在成员函数上，表明函数不能被覆盖。
 class ModelImporter final : public nvonnxparser::IParser {
   string_map<NodeImporter> _op_importers;
   ImporterContext _importer_ctx;

@@ -50,6 +50,7 @@ public:
     _plugin_registry[plugin_type] = func;
   }
   // This is used by TRT during engine deserialization
+  //sds: 只实现了pluginFactory的反序列化创建引擎plugin的构造方法(非plugin在哪里?)。正常的根据onnx模型文件创建引擎在哪里?  virtual nvinfer1::IPlugin* createPlugin(const char* layerName,
   virtual nvinfer1::IPlugin* createPlugin(const char* layerName,
                                           const void* serialData,
                                           size_t serialLength) override;

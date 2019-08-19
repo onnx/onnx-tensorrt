@@ -50,6 +50,7 @@ public:
     weights.values = _temp_bufs.back().data();
     return weights;
   }
+  //sds: ‰»Î «plugin∫Õ vector<ITensor> inputs
   virtual nvinfer1::IPluginV2Layer* addPluginV2(PluginV2* plugin,
                                             std::vector<nvinfer1::ITensor*> const& inputs) override {
     // Note: Plugins are wrapped here to make them work with

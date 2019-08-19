@@ -24,6 +24,7 @@
 #include "ShapedWeights.hpp"
 #include "onnx2trt_utils.hpp"
 
+//sds，返回不同类型的attr
 template<> float OnnxAttrs::get<float>(std::string key) const {
   return this->at(key)->f();
 }

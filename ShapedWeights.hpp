@@ -31,15 +31,15 @@ class ShapedWeights {
 public:
   typedef int32_t DataType;
   DataType type;
-  void* values;
+  void* values;//这个指针是gpu和还是cpu得?
   nvinfer1::Dims shape;
   static ShapedWeights empty(DataType type);
   ShapedWeights();
   explicit ShapedWeights(DataType type, void* values, nvinfer1::Dims shape_);
   size_t count() const;
   size_t size_bytes() const;
-  operator bool() const;
-  operator nvinfer1::Weights() const;
+  operator bool() const;//sds,隐式类型转换
+  operator nvinfer1::Weights() const;//sds,可自欧东转换成nvinfoer1:weights
 };
 
 bool transposeWeights(ShapedWeights const& weights,

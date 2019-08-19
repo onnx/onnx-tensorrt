@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
   int verbosity = (int)nvinfer1::ILogger::Severity::kWARNING;
   bool print_layer_info = false;
   bool debug_builder = false;
-
+  //sds:参数解析
   int arg = 0;
   while( (arg = ::getopt(argc, argv, "o:b:w:t:T:d:lgvqVh")) != -1 ) {
     switch (arg){
@@ -104,6 +104,7 @@ int main(int argc, char* argv[]) {
   }
   std::string onnx_filename = argv[optind];
 
+  //sds:量化
   nvinfer1::DataType model_dtype;
   if(      model_dtype_nbits == 32 ) { model_dtype = nvinfer1::DataType::kFLOAT; }
   else if( model_dtype_nbits == 16 ) { model_dtype = nvinfer1::DataType::kHALF; }
@@ -117,7 +118,7 @@ int main(int argc, char* argv[]) {
     cerr << "Input file not found: " << onnx_filename << endl;
     return -3;
   }
-
+  //sds:protobuf解析，新增算子需要修改proto文件吗?
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   bool is_binary = common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
   if( !is_binary && !common::ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
@@ -191,6 +192,7 @@ int main(int argc, char* argv[]) {
       cerr << "ERROR: Failed to read from file " << onnx_filename << endl;
       return -4;
     }
+	//模型解析
     if( !trt_parser->parse(onnx_buf.data(), onnx_buf.size()) ) {
       int nerror = trt_parser->getNbErrors();
       for( int i=0; i<nerror; ++i ) {
@@ -239,6 +241,7 @@ int main(int argc, char* argv[]) {
       return -5;
     }
     trt_builder->setDebugSync(debug_builder);
+	//sds:生成引擎
     auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
 
     auto engine_plan = common::infer_object(trt_engine->serialize());

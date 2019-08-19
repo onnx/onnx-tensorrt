@@ -45,6 +45,7 @@ size_t get_num_elements(nvinfer1::Dims dims) {
 
 
 template <typename Data>
+//sds:此函数没有实现彻底，不能直接使用。开源代码中也确实未使用。
 int FancyActivationPlugin::doEnqueue(int batchSize,
                                          const void *const *inputs, void **outputs,
                                          void *workspace, cudaStream_t stream) {
