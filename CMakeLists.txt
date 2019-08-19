@@ -190,7 +190,8 @@ set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
 
 
 # CUDNN
-set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+#set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+set(CUDNN_ROOT_DIR "/home/odin/shendasai/CUDNN")
 find_path(CUDNN_INCLUDE_DIR cudnn.h
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES cuda/include include)
@@ -226,7 +227,7 @@ if(NOT TENSORRT_FOUND)
   message(ERROR "Cannot find TensorRT library.")
 endif()
 
-
+set(CUDA_INCLUDE_DIRS "/usr/local/cuda/include")
 # --------------------------------
 # Plugin library
 # --------------------------------

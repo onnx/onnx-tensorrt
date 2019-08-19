@@ -657,6 +657,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Acosh)
 {
     return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
 }
+//Add: added by shendasai for new op 'less'.
+DEFINE_BUILTIN_OP_IMPORTER(Less)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
+}
 
 DEFINE_BUILTIN_OP_IMPORTER(Add) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
@@ -864,7 +869,10 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape) {
   //return {{attrs.get<ShapedWeights>("value")}};
   nvinfer1::Weights w = nvinfer1::Weights(attrs.get<ShapedWeights>("value"));
   int value = *(w.value);
-  auto* layer = ctx->addPluginV2(new ConstantOfShapePlugin(value),{input});
+  RETURN_FIRST_OUTPUT(
+      ctx->addPluginV2(
+        new ConstantOfShape(value),
+        {&inputs.at(0).tensor()}));
   //方法1:直接返回一个inputs 同dim的ShapedWeights，且用value初始化(需要构建一个ShapedWeights,需要自己申请gpu)
   //方法2:用TensorRT的constant layer初始化(需要构建一个weights,需要申请gpu)
   //方法3:使用plugin实现
@@ -890,10 +898,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Where) {
 }
 DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
   ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
-  auto* layer = ctx->addPluginV2(new NonZeroPlugin(),{input});
+  
+  RETURN_FIRST_OUTPUT(
+      ctx->addPluginV2(
+        new NonZeroPlugin(),
+        {&inputs.at(0).tensor()}));
 }
 
-
+DEFINE_BUILTIN_OP_IMPORTER(Expand) {
+  ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  
+  RETURN_FIRST_OUTPUT(
+      ctx->addPluginV2(
+        new ExpandPlugin(),
+        {&inputs.at(0).tensor(), &inputs.at(1).tensor()}));
+}
 
 
 

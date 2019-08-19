@@ -212,6 +212,8 @@ inline bool convert_input_dtype(int32_t onnx_dtype,
   case ::ONNX_NAMESPACE::TensorProto::INT8:    *trt_dtype = nvinfer1::DataType::kINT8;  break;
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
 #if NV_TENSORRT_MAJOR >= 4
+  //modify:added by shendasai for solver not support input int64. no check!
+  case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
   case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
 #endif
   default:
