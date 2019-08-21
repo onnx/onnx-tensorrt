@@ -51,8 +51,8 @@ struct IImporterContext {
   virtual nvinfer1::INetworkDefinition* network() = 0;
   virtual ShapedWeights createTempWeights(ShapedWeights::DataType type,
                                           nvinfer1::Dims shape) = 0;
-  virtual nvinfer1::IPluginLayer* addPlugin(
-      Plugin* plugin,
+  virtual nvinfer1::IPluginV2Layer* addPluginV2(
+      PluginV2* plugin,
       std::vector<nvinfer1::ITensor*> const& inputs) = 0;
   virtual int64_t getOpsetVersion(const char* domain="") const = 0;
 protected:

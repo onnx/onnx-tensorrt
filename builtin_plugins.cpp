@@ -35,47 +35,4 @@ string_map<plugin_deserializer>& getBuiltinPluginMap() {
   return builtin_plugins;
 }
 
-namespace {
-
-static bool registerBuiltinPlugin(const char* plugin_type,
-                                  plugin_deserializer func) {
-  bool inserted = getBuiltinPluginMap().insert({plugin_type, func}).second;
-  assert(inserted);
-  return inserted;
-}
-
-#define IGNORE_UNUSED_GLOBAL(x) \
-  static void _ignore_unused2_##x(); \
-  static void _ignore_unused1_##x() { (void)_ignore_unused2_##x; (void)x; } \
-  static void _ignore_unused2_##x() { (void)_ignore_unused1_##x; } \
-  struct SwallowSemicolon##x {}
-
-#define REGISTER_BUILTIN_PLUGIN(plugin_type_string, PluginClass) \
-  Plugin* _build_##PluginClass(const void* serialData, \
-                               size_t serialLength) {  \
-    return new PluginClass(serialData, serialLength);  \
-  }                                                    \
-  static const bool _registered_##PluginClass = \
-      registerBuiltinPlugin(plugin_type_string, _build_##PluginClass); \
-  IGNORE_UNUSED_GLOBAL(_registered_##PluginClass)
-
-#define REGISTER_BUILTIN_NVPLUGIN(plugin_type_string, PluginClass) \
-  Plugin* _build_##PluginClass(const void* serialData, \
-                                      size_t serialLength) { \
-    return new NvPlugin( \
-        nvinfer1::plugin::create##PluginClass(serialData, serialLength)); \
-  } \
-  static const bool _registered_##PluginClass = \
-      registerBuiltinPlugin(plugin_type_string, _build_##PluginClass); \
-  IGNORE_UNUSED_GLOBAL(_registered_##PluginClass)
-
-REGISTER_BUILTIN_PLUGIN("FancyActivation",       FancyActivationPlugin);
-REGISTER_BUILTIN_PLUGIN("ResizeNearest",         ResizeNearestPlugin);
-REGISTER_BUILTIN_PLUGIN("Split"        ,         SplitPlugin);
-REGISTER_BUILTIN_PLUGIN("InstanceNormalization", InstanceNormalizationPlugin);
-
-REGISTER_BUILTIN_NVPLUGIN("Concat", ConcatPlugin);
-
-} // namespace
-
 } // namespace onnx2trt

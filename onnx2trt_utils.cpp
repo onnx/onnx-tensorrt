@@ -30,10 +30,9 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
                        nvinfer1::DimsHW* strides,
                        nvinfer1::DimsHW* beg_padding,
                        nvinfer1::DimsHW* end_padding,
+                       nvinfer1::PaddingMode& paddingMode,
                        nvinfer1::DimsHW* dilations,
-                       nvinfer1::DimsHW const* output_shape,
-                       bool enable_padding_trick) {
-  // TODO: Generalize this function to support 3D spatial data
+                       nvinfer1::DimsHW const* output_shape) {
   OnnxAttrs attrs(onnx_node);
   if( attrs.count("kernel_shape") ) {
     auto const* onnx_kernel_size = attrs.at("kernel_shape");
@@ -53,6 +52,7 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
     dilations->h() = onnx_dilations->ints(0);
     dilations->w() = ndim > 1 ? onnx_dilations->ints(1) : 1;
   }
+  paddingMode = nvinfer1::PaddingMode::kEXPLICIT_ROUND_DOWN;
   auto onnx_auto_pad = attrs.get("auto_pad", std::string("NOTSET"));
   if( onnx_auto_pad == "VALID" || onnx_auto_pad == "NOTSET" ) {
     if( attrs.count("pads") ) {
@@ -67,69 +67,13 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
   } else { // SAME_* padding
     assert(!attrs.count("pads"));
     // Note: ONNX is always NCHW ordering
-    int ih = input_shape.h();
-    int iw = input_shape.w();
-    assert(ih != 0 && iw != 0);
-    int sh = strides->h();
-    int sw = strides->w();
-    int kh = kernel_size->h();
-    int kw = kernel_size->w();
-    int dh = dilations ? dilations->h() : 1;
-    int dw = dilations ? dilations->w() : 1;
-    kh += (kh - 1) * (dh - 1);
-    kw += (kw - 1) * (dw - 1);
-    int oh;
-    int ow;
-    if( output_shape ) {
-      oh = output_shape->h();
-      ow = output_shape->w();
-    } else {
-      oh = (ih - 1) / sh + 1;
-      ow = (iw - 1) / sw + 1;
-    }
-    int ph = (oh - 1) * sh + kh - ih;
-    int pw = (ow - 1) * sw + kw - iw;
-    int ph_minor = ph >> 1; // Note: Rounds to -inf by design
-    int ph_major = ph - ph_minor;
-    int pw_minor = pw >> 1; // Note: Rounds to -inf by design
-    int pw_major = pw - pw_minor;
     if( onnx_auto_pad == "SAME_LOWER" ) {
-      beg_padding->h() = ph_major;
-      beg_padding->w() = pw_major;
-      end_padding->h() = ph_minor;
-      end_padding->w() = pw_minor;
+    paddingMode = nvinfer1::PaddingMode::kSAME_LOWER;
     } else if( onnx_auto_pad == "SAME_UPPER" ) {
-      beg_padding->h() = ph_minor;
-      beg_padding->w() = pw_minor;
-      end_padding->h() = ph_major;
-      end_padding->w() = pw_major;
+    paddingMode = nvinfer1::PaddingMode::kSAME_UPPER;
     } else {
       throw std::invalid_argument("Unexpected auto_pad value: " +
                                   onnx_auto_pad);
-    }
-  }
-  if( !enable_padding_trick ) {
-    return;
-  }
-  // Check if asymmetric padding can be converted to symmetric padding such
-  // that CUDNN/TRT will still produce the correct result. This is only
-  // possible when beg_padding = end_padding + 1, and in the general case we
-  // check if the output size remains unchanged under the transformation
-  // (beg, end) --> (beg, beg).
-  for( int dim=0; dim<2; ++dim ) {
-    int beg_p = beg_padding->d[dim];
-    int end_p = end_padding->d[dim];
-    if( beg_p == end_p ) {
-      continue;
-    }
-    int i = input_shape.d[dim];
-    int k = kernel_size->d[dim];
-    int s = strides->d[dim];
-    int d = dilations ? dilations->d[dim] : 1;
-    int osize_asymmetric = get_conv_output_size(i, k, s, d, beg_p + end_p);
-    int osize_symmetric  = get_conv_output_size(i, k, s, d, beg_p + beg_p);
-    if( osize_symmetric == osize_asymmetric ) {
-      end_padding->d[d] = beg_padding->d[d];
     }
   }
 }

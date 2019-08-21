@@ -36,6 +36,15 @@
     } \
   } while(0)
 
+#define MAKE_INPUT_ERROR(desc, code, name) \
+  Status((code), (desc), name, __LINE__, __func__)
+
+#define ASSERT_INPUT(condition, error_code, name) do {\
+    if ( !(condition) ) {\
+      return MAKE_INPUT_ERROR("Assertion failed: " #condition, (error_code), (name)); \
+    } \
+  } while(0)
+
 #define ASSERT_C(condition, error_code) do { \
     if( !(condition) ) { \
       return error_code; \

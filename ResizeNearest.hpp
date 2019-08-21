@@ -21,13 +21,19 @@
  */
 
 #pragma once
+#include <NvInfer.h>
 
 #include "plugin.hpp"
 #include "serialize.hpp"
 
 #include <cassert>
 
-class ResizeNearestPlugin final : public onnx2trt::Plugin {
+namespace {
+    constexpr const char* RESIZE_PLUGIN_VERSION{"001"};
+    constexpr const char* RESIZE_PLUGIN_NAME{"ResizeNearest"};
+}
+
+class ResizeNearestPlugin final : public onnx2trt::PluginV2 {
   int   _ndims;
   float _scale[nvinfer1::Dims::MAX_DIMS];
   nvinfer1::Dims _output_dims;
@@ -37,10 +43,10 @@ protected:
     deserialize_value(&serialData, &serialLength, &_ndims);
     deserialize_value(&serialData, &serialLength, &_scale);
   }
-  size_t getSerializationSize() override {
+  size_t getSerializationSize() const override {
     return serialized_size(_ndims) + serialized_size(_scale) + getBaseSerializationSize();
   }
-  void serialize(void *buffer) override {
+  void serialize(void *buffer) const override {
     serializeBase(buffer);
     serialize_value(&buffer, _ndims);
     serialize_value(&buffer, _scale);
@@ -54,7 +60,18 @@ public:
   ResizeNearestPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
-  virtual const char* getPluginType() const override { return "ResizeNearest"; }
+  virtual const char* getPluginType() const override { return RESIZE_PLUGIN_NAME; }
+
+  virtual void destroy() override { delete this; }
+
+  virtual nvinfer1::IPluginV2* clone() const override { return new ResizeNearestPlugin{std::vector<float>(_scale, _scale + _ndims)}; }
+
+  virtual const char* getPluginVersion() const override { return RESIZE_PLUGIN_VERSION; }
+
+  virtual void setPluginNamespace(const char* pluginNamespace) override {}
+
+  virtual const char* getPluginNamespace() const override { return ""; }
+
   virtual int getNbOutputs() const override { return 1; }
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
@@ -63,3 +80,29 @@ public:
               const void *const *inputs, void **outputs,
               void *workspace, cudaStream_t stream) override;
 };
+
+class ResizeNearestPluginCreator : public nvinfer1::IPluginCreator
+{
+public:
+  ResizeNearestPluginCreator() {}
+
+  ~ResizeNearestPluginCreator() {}
+
+  const char* getPluginName() const { return RESIZE_PLUGIN_NAME; }
+
+  const char* getPluginVersion() const { return RESIZE_PLUGIN_VERSION; }
+
+  const nvinfer1::PluginFieldCollection* getFieldNames() { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* createPlugin(const char* name, const nvinfer1::PluginFieldCollection* fc) { std::cerr<< "Function not implemented" << std::endl; return nullptr; }
+
+  nvinfer1::IPluginV2* deserializePlugin(const char* name, const void* serialData, size_t serialLength) { return new ResizeNearestPlugin{serialData, serialLength}; }
+
+  void setPluginNamespace(const char* libNamespace) { mNamespace = libNamespace; }
+
+  const char* getPluginNamespace() const { return mNamespace.c_str(); }
+private:
+    std::string mNamespace;
+};
+
+REGISTER_TENSORRT_PLUGIN(ResizeNearestPluginCreator);

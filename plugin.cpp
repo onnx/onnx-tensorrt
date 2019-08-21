@@ -28,7 +28,7 @@ namespace onnx2trt {
 
 // ========================= Plugin =====================
 
-  void Plugin::serializeBase(void*& buffer)  {
+  void Plugin::serializeBase(void*& buffer) {
     serialize_value(&buffer, _input_dims);
     serialize_value(&buffer, _max_batch_size);
     serialize_value(&buffer, _data_type);
@@ -42,7 +42,7 @@ namespace onnx2trt {
     deserialize_value(&serialData, &serialLength, &_data_format);
   }
 
-  size_t Plugin::getBaseSerializationSize()  {
+  size_t Plugin::getBaseSerializationSize() {
     return (serialized_size(_input_dims) +
             serialized_size(_max_batch_size) +
             serialized_size(_data_type) +
@@ -66,87 +66,110 @@ namespace onnx2trt {
     _max_batch_size = maxBatchSize;
   }
 
+// ========================= PluginV2 =====================
+
+  void PluginV2::serializeBase(void*& buffer) const {
+    serialize_value(&buffer, _input_dims);
+    serialize_value(&buffer, _max_batch_size);
+    serialize_value(&buffer, _data_type);
+    serialize_value(&buffer, _data_format);
+  }
+
+  void PluginV2::deserializeBase(void const*& serialData, size_t& serialLength) {
+    deserialize_value(&serialData, &serialLength, &_input_dims);
+    deserialize_value(&serialData, &serialLength, &_max_batch_size);
+    deserialize_value(&serialData, &serialLength, &_data_type);
+    deserialize_value(&serialData, &serialLength, &_data_format);
+  }
+
+  size_t PluginV2::getBaseSerializationSize() const {
+    return (serialized_size(_input_dims) +
+            serialized_size(_max_batch_size) +
+            serialized_size(_data_type) +
+            serialized_size(_data_format));
+  }
+
+  bool PluginV2::supportsFormat(nvinfer1::DataType type,
+                              nvinfer1::PluginFormat format) const {
+    return ((type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kHALF)  &&
+            (format == nvinfer1::PluginFormat::kNCHW));
+  }
+
+  void PluginV2::configureWithFormat(const nvinfer1::Dims* inputDims, int nbInputs,
+                                   const nvinfer1::Dims* outputDims, int nbOutputs,
+                                   nvinfer1::DataType type,
+                                   nvinfer1::PluginFormat format,
+                                   int maxBatchSize)  {
+    _data_type = type;
+    _data_format = format;
+    _input_dims.assign(inputDims, inputDims + nbInputs);
+    _max_batch_size = maxBatchSize;
+  }
+
 // ========================= PluginAdapter =====================
 
   int PluginAdapter::getNbOutputs() const {
-    return _plugin->getNbOutputs();
+    return _pluginV2->getNbOutputs();
   }
   nvinfer1::Dims PluginAdapter::getOutputDimensions(int index,
                                                     const nvinfer1::Dims *inputDims,
                                                     int nbInputs)  {
-    return _plugin->getOutputDimensions(index, inputDims, nbInputs);
+    return _pluginV2->getOutputDimensions(index, inputDims, nbInputs);
   }
-  void PluginAdapter::serialize(void* buffer)  {
-    return _plugin->serialize(buffer);
+  void PluginAdapter::serialize(void* buffer) const {
+    return _pluginV2->serialize(buffer);
   }
-  size_t PluginAdapter::getSerializationSize() {
-    return _plugin->getSerializationSize();
+  size_t PluginAdapter::getSerializationSize() const {
+    return _pluginV2->getSerializationSize();
   }
-  bool PluginAdapter::supportsFormat(nvinfer1::DataType type, nvinfer1::PluginFormat format) const 
+  bool PluginAdapter::supportsFormat(nvinfer1::DataType type, nvinfer1::PluginFormat format) const
   {
-    if (_ext)
-      return _ext->supportsFormat(type, format);
-    else
-      return (type == nvinfer1::DataType::kFLOAT &&
-              format == nvinfer1::PluginFormat::kNCHW);
+    return _pluginV2->supportsFormat(type, format);
   }
   void PluginAdapter::configureWithFormat(const nvinfer1::Dims *inputDims, int nbInputs,
                                           const nvinfer1::Dims *outputDims, int nbOutputs,
                                           nvinfer1::DataType type,
                                           nvinfer1::PluginFormat format,
                                           int maxBatchSize) {
-    if (_ext)
-      return _ext->configureWithFormat(inputDims, nbInputs,
-                                       outputDims, nbOutputs,
-                                       type, format, maxBatchSize);
-    else
-      return _plugin->configure(inputDims, nbInputs,
-                                outputDims, nbOutputs,
-                                maxBatchSize);
+    return _pluginV2->configureWithFormat(inputDims, nbInputs,
+                                   outputDims, nbOutputs,
+                                   type, format, maxBatchSize);
   }
   size_t PluginAdapter::getWorkspaceSize(int maxBatchSize) const {
-    return _plugin->getWorkspaceSize(maxBatchSize);
+    return _pluginV2->getWorkspaceSize(maxBatchSize);
   }
-  int PluginAdapter::initialize() { return _plugin->initialize(); }
+  int PluginAdapter::initialize() { return _pluginV2->initialize(); }
 
   void PluginAdapter::terminate() {
-    if (_plugin) {
-      _plugin->terminate();
+    if (_pluginV2) {
+      _pluginV2->terminate();
     }
+  }
+
+  void PluginAdapter::destroy() {
+    return _pluginV2->destroy();
+  }
+
+  nvinfer1::IPluginV2* PluginAdapter::clone() const {
+    return _pluginV2->clone();
+  }
+
+  const char* PluginAdapter::getPluginVersion() const {
+    return _pluginV2->getPluginVersion();
+  }
+
+  void PluginAdapter::setPluginNamespace(const char* pluginNamespace) {
+    return _pluginV2->setPluginNamespace(pluginNamespace);
+  }
+
+  const char* PluginAdapter::getPluginNamespace() const {
+      return _pluginV2->getPluginNamespace();
   }
 
   int PluginAdapter::enqueue(int batchSize,
                              const void *const *inputs, void **outputs,
                              void *workspace, cudaStream_t stream) {
-    return _plugin->enqueue(batchSize, inputs, outputs, workspace, stream);
-  }
-
-// ========================= NvPlugin =====================
-
-  const char* NvPlugin::getPluginType() const {
-    using namespace nvinfer1;
-    switch( _plugin->getPluginType() ) {
-    case PluginType::kFASTERRCNN:         return "FasterRCNN";
-    case PluginType::kNORMALIZE:          return "Normalize";
-    case PluginType::kPERMUTE:            return "Permute";
-    case PluginType::kPRIORBOX:           return "SSDPriorBox";
-    case PluginType::kSSDDETECTIONOUTPUT: return "SSDDetectionOutput";
-    case PluginType::kCONCAT:             return "Concat";
-    case PluginType::kPRELU:              return "PRelu";
-    case PluginType::kYOLOREORG:          return "YoloReorg";
-    case PluginType::kYOLOREGION:         return "YoloRegion";
-    default: return "Unknown";
-    }
-  }
-
-  void NvPlugin::destroy() {
-    if (_plugin) {
-#if NV_TENSORRT_MAJOR >= 4 // WAR for double-free issue with NvPlugins in TRT 3
-      _plugin->destroy();
-#endif // NV_TENSORRT_MAJOR >= 4
-      _plugin = 0;
-    }
-    delete this;
+    return _pluginV2->enqueue(batchSize, inputs, outputs, workspace, stream);
   }
 
 } // namespace onnx2trt
