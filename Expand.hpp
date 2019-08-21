@@ -23,7 +23,8 @@
 #pragma once
 #include <NvInfer.h>
 
-#include "Expand.hpp"
+#include "plugin.hpp"
+
 #include "serialize.hpp"
 
 #include <thrust/device_vector.h>
@@ -33,7 +34,7 @@ namespace {
     constexpr const char* EXPAND_PLUGIN_VERSION{"001"};
     constexpr const char* EXPAND_PLUGIN_NAME{"Expand"};
 }
-enum ExpandType : int {
+enum class ExpandType : int {
     Expand,
     MAX_VALUE //no mean
 };
@@ -42,10 +43,10 @@ public:
 
 private:
   int _value;
-  unsigned long long _numbers,
+  unsigned long long _numbers;
   float* _lensOfDim;
   float* _mulOfSon;
-  unsigned int _rows,
+  unsigned int _rows;
   nvinfer1::Dims output_dims;
   nvinfer1::Dims input_dims;
   //int _nx, _ny, _nz;
@@ -73,7 +74,7 @@ public:
   }
   virtual const char* getPluginType() const override { return EXPAND_PLUGIN_NAME; }
 
-  virtual void destroy() override { cudaFree(_lensOfDim); cudaFree(_mulOfSon);delete this; }
+  virtual void destroy() override { if(_lensOfDim!=nullptr)cudaFree(_lensOfDim);  if(_mulOfSon!=nullptr)cudaFree(_mulOfSon);delete this; }
 
   virtual nvinfer1::IPluginV2* clone() const override { return new ExpandPlugin{}; }
 
@@ -83,7 +84,7 @@ public:
 
   virtual const char* getPluginNamespace() const override { return ""; }
   //sds:The number of the output tensor. 分割成几分，就是介个tensor.
-  virtual int getNbOutputs() const override { return 1; }
+  virtual int getNbOutputs() const override { return 1; };
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
   virtual int initialize() override;
@@ -100,7 +101,7 @@ public:
 
   ~ExpandPluginCreator() {}
 
-  const char* getPluginName() const { return SPLIT_PLUGIN_NAME; }
+  const char* getPluginName() const { return EXPAND_PLUGIN_NAME; }
 
   const char* getPluginVersion() const { return EXPAND_PLUGIN_VERSION; }
 

@@ -359,7 +359,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
                           MyElementWiseType my_op_type,
                           bool legacy_binary_op_broadcasting=false) {
   ASSERT(!inputs.empty(), ErrorCode::kINVALID_NODE);
-  Assert(my_op_type <= MyElementWiseType::MAX_VALUE);
+   ASSERT(my_op_type <= MyElementWiseType::MAX_VALUE,  ErrorCode::kINVALID_NODE);
   if (ctx->getOpsetVersion() < 7 && legacy_binary_op_broadcasting) {
     ASSERT(inputs.size() == 2, ErrorCode::kINTERNAL_ERROR);
     TRT_CHECK(applyLegacyBinaryOpBroadcasting(ctx, node, inputs[0], inputs[1]));
@@ -375,7 +375,6 @@ combineTensorsMyElementwise(IImporterContext* ctx,
     }
   }
 
-  auto* layer = nullptr;
   for( auto input : inputs ) {
     nvinfer1::ITensor* tensor_ptr;
 #if NV_TENSORRT_MAJOR < 4
@@ -420,6 +419,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
     // Note: Single input must be wrapped in identity to avoid messing up network outputs
     return {{identity(ctx, combined)}};
   }
+  nvinfer1::IPluginV2Layer* layer2 = nullptr;
   // 'Equal' or 'Less'
   if(input_tensors.size()==2) 
   {
@@ -428,9 +428,8 @@ combineTensorsMyElementwise(IImporterContext* ctx,
            ErrorCode::kUNSUPPORTED_NODE);
     //add plugin for this op
     //PluginV2& plugin = getMyPluginMap()[my_op_type].second();
-    nvinfer1::IPluginV2Layer* layer = nullptr;
     //sds,可扩展性，后续改成函数指针map->创建plugin。
-    layer = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined, tensor});
+    layer2 = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined, tensor});
     
   }
 
@@ -438,31 +437,30 @@ combineTensorsMyElementwise(IImporterContext* ctx,
   if(input_tensors.size() ==3)
   {
       nvinfer1::ITensor* tensor1 = input_tensors.at(1);
-      nvinfer1::ITensor* tensor1 = input_tensors.at(2);
+      nvinfer1::ITensor* tensor2 = input_tensors.at(2);
       ASSERT(tensor1->getDimensions().nbDims == combined->getDimensions().nbDims,
              ErrorCode::kUNSUPPORTED_NODE);
       ASSERT(tensor2->getDimensions().nbDims == combined->getDimensions().nbDims,
              ErrorCode::kUNSUPPORTED_NODE);
       //add plugin for this op
       //PluginV2& plugin = getMyPluginMap()[my_op_type].second();
-      nvinfer1::IPluginV2Layer* layer = nullptr;
   
       //sds,可扩展性，后续改成函数指针map->创建plugin。
 
       {
           //layer = ctx->addPluginV2(new EqualPlugin(*combined, *tensor),
-          layer = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined, tensor1, tensor2});
+          layer2 = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined, tensor1, tensor2});
       }
   }
 
     //get output
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    int noutput ==1;//just one output
-    ASSERT(layer->getNbOutputs() == noutput, ErrorCode::kINTERNAL_ERROR);
+    ASSERT(layer2, ErrorCode::kUNSUPPORTED_NODE);
+    int noutput =1;//just one output
+    ASSERT(layer2->getNbOutputs() == noutput, ErrorCode::kINTERNAL_ERROR);
     std::vector<TensorOrWeights> outputs;
     for( int i=0; i<noutput; ++i ) 
     {
-        outputs.push_back(layer->getOutput(i));
+        outputs.push_back(layer2->getOutput(i));
     }
     return outputs;
 }
@@ -540,10 +538,6 @@ string_map<NodeImporter>& getBuiltinOpImporterMap() {
   return builtin_op_importers;
 }
 
-string_map<PluginV2>& getMyPluginMap() {
-  static string_map<PluginV2> my_plugins;
-  return my_plugins;
-}
 
 
 namespace {
@@ -555,12 +549,6 @@ bool registerBuiltinOpImporter(std::string op,
   return inserted;
 }
 
-bool registerMyPlugin(std::string op,
-                               PluginV2 const& plugin) {
-  bool inserted = getMyPluginMap().insert({op, plugin}).second;
-  assert(inserted);
-  return inserted;
-}
 
 
 #define IGNORE_UNUSED_GLOBAL(x) \
@@ -654,11 +642,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Acos)
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Acosh)
-{
-    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
-}
-//Add: added by shendasai for new op 'less'.
-DEFINE_BUILTIN_OP_IMPORTER(Less)
 {
     return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
 }
@@ -868,10 +851,10 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape) {
   OnnxAttrs attrs(node);
   //return {{attrs.get<ShapedWeights>("value")}};
   nvinfer1::Weights w = nvinfer1::Weights(attrs.get<ShapedWeights>("value"));
-  int value = *(w.value);
+  int value = *((int*)(w.values));
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
-        new ConstantOfShape(value),
+        new ConstantOfShapePlugin(value),
         {&inputs.at(0).tensor()}));
   //方法1:直接返回一个inputs 同dim的ShapedWeights，且用value初始化(需要构建一个ShapedWeights,需要自己申请gpu)
   //方法2:用TensorRT的constant layer初始化(需要构建一个weights,需要申请gpu)
@@ -884,6 +867,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Equal) {
   return combineTensorsMyElementwise(
       ctx, node, inputs, MyElementWiseType::Equal, true);
 }
+DEFINE_BUILTIN_OP_IMPORTER(Not)
+{
+  ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+  return combineTensorsMyElementwise(
+      ctx, node, inputs, MyElementWiseType::Not, true);
+
+}
+
 
 DEFINE_BUILTIN_OP_IMPORTER(Less) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
@@ -1191,7 +1182,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
     int nbDims = inputs.at(0).shape().nbDims;
-    TRT_CHECK(convert_axis(axis, nbDims));
+    //sds-temp (delete by shendasai)
+    //TRT_CHECK(convert_axis(axis, nbDims));
     RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
 }
 #endif // NV_TENSORRT_MAJOR >= 4
@@ -2188,7 +2180,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   {
       for (auto& axis : axes)
       {
-          ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+          //sds-temp, 
+          //ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+          if(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
           --axis;
       }
   }

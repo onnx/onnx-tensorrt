@@ -76,7 +76,7 @@ inline std::ostream& operator<<(std::ostream& stream, google::protobuf::Message 
 }
 */
 namespace onnx2trt {
-
+#if 0
 inline nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape) 
 {
   if( shape == tensor.getDimensions() ) {
@@ -89,7 +89,7 @@ inline nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITenso
   layer->setReshapeDimensions(shape);
   return layer->getOutput(0);
 }
-
+#endif
 inline int get_dtype_size(int32_t onnx_dtype) {
   switch( onnx_dtype ) {
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16:    return 2;
@@ -132,7 +132,7 @@ inline const char* get_dtype_name(int32_t onnx_dtype) {
   default: return "<UNKNOWN>";
   }
 }
-
+#if 0
 inline void broadcast_tensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2)
 {
     if (t1->getDimensions().nbDims == t2->getDimensions().nbDims)
@@ -173,7 +173,7 @@ inline void broadcast_tensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvi
 
     t1 == smallTensor ? t1 = reshape_tensor(ctx, *t1, newDims) : t2 = reshape_tensor(ctx, *t2, newDims);
 }
-
+#endif
 inline bool check_for_input(::ONNX_NAMESPACE::NodeProto const& node, std::string const& input_node)
 {
   for (auto input : node.input())
@@ -196,6 +196,7 @@ inline bool convert_dtype(int32_t onnx_dtype,
   // See ShapedWeights.cpp for sanity check if all values can be safetly downcasted to INT32
   case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
   case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+  case ::ONNX_NAMESPACE::TensorProto::BOOL:   *trt_dtype = nvinfer1::DataType::kINT32; break;//sds
 #endif
   default:
     cerr << "Unsupported ONNX data type: " << get_dtype_name(onnx_dtype)
@@ -224,6 +225,7 @@ inline bool convert_input_dtype(int32_t onnx_dtype,
   return true;
 }
 
+//sds:需要删除batch信息。
 template<typename OnnxDims>
 inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) {
   enum { BATCH_DIM = 0 };
@@ -249,6 +251,7 @@ inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) {
   }
   std::copy(onnx_dims_vector.begin(), onnx_dims_vector.end(), trt_dims.d);
   // Remove batch dimension from trt_dims.
+  //sds: tensorrt的input itensor是针对单个batch的，所以需要删除batch信息。
   trt_dims = set_dims_CHW(remove_dim(trt_dims, BATCH_DIM));
   return true;
 }

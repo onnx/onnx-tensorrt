@@ -31,8 +31,12 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
-
+#include <unistd.h>
 // Namespace for common functions used throughout onnx-trt
+using namespace::google::protobuf::io;
+
+using namespace std;
+
 namespace common
 {
   struct InferDeleter {
@@ -89,6 +93,65 @@ namespace common
     coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(),
                                    std::numeric_limits<int>::max()/4);
     return msg->ParseFromCodedStream(&coded_input);
+  }
+
+  
+  inline bool SerializeToFile_WAR(google::protobuf::Message* msg,
+                         const char*                filename) {
+                         #if 0
+    using namespace google::protobuf::io;
+    int fd = open(filename, O_CREAT | O_RDWR);
+    if (fd == -1) {
+        return false;
+    }
+    //ZeroCopyOutputStream *raw_output = new FileOutputStream(fd1);
+    google::protobuf::io::ZeroCopyOutputStream *raw_output = new google::protobuf::io::FileOutputStream(fd);
+    
+    google::protobuf::io::CodedOutputStream coded_output(raw_output);
+
+    //coded_output.SetTotalBytesLimit(std::numeric_limits<int>::max(),
+              //                     std::numeric_limits<int>::max()/4);
+    
+    int ret = msg->SerializeToCodedStream(&coded_output);
+    //delete(raw_output);
+    //close(fd);
+    #endif
+#if 1
+    //方法一: 使用SerializePartialToOstream来序列化,注意ios::binary以二进制流写入文件
+    fstream fserial(filename, ios::out | ios::trunc | ios::binary);    
+    if (!msg->SerializePartialToOstream(&fserial))
+    {
+       cerr<<"Failed to serial address book data!\n";
+       return false;
+    }
+    cout<<"Serial address book data successfully!\n";
+    fserial.close();
+    fserial.clear();
+    #endif
+#if 0
+    int fd  = _open(filename, O_WRONLY |O_CREAT| O_BINARY, S_IREAD|S_IWRITE);    
+    if( -1 == fd )
+    {
+        cerr<<"Create addressbook.data failed!\n";
+        return false;
+    }
+    char tmpArr[2000000000];
+    memset(tmpArr,0,sizeof(tmpArr));
+    ZeroCopyOutputStream *raw_output = new ArrayOutputStream(tmpArr,msg->ByteSize()+1);    
+    CodedOutputStream* coded_output = new CodedOutputStream(raw_output);    
+    if( !msg->SerializeToCodedStream( coded_output ))
+    {
+        cerr<<"Fail to serial addressbook data!\n";
+        return false;
+    }    
+    _write(fd,tmpArr,msg->ByteSize()+1);
+    cout<<"serial address successfully!\n";
+    delete coded_output;
+    delete raw_output;        
+    close(fd);  
+
+    #endif
+    return true;
   }
 
   inline bool ParseFromTextFile(google::protobuf::Message* msg,

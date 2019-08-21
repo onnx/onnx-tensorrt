@@ -182,6 +182,7 @@ NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& no
           // If a Weights object is a graph output, convert it into a tensor.
           if (is_graph_output)
           {
+            //sds, 如果一个权重是作为输出，需要删除最外层的batchsize维度
             outputs.at(i) = TensorOrWeights(&convert_output_weight_to_tensor(output, &_importer_ctx));
             TensorOrWeights& output = outputs.at(i);
             output.tensor().setName(node_output_name.c_str());
@@ -543,7 +544,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
   }
 
   //sds:把所有的权重和输入Tensor保存到tensors: name + value
-  //sds:输入Tensor 从模型中只能读到原始输入，后面每处理完一层，会增加output到tensors。而下一层会从新的tensors时寻找
+  //sds:输入Tensor，每处理完一层，还会增加output到tensors。而下一层会从新的tensors时寻找
   string_map<TensorOrWeights> tensors;
   TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors, weight_count,
                          weight_descriptors));

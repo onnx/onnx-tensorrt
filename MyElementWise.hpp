@@ -23,8 +23,9 @@
 #pragma once
 #include <NvInfer.h>
 
-#include "MyElementWise.hpp"
+#include "plugin.hpp"
 #include "serialize.hpp"
+
 
 #include <thrust/device_vector.h>
 #include <cassert>
@@ -33,18 +34,17 @@ namespace {
     constexpr const char* MYELEMENTWISE_PLUGIN_VERSION{"001"};
     constexpr const char* MYELEMENTWISE_PLUGIN_NAME{"MyElementWise"};
 }
-enum MyElementWiseType : int {
+enum class MyElementWiseType : int {
     Equal,
     Less,
     Where,
+    Not,
     MAX_VALUE //no mean
 };
 class MyElementWisePlugin final : public onnx2trt::PluginV2 {
-public:
-
 private:
   MyElementWiseType _type;
-  unsigned long long _numbers,
+  unsigned long long _numbers;
   //int _nx, _ny, _nz;
   //int _x_stride, _y_stride, _z_stride;
   //thrust::device_vector<int> _d_segment_offsets;
@@ -69,7 +69,7 @@ public:
   MyElementWisePlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
-  virtual const char* getPluginType() const override { return MyElementWise_PLUGIN_NAME; }
+  virtual const char* getPluginType() const override { return MYELEMENTWISE_PLUGIN_NAME; }
 
   virtual void destroy() override { delete this; }
 
@@ -81,7 +81,7 @@ public:
 
   virtual const char* getPluginNamespace() const override { return ""; }
   //sds:The number of the output tensor. 分割成几分，就是介个tensor.
-  virtual int getNbOutputs() const override { return 1; }
+  virtual int getNbOutputs() const override { return 1; };
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
   virtual int initialize() override;
@@ -98,7 +98,7 @@ public:
 
   ~MyElementWisePluginCreator() {}
 
-  const char* getPluginName() const { return SPLIT_PLUGIN_NAME; }
+  const char* getPluginName() const { return MYELEMENTWISE_PLUGIN_NAME; }
 
   const char* getPluginVersion() const { return MYELEMENTWISE_PLUGIN_VERSION; }
 

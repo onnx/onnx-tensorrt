@@ -67,6 +67,8 @@ int main(int argc, char* argv[]) {
   int verbosity = (int)nvinfer1::ILogger::Severity::kWARNING;
   bool print_layer_info = false;
   bool debug_builder = false;
+  bool txt2bin =false;
+  std::string txt2bin_filename;
   //sds:²ÎÊý½âÎö
   int arg = 0;
   while( (arg = ::getopt(argc, argv, "o:b:w:t:T:d:lgvqVh")) != -1 ) {
@@ -86,9 +88,17 @@ int main(int argc, char* argv[]) {
     case 'w':
       if( optarg ) { max_workspace_size = atoll(optarg); break; }
       else { cerr << "ERROR: -w flag requires argument" << endl; return -1; }
+    //case 'd':
+     // if( optarg ) { model_dtype_nbits = atoi(optarg); break; }
+      //else { cerr << "ERROR: -d flag requires argument" << endl; return -1; }
     case 'd':
-      if( optarg ) { model_dtype_nbits = atoi(optarg); break; }
-      else { cerr << "ERROR: -d flag requires argument" << endl; return -1; }
+        txt2bin = true;
+        txt2bin_filename = optarg;
+        break;
+    case 'S':
+        txt2bin = true;
+        txt2bin_filename = optarg;
+        break;
     case 'l': print_layer_info = true; break;
     case 'g': debug_builder = true; break;
     case 'v': ++verbosity; break;
@@ -124,6 +134,12 @@ int main(int argc, char* argv[]) {
   if( !is_binary && !common::ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
     cerr << "Failed to parse ONNX model" << endl;
     return -3;
+  }
+  if(txt2bin)
+  {
+
+    bool ret = common::SerializeToFile_WAR(&onnx_model, txt2bin_filename.c_str());
+    return 0;
   }
 
   if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {

@@ -23,7 +23,8 @@
 #pragma once
 #include <NvInfer.h>
 
-#include "ConstantOfShape.hpp"
+#include "plugin.hpp"
+
 #include "serialize.hpp"
 
 #include <thrust/device_vector.h>
@@ -33,7 +34,7 @@ namespace {
     constexpr const char* CONSTANTOfSHAPE_PLUGIN_VERSION{"001"};
     constexpr const char* CONSTANTOfSHAPE_PLUGIN_NAME{"ConstantOfShape"};
 }
-enum ConstantOfShapeType : int {
+enum class ConstantOfShapeType : int {
     ConstantOfShape,
     MAX_VALUE //no mean
 };
@@ -41,8 +42,8 @@ class ConstantOfShapePlugin final : public onnx2trt::PluginV2 {
 public:
 
 private:
-  int _value;
-  unsigned long long _numbers,
+  float _value;
+  unsigned long long _numbers;
   //int _nx, _ny, _nz;
   //int _x_stride, _y_stride, _z_stride;
   //thrust::device_vector<int> _d_segment_offsets;
@@ -79,7 +80,7 @@ public:
 
   virtual const char* getPluginNamespace() const override { return ""; }
   //sds:The number of the output tensor. 分割成几分，就是介个tensor.
-  virtual int getNbOutputs() const override { return 1; }
+  virtual int getNbOutputs() const override { return 1; };
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
   virtual int initialize() override;
@@ -96,7 +97,7 @@ public:
 
   ~ConstantOfShapePluginCreator() {}
 
-  const char* getPluginName() const { return SPLIT_PLUGIN_NAME; }
+  const char* getPluginName() const { return CONSTANTOfSHAPE_PLUGIN_NAME; }
 
   const char* getPluginVersion() const { return CONSTANTOfSHAPE_PLUGIN_VERSION; }
 

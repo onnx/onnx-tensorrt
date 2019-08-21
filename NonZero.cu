@@ -38,7 +38,10 @@ nvinfer1::Dims NonZeroPlugin::getOutputDimensions(int index,
   //output_dims == input_dims[0]
   //nvinfer1::Dims output_dims(input_dims.nbDims, _numbers);
   //sds 输入的每个lement必须都是非0(实际上前层是constantOfShape,每个element都是1).满足这个条件，则输出必是rows*numbers
-  nvinfer1::Dims output_dims(_rows, _numbers);
+  nvinfer1::Dims output_dims;
+  output_dims.nbDims=2;
+  output_dims.d[0]=_rows;
+  output_dims.d[1]=_numbers;
   return output_dims;
 }
 
@@ -47,8 +50,8 @@ int NonZeroPlugin::initialize() {
   _rows = dims.nbDims;
   _numbers = 1;
   
-  float hLensOfDim[_rows] = {0.0};
-  float hmulOfSon[_rows] = {0.0};
+  int* hLensOfDim = new int[_rows];
+  int* hmulOfSon = new int[_rows];
   for( int i=0; i<=dims.nbDims-1; i++ ) {
     _numbers *= dims.d[i];
     hLensOfDim[i]= dims.d[i];
@@ -60,7 +63,7 @@ int NonZeroPlugin::initialize() {
     hmulOfSon[i]=hmulOfSon[i+1] * hLensOfDim[i+1];
   }
   
-  int length= sizeof(float) * _rows;
+  int length= sizeof(int) * _rows;
   CHECK_CUDA(cudaMalloc((void**)&_lensOfDim, length));
   CHECK_CUDA(cudaMemcpy(_lensOfDim, hLensOfDim, length, cudaMemcpyHostToDevice));
 
@@ -68,22 +71,23 @@ int NonZeroPlugin::initialize() {
   CHECK_CUDA(cudaMalloc((void**)&_mulOfSon, length));
   CHECK_CUDA(cudaMemcpy(_mulOfSon, hmulOfSon, length, cudaMemcpyHostToDevice));
 
+  delete []hLensOfDim;
+  delete []hmulOfSon;
   return 0;
 }
 
 
-
-__global__ void non_zero_kernel(const int columns, float* _lenOfDim, float* _mulOfSon,T const* __restrict__ y) {
+template<typename T>
+__global__ void non_zero_kernel(const int columns, int* _lenOfDim, int* _mulOfSon,T * __restrict__ y) {
     int x_index = blockIdx.x * blockDim.x + threadIdx.x;
     if(x_index < columns)
     {
         int y_index = threadIdx.y;
         //sds,每个element赋值满足下面的规律
-        y[y_index*columns + x_index] = (x_index/_mulOfSon[y_index]) % _lenOfDim[y_index];
+        y[y_index*columns + x_index] = (T)((x_index/_mulOfSon[y_index]) % _lenOfDim[y_index]);
     }
     
   }
-}
 
 
 int NonZeroPlugin::enqueue(int batchSize,
@@ -91,7 +95,7 @@ int NonZeroPlugin::enqueue(int batchSize,
                          void *workspace, cudaStream_t stream) {
 
   //float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
-  float const* odatas = reinterpret_cast<float const*>(outputs[0]);
+  float * odatas = reinterpret_cast<float *>(outputs[0]);
 
   dim3 block(_rows, 512);
   dim3 grid(1, (_numbers + 512 - 1) / 512);

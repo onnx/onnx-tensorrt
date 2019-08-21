@@ -23,29 +23,35 @@
 #pragma once
 #include <NvInfer.h>
 
-#include "NonZero.hpp"
+#include "plugin.hpp"
 #include "serialize.hpp"
 
 #include <thrust/device_vector.h>
 #include <cassert>
 
+#define CHECK_CUDA(call) do {    \
+  cudaError_t status = call; \
+  if( status != cudaSuccess ) { \
+    return status; \
+  } \
+} while(0)
+
+
 namespace {
     constexpr const char* NONZERO_PLUGIN_VERSION{"001"};
     constexpr const char* NONZERO_PLUGIN_NAME{"NonZero"};
 }
-enum NonZeroType : int {
+enum class NonZeroType : int {
     NonZero,
     MAX_VALUE //no mean
 };
 class NonZeroPlugin final : public onnx2trt::PluginV2 {
-public:
-
 private:
   int _value;
-  unsigned long long _numbers,
-  float* _lensOfDim;
-  float* _mulOfSon;
-  unsigned int _rows,
+  unsigned long long _numbers;
+  int* _lensOfDim;
+  int* _mulOfSon;
+  unsigned int _rows;
   //int _nx, _ny, _nz;
   //int _x_stride, _y_stride, _z_stride;
   //thrust::device_vector<int> _d_segment_offsets;
@@ -71,7 +77,7 @@ public:
   }
   virtual const char* getPluginType() const override { return NONZERO_PLUGIN_NAME; }
 
-  virtual void destroy() override { cudaFree(_lensOfDim); cudaFree(_mulOfSon);delete this; }
+  virtual void destroy() override {if(_lensOfDim!=nullptr)cudaFree(_lensOfDim);  if(_mulOfSon!=nullptr)cudaFree(_mulOfSon);delete this; }
 
   virtual nvinfer1::IPluginV2* clone() const override { return new NonZeroPlugin{}; }
 
@@ -81,7 +87,7 @@ public:
 
   virtual const char* getPluginNamespace() const override { return ""; }
   //sds:The number of the output tensor. 分割成几分，就是介个tensor.
-  virtual int getNbOutputs() const override { return 1; }
+  virtual int getNbOutputs() const override { return 1; };
   virtual nvinfer1::Dims getOutputDimensions(int index,
                                              const nvinfer1::Dims *inputs, int nbInputDims) override;
   virtual int initialize() override;
@@ -98,7 +104,7 @@ public:
 
   ~NonZeroPluginCreator() {}
 
-  const char* getPluginName() const { return SPLIT_PLUGIN_NAME; }
+  const char* getPluginName() const { return NONZERO_PLUGIN_NAME; }
 
   const char* getPluginVersion() const { return NONZERO_PLUGIN_VERSION; }
 

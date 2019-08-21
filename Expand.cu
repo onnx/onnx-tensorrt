@@ -53,18 +53,19 @@ int ExpandPlugin::initialize() {
 
 
 //sds，以下写法只满足是二维的输入
-__global__ void expand_kernel(const int rows, const int columns, const int dim_src_y, const int dim_src_x,T const* __restrict__ x, T const* __restrict__ y) {
+template<typename T>
+__global__ void expand_kernel(const int rows, const int columns, const int dim_src_y, const int dim_src_x,T const* __restrict__ x, T * __restrict__ y) {
     int x_index = blockIdx.x * blockDim.x + threadIdx.x;
-	int y_index = blockIdx.y * blockDim.y + threadIdx.y;
+    int y_index = blockIdx.y * blockDim.y + threadIdx.y;
+    int temp_x, temp_y;
     if(x_index < columns && y_index < rows)
     {
-	    temp_x = x_index%dim_src_x;
-		temp_y = y_index%dim_src_y;
+    temp_x = x_index%dim_src_x;
+    temp_y = y_index%dim_src_y;
         y[y_index*columns + x_index] = x[temp_y*dim_src_x + temp_x];
     }
     
   }
-}
 
 
 int ExpandPlugin::enqueue(int batchSize,
@@ -72,7 +73,7 @@ int ExpandPlugin::enqueue(int batchSize,
                          void *workspace, cudaStream_t stream) {
 
   float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
-  float const* odatas = reinterpret_cast<float const*>(outputs[0]);
+  float * odatas = reinterpret_cast<float *>(outputs[0]);
 
   dim3 block(32, 16);
   dim3 grid((output_dims.d[0]+32-1)/32, (output_dims.d[1]+16-1) / 16);

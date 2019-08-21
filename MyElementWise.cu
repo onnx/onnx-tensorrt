@@ -31,8 +31,8 @@
 nvinfer1::Dims MyElementWisePlugin::getOutputDimensions(int index,
                                                 const nvinfer1::Dims *inputDims,
                                                 int nbInputs) {
-  // 'equal' and 'less' is 2, 'where' is 3
-  assert(nbInputs == 2 || nbInputs == 3);
+  // 'not' is 1, 'equal' and 'less' is 2, 'where' is 3
+  assert(nbInputs == 1 || nbInputs == 2 || nbInputs == 3);
   assert(index == 0);// only one output
   nvinfer1::Dims const& input_dims = inputDims[0];
   //output_dims == input_dims[0]
@@ -56,9 +56,10 @@ Returns the tensor resulted from performing the equal logical operation elementw
 This operator supports multidirectional (i.e., Numpy-style) broadcasting;
 
 */
+//sds-temp,以下kernel暂时还不支持broadcasting. 比如[1,2,3] equal [2], 需要把2扩展成[2,2,2]
 template<typename T>
 __global__ void equal_kernel(const int n, T const* __restrict__ a,
-    T const* __restrict__ b, T const* __restrict__ y) {
+    T const* __restrict__ b, T * __restrict__ y) {
     for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
     {
         T temp=0;
@@ -67,11 +68,10 @@ __global__ void equal_kernel(const int n, T const* __restrict__ a,
         y[index] = temp;
     }
   }
-}
 
 template<typename T>
 __global__ void less_kernel(const int n, T const* __restrict__ a,
-    T const* __restrict__ b, T const* __restrict__ y) {
+    T const* __restrict__ b, T * __restrict__ y) {
     for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
     {
         T temp=0;
@@ -80,11 +80,10 @@ __global__ void less_kernel(const int n, T const* __restrict__ a,
         y[index] = temp;
     }
   }
-}
 
 template<typename T>
 __global__ void where_kernel(const int n,T const* __restrict__ cond, T const* __restrict__ a,
-    T const* __restrict__ b, T const* __restrict__ y) {
+    T const* __restrict__ b, T * __restrict__ y) {
     for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
     {
         if(cond[index])
@@ -93,7 +92,17 @@ __global__ void where_kernel(const int n,T const* __restrict__ cond, T const* __
             y[index] = b[index];
     }
   }
-}
+
+template<typename T>
+__global__ void not_kernel(const int n, T const* __restrict__ a, T * __restrict__ y) {
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
+    {
+        T temp=0;
+        if(a[index] > 0)
+            temp = 1;
+        y[index] = temp;
+    }
+  }
 
 
 //sds:这里的inputs是在显存，outputs是在内存。
@@ -105,9 +114,9 @@ int MyElementWisePlugin::enqueue(int batchSize,
                          void *workspace, cudaStream_t stream) {
 
   float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
-  float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+  
 
-  float const* odatas = reinterpret_cast<float const*>(outputs[0]);
+  float * odatas = reinterpret_cast<float *>(outputs[0]);
 
   /*
   cudaError_t cuda_status =
@@ -124,15 +133,27 @@ int MyElementWisePlugin::enqueue(int batchSize,
   
  switch(_type){
      
-  case(MyElementWiseType::Equal):       
-    equal_kernel<<<_numbers, grid, block, 0, stream>>>(idata1, idata2, odatas);
+  case(MyElementWiseType::Equal): 
+  {
+    float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+    equal_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2, odatas);
     break;
+  }
   case(MyElementWiseType::Less):
-    Less_kernel<<<_numbers, grid, block, 0, stream>>>(idata1, idata2, odatas);
+  {
+    float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+    less_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2, odatas);
     break;
+  }
   case(MyElementWiseType::Where):
+  {
+    float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
     float  const* idata3    = reinterpret_cast<float  const*>(inputs[2]);
-    Where_kernel<<<_numbers, grid, block, 0, stream>>>(idata1, idata2,idata3, odatas);
+    where_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2,idata3, odatas);
+    break;
+  }
+  case(MyElementWiseType::Not):
+    not_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, odatas);
     break;
   default:
     break;

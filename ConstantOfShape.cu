@@ -52,13 +52,13 @@ int ConstantOfShapePlugin::initialize() {
 
 
 template<typename T>
-__global__ void constant_shape_kernel(const int n, T value, T const* __restrict__ y) {
+__global__ void constant_shape_kernel(unsigned long long n, T value, T * __restrict__ y) {
     for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
     {
         y[index] = value;
     }
   }
-}
+
 
   
 //sds:这里的inputs是在显存，outputs是在内存。
@@ -70,12 +70,12 @@ int ConstantOfShapePlugin::enqueue(int batchSize,
                          void *workspace, cudaStream_t stream) {
 
   //float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
-  float const* odatas = reinterpret_cast<float const*>(outputs[0]);
+  float * odatas = reinterpret_cast<float *>(outputs[0]);
 
   dim3 block(512);
   dim3 grid((_numbers + 512 - 1) / 512);
       
-  constant_shape_kernel<<<_numbers, grid, block, 0, stream>>>(_value, odatas);
+  constant_shape_kernel<<<grid, block, 0, stream>>>(_numbers, _value, odatas);
 
   return cudaGetLastError() != cudaSuccess;
 }
