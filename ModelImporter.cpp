@@ -444,12 +444,15 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
           }
           // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
+          // The split_after graph is marked as unsupported.
           else if (node_index == 0)
           {
             NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
             sub_graph_collection[graph_index].first = split_after;
+            sub_graph_collection[graph_index].second = false;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
+          // The split_before graph is marked as supported.
           else if (node_index == subgraph.size() - 1)
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
@@ -457,6 +460,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection[graph_index].second = true;
           }
           // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
+          // Mark split_before as supported and split_after as unsupported.
           else
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
