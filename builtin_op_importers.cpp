@@ -823,21 +823,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip) {
   return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kCLIP, &alpha, &beta);
 }
 
-bool  concat_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+bool  concat_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
 {
 
-    vector<int64_t> temp_value;
+    std::vector<int64_t> temp_value;
     for( auto& input : inputs )
     {
         //必须是weights
-        if(!input.is_weight()) return false;
+        if(!input.is_weights()) return false;
 
         //必须是常量
         auto weights = input.weights();
         nvinfer1::Dims dims = weights.shape;
         if(dims.nbDims !=1 || dims.d[0] != 1) return false;
     
-        int64_t* temp = static_cast<int64_t*>(weights.values)[0];
+        int64_t temp = static_cast<int64_t*>(weights.values)[0];
         temp_value.push_back(temp);
     }
 
@@ -858,11 +858,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
 
   //Begin:added by shendasai ,2019-8-23
   ShapedWeights newWeights;
-  isScalar = concat_scalar(inputs, newWeights);
+  isScalar = concat_scalar(ctx, inputs, newWeights);
 
   if(isScalar)
   {
-      return newWeights;
+      return {{newWeights}};
   }
   //End:added by shendasai ,2019-8-23
 
@@ -899,11 +899,33 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape) {
   OnnxAttrs attrs(node);
   //return {{attrs.get<ShapedWeights>("value")}};
   nvinfer1::Weights w = nvinfer1::Weights(attrs.get<ShapedWeights>("value"));
-  int value = *((int*)(w.values));
+  float value = *((float*)(w.values));
+
+
+  ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+  
+    ASSERT(inputs.at(0).is_weights(), ErrorCode::kINVALID_NODE);
+
+    auto weights = inputs.at(0).weights();
+    nvinfer1::Dims dims = weights.shape;
+    ASSERT(dims.nbDims ==1, ErrorCode::kINVALID_NODE);//必须是1-d的shape
+
+    nvinfer1::Dims  new_shape;
+
+    int len = dims.d[0]; 
+    new_shape.nbDims = len;
+    int64_t* pTemp_ = static_cast<int64_t*>(weights.values);
+    std::copy(pTemp_, pTemp_ + len, new_shape.d);
+
+    new_shape = set_dims_CHW(new_shape);
+
+  //sds-temp,未使用输入，这个层可以直接返回weights，不用plugin layer.
+  std::vector<nvinfer1::ITensor*> inputs_;
+
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
-        new ConstantOfShapePlugin(value),
-        {&inputs.at(0).tensor()}));
+        new ConstantOfShapePlugin(value, new_shape),
+        inputs_));
   //方法1:直接返回一个inputs 同dim的ShapedWeights，且用value初始化(需要构建一个ShapedWeights,需要自己申请gpu)
   //方法2:用TensorRT的constant layer初始化(需要构建一个weights,需要申请gpu)
   //方法3:使用plugin实现
@@ -950,7 +972,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
 
   nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
-  ASSERT(inputs.at(1).is_weight(), ErrorCode::kINVALID_NODE);
+  ASSERT(inputs.at(1).is_weights(), ErrorCode::kINVALID_NODE);
 
    auto weights = inputs.at(1).weights();
    nvinfer1::Dims dims = weights.shape;
@@ -970,7 +992,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
         new ExpandPlugin(new_shape),
-        {data}));
+        {&data}));
+       // {&inputs.at(0).tensor()}));
+
 }
 
 
@@ -1244,14 +1268,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
 }
 
 
-bool  gather_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+bool  gather_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
 {
 
-    vector<int64_t> temp_value;
     for( auto& input : inputs )
     {
         //必须是weights
-        if(!input.is_weight()) return false;
+        if(!input.is_weights()) return false;
     }
     
     auto weights0 = inputs.at(0).weights();
@@ -1263,7 +1286,10 @@ bool  gather_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeig
     if(dims1.nbDims !=1 ||  dims1.d[0] !=1) return false;
     int64_t _index = static_cast<int64_t*>(weights1.values)[0];
 
-    ASSERT(_index < dims0.d[0],ErrorCode::kUNSUPPORTED_NODE);
+    if(_index >= dims0.d[0])
+    {
+        return false;   
+    }
     int64_t _value = static_cast<int64_t*>(weights0.values)[_index];
 
 
@@ -1288,10 +1314,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     //Begin: added by shendasai for output is scalar case, 2019年8月23日14:03:19.
     bool isOutScalar =false;
     ShapedWeights newWeights;
-    isOutScalar = gather_scalar(inputs, newWeights);
+    isOutScalar = gather_scalar(ctx, inputs, newWeights);
     if(isOutScalar)
     {
-        return newWeights;
+        return {{newWeights}};
     }
     //End: added by shendasai for output is scalar case.
 
@@ -2295,10 +2321,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
     //ASSERT(perm.order[BATCH_DIM] == BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
     //perm = remove_first_dim(perm);
     
-    nvinfer1::Permutation perm_new = add_perm_value(perm);
+    //nvinfer1::Permutation perm_new = add_perm_value(perm);
     // Note: Dimension types kept unchanged in order to avoid TRT complaining about CHW order
     nvinfer1::ITensor* output_tensor =
-        transpose_tensor(ctx, input.tensor(), perm_new, false);
+        transpose_tensor(ctx, input.tensor(), perm, false);
     ASSERT(output_tensor, ErrorCode::kUNSUPPORTED_NODE);
     return {{output_tensor}};
   }
@@ -2314,9 +2340,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
 }
 
 
-bool  unsqueeze_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+bool  unsqueeze_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
 {
-    if(!inputs.at(0).is_weight()) return false;
+    if(!inputs.at(0).is_weights()) return false;
 
     auto weights0 = inputs.at(0).weights();
     nvinfer1::Dims dims0 = weights0.shape;
@@ -2345,10 +2371,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   //Begin: added by shendasai for output is scalar case, 2019年8月23日14:03:19.
   bool isOutScalar =false;
   ShapedWeights newWeights;
-  isOutScalar = unsqueeze_scalar(inputs, newWeights);
+  isOutScalar = unsqueeze_scalar(ctx, inputs, newWeights);
   if(isOutScalar)
   {
-      return newWeights;
+      return {{newWeights}};
   }
   //End: added by shendasai for input is scalar case, 2019年8月23日14:03:19.
 

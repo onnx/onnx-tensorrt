@@ -31,20 +31,17 @@
 nvinfer1::Dims ConstantOfShapePlugin::getOutputDimensions(int index,
                                                 const nvinfer1::Dims *inputDims,
                                                 int nbInputs) {
-  // 'equal' and 'less' is 2, 'where' is 3
-  assert(nbInputs == 1);
+  // input shape and input value is weights
+  assert(nbInputs == 0);
   assert(index == 0);// only one output
-  nvinfer1::Dims const& input_dims = inputDims[0];
-  //output_dims == input_dims[0]
-  nvinfer1::Dims output_dims = input_dims;
   return output_dims;
 }
 
 int ConstantOfShapePlugin::initialize() {
-  nvinfer1::Dims dims = this->getInputDims(0);
+ // nvinfer1::Dims dims = this->getInputDims(0);
   _numbers = 1;
-  for( int i=dims.nbDims-1; i>=0; i-- ) {
-    _numbers *= dims.d[i];
+  for( int i=output_dims.nbDims-1; i>=0; i-- ) {
+    _numbers *= output_dims.d[i];
   }
   return 0;
 }  

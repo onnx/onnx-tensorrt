@@ -43,6 +43,7 @@ public:
 
 private:
   float _value;
+  nvinfer1::Dims  output_dims;
   unsigned long long _numbers;
   //int _nx, _ny, _nz;
   //int _x_stride, _y_stride, _z_stride;
@@ -61,8 +62,9 @@ protected:
     serialize_value(&buffer, _value);
   }
 public:
-  ConstantOfShapePlugin(int value)
-    : _value(value) {
+  ConstantOfShapePlugin(float value, nvinfer1::Dims  new_shape)
+    : _value(value),output_dims(new_shape) {
+
     //assert(value <= ConstantOfShapeType::MAX_VALUE);
   }
   ConstantOfShapePlugin(void const* serialData, size_t serialLength) {
@@ -72,7 +74,7 @@ public:
 
   virtual void destroy() override { delete this; }
 
-  virtual nvinfer1::IPluginV2* clone() const override { return new ConstantOfShapePlugin{_value}; }
+  virtual nvinfer1::IPluginV2* clone() const override { return new ConstantOfShapePlugin{_value, output_dims}; }
 
   virtual const char* getPluginVersion() const override { return CONSTANTOfSHAPE_PLUGIN_VERSION; }
 

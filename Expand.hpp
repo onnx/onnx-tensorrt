@@ -71,7 +71,7 @@ public:
     :output_dims(new_shape) {
     //assert(axis <= nvinfer1::Dims::MAX_DIMS);
   }
-  }
+ 
   ExpandPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);
   }
@@ -79,7 +79,7 @@ public:
 
   virtual void destroy() override { if(_lensOfDim!=nullptr)cudaFree(_lensOfDim);  if(_mulOfSon!=nullptr)cudaFree(_mulOfSon);delete this; }
 
-  virtual nvinfer1::IPluginV2* clone() const override { return new ExpandPlugin{}; }
+  virtual nvinfer1::IPluginV2* clone() const override { return new ExpandPlugin{output_dims}; }
 
   virtual const char* getPluginVersion() const override { return EXPAND_PLUGIN_VERSION; }
 

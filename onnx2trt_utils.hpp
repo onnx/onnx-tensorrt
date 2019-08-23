@@ -408,7 +408,9 @@ inline Status convert_axis(int& axis, int nbDims)
     //sds-temp, 不需要-1了。我的模型中本来也不含batch这个维度
     //axis = axis - 1;
   }
-  ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
+  ASSERT(axis >= 0 && axis <= nbDims, ErrorCode::kUNSUPPORTED_NODE);
+  cout <<" the nbDims and axis is: " << axis <<"   ,  " << nbDims << endl;
+  
   return Status::success();
 }
 
