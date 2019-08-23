@@ -252,7 +252,8 @@ inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims) {
   std::copy(onnx_dims_vector.begin(), onnx_dims_vector.end(), trt_dims.d);
   // Remove batch dimension from trt_dims.
   //sds: tensorrt的input itensor是针对单个batch的，所以需要删除batch信息。
-  trt_dims = set_dims_CHW(remove_dim(trt_dims, BATCH_DIM));
+  //trt_dims = set_dims_CHW(remove_dim(trt_dims, BATCH_DIM));
+  trt_dims = set_dims_CHW((trt_dims));//sds, 不删除batach .faiseq的batch和trt不是同一理念
   return true;
 }
 
@@ -309,6 +310,7 @@ inline bool convert_onnx_weights(::ONNX_NAMESPACE::TensorProto const& onnx_tenso
   std::copy(onnx_tensor.dims().begin(), onnx_tensor.dims().end(),
             shape.d);
   // Special case for scalars
+  //sds,trt中scalar, nbDims是1，不是0
   if( shape.nbDims == 0 ) {
     shape.nbDims = 1;
     shape.d[0] = 1;
@@ -363,6 +365,9 @@ inline nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterConte
         // Handle non-tensor indices input by adding a new constant layer to the network.
         const ShapedWeights& weights = input.weights();
         return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+        //addConstant中申请显存会在batchsize这一维度上作broadcast吗?
+        //注意看下这里的getOutput是什么维度
+        //sds_check?
     }
 
 }
@@ -400,7 +405,8 @@ inline Status convert_axis(int& axis, int nbDims)
   // If axis was positive, subtract 1 to strip batch dimension
   else
   {
-    axis = axis - 1;
+    //sds-temp, 不需要-1了。我的模型中本来也不含batch这个维度
+    //axis = axis - 1;
   }
   ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
   return Status::success();

@@ -122,6 +122,18 @@ remove_first_dim(nvinfer1::Permutation const& perm) {
   return new_perm;
 }
 
+inline nvinfer1::Permutation
+add_perm_value(nvinfer1::Permutation & perm) {
+  nvinfer1::Permutation new_perm;
+  int ndim = nvinfer1::Dims::MAX_DIMS;
+  for( int i=0; i<ndim-1; ++i ) {
+    new_perm.order[i] = perm.order[i] + 1;
+  }
+  return new_perm;
+}
+
+
+
 inline nvinfer1::Dims squeeze_trailing_dims(nvinfer1::Dims const& dims) {
   nvinfer1::Dims new_dims = dims;
   // Note: TRT requires at least one dimension, so we don't squeeze [1]->[]

@@ -388,9 +388,11 @@ combineTensorsMyElementwise(IImporterContext* ctx,
       //    所以，要么把weights转为constant layer,要么就直接传给plugin，但需要单独处理(serialize等)
       auto weights = input.weights();
       // Note: TRT supports broadcasting, but ranks must match
+      //sds:支持广播，但是rank一定要一致
       if( input.shape().nbDims < ndim_max ) {
         weights.shape = expand_dims(weights.shape, ndim_max);
       }
+      //进入这个分支说明输入时tensor+weights，且wieghts 的rank多。这时候就要降维了
       if (weights.shape.nbDims == tensors_ndim_max + 1) {
         // The weights contain a batch dim, which must be removed
         // Note: TRT Constant layer has implicit batch dim of 1
@@ -798,6 +800,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kCEIL);
 }
 
+//sds-check
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Get input node.
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -820,7 +823,50 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip) {
   return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kCLIP, &alpha, &beta);
 }
 
+bool  concat_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+{
+
+    vector<int64_t> temp_value;
+    for( auto& input : inputs )
+    {
+        //必须是weights
+        if(!input.is_weight()) return false;
+
+        //必须是常量
+        auto weights = input.weights();
+        nvinfer1::Dims dims = weights.shape;
+        if(dims.nbDims !=1 || dims.d[0] != 1) return false;
+    
+        int64_t* temp = static_cast<int64_t*>(weights.values)[0];
+        temp_value.push_back(temp);
+    }
+
+    int _size = temp_value.size();
+    int ndim = 1;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
+    scale_shape.d[0]=_size;
+    newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
+    //static_cast<float*>(newWeights.values)[0] = scale_value;
+    std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
+
+
+    return true;
+}
 DEFINE_BUILTIN_OP_IMPORTER(Concat) {
+  bool isScalar =false;
+
+  //Begin:added by shendasai ,2019-8-23
+  ShapedWeights newWeights;
+  isScalar = concat_scalar(inputs, newWeights);
+
+  if(isScalar)
+  {
+      return newWeights;
+  }
+  //End:added by shendasai ,2019-8-23
+
+  
   std::vector<nvinfer1::ITensor*> tensors;
   for( auto& input : inputs ) {
     ASSERT(input.is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -830,6 +876,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
 #endif // NV_TENSORRT_MAJOR >= 4
     tensors.push_back(&input.tensor());
   }
+
+  
   OnnxAttrs attrs(node);
   int nbDims = inputs.at(0).shape().nbDims;
   int axis = attrs.get<int>("axis");
@@ -875,18 +923,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Not)
 
 }
 
+//sds-check
 
 DEFINE_BUILTIN_OP_IMPORTER(Less) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsMyElementwise(
       ctx, node, inputs, MyElementWiseType::Less, true);
 }
-
+//sds-check
 DEFINE_BUILTIN_OP_IMPORTER(Where) {
   ASSERT(inputs.size() == 3, ErrorCode::kINVALID_NODE);
   return combineTensorsMyElementwise(
       ctx, node, inputs, MyElementWiseType::Where, true);
 }
+//sds-check
 DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
   ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
   
@@ -895,10 +945,10 @@ DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
         new NonZeroPlugin(),
         {&inputs.at(0).tensor()}));
 }
-
+//sds-check
 DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-  
+  //sds,是否需要检查两个输入的维度
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
         new ExpandPlugin(),
@@ -1175,15 +1225,68 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten) {
   return {{tensor_ptr}};
 }
 
+
+bool  gather_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+{
+
+    vector<int64_t> temp_value;
+    for( auto& input : inputs )
+    {
+        //必须是weights
+        if(!input.is_weight()) return false;
+    }
+    
+    auto weights0 = inputs.at(0).weights();
+    nvinfer1::Dims dims0 = weights0.shape;
+    if(dims0.nbDims !=1) return false;
+
+    auto weights1 = inputs.at(1).weights();
+    nvinfer1::Dims dims1 = weights1.shape;
+    if(dims1.nbDims !=1 ||  dims1.d[0] !=1) return false;
+    int64_t _index = static_cast<int64_t*>(weights1.values)[0];
+
+    ASSERT(_index < dims0.d[0],ErrorCode::kUNSUPPORTED_NODE);
+    int64_t _value = static_cast<int64_t*>(weights0.values)[_index];
+
+
+    int ndim = 1;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
+    scale_shape.d[0]=1;
+    newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
+    static_cast<int64_t*>(newWeights.values)[0] = _value;
+    //std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
+
+
+    return true;
+}
+
+  
+
+//sds-check
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(Gather) {
+
+    //Begin: added by shendasai for output is scalar case, 2019年8月23日14:03:19.
+    bool isOutScalar =false;
+    ShapedWeights newWeights;
+    isOutScalar = gather_scalar(inputs, newWeights);
+    if(isOutScalar)
+    {
+        return newWeights;
+    }
+    //End: added by shendasai for output is scalar case.
+
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
     int nbDims = inputs.at(0).shape().nbDims;
-    //sds-temp (delete by shendasai)
-    //TRT_CHECK(convert_axis(axis, nbDims));
+    //sds-temp ,因为外围扩1个维度，所以axis +=1;
+    //(1)embeding处axis+1 (2)shape后的axis+1 (3)其它+1是否成立?
+    //axis +=1;
+    TRT_CHECK(convert_axis(axis, nbDims));
+    //sds
     RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
 }
 #endif // NV_TENSORRT_MAJOR >= 4
@@ -1688,20 +1791,24 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
   if( ctx->getOpsetVersion() >= 5 ) {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
     auto new_shape_input = inputs.at(1);
+    //sds-temp,输入的shape必须是weights。itensor在创建engine时值是不确定的.
     ASSERT(new_shape_input.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    ShapedWeights new_shape_weights = new_shape_input.weights();
-    ASSERT(new_shape_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-    ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT64,
-           ErrorCode::kINVALID_NODE);
-    int64_t const* new_shape_ptr =
-      static_cast<int64_t const*>(new_shape_weights.values);
-    new_shape.nbDims = new_shape_weights.shape.d[0];
-    std::copy(new_shape_ptr, new_shape_ptr + new_shape.nbDims, new_shape.d);
+    {
+        ShapedWeights new_shape_weights = new_shape_input.weights();
+        ASSERT(new_shape_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
+        ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT64,
+               ErrorCode::kINVALID_NODE);
+        int64_t const* new_shape_ptr =
+          static_cast<int64_t const*>(new_shape_weights.values);
+        new_shape.nbDims = new_shape_weights.shape.d[0];
+        std::copy(new_shape_ptr, new_shape_ptr + new_shape.nbDims, new_shape.d);
+    }
   } else {
     OnnxAttrs attrs(node);
     new_shape = attrs.get<nvinfer1::Dims>("shape");
   }
     int infer_dim = -1;
+    //sds,暂时不考虑input[0]是权重的问题。  实际上，当前faiseq网络input[0]都是tensor
     if( input.is_weights() ) {
       auto weights = input.weights();
       TRT_CHECK(get_infer_dim(infer_dim,new_shape));
@@ -1728,11 +1835,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     else
     {
       nvinfer1::ITensor& tensor = input.tensor();
-      new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
-      // Check for -1 dimension in new shape
-      TRT_CHECK(get_infer_dim(infer_dim,new_shape));
+
+      //sds-temp,modifyed by shendasai, 输入的权重已经去掉batch_dim
+      //(1)shape(2)constant(3)concat
+      //new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
+      new_shape = set_dims_CHW(new_shape);
       
+      // Check for -1 dimension in new shape
+      //检查有且只能有一个 -1
+      TRT_CHECK(get_infer_dim(infer_dim,new_shape));
+
+      //不存在-1
       if (infer_dim < 0) {
+        //input[0]和input[1]的大小要一致
         ASSERT(get_shape_size(new_shape) ==
                    get_shape_size(tensor.getDimensions()),
                ErrorCode::kUNSUPPORTED_NODE);
@@ -1819,10 +1934,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Selu) {
   return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSELU, &alpha, &beta);
 }
 
+//sds:当遇到shape后，会返回一个weights。并不创建layer。
 DEFINE_BUILTIN_OP_IMPORTER(Shape) {
+  //shape is Dims
   auto shape = inputs.at(0).shape();
   if( inputs.at(0).is_tensor() ) {
-    shape = insert_dim(shape, BATCH_DIM, -1);
+   //sds-delete, 不扩展维度，batch-size这一维度暂不体现(shape后面跟gather和expand，都不需要体现)
+   //sds,若不删，gather的indict需要+1
+   // shape = insert_dim(shape, BATCH_DIM, -1);
+   
   }
   nvinfer1::Dims weight_dims;
   weight_dims.nbDims = 1;
@@ -1832,6 +1952,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Shape) {
       ::ONNX_NAMESPACE::TensorProto::INT32, weight_dims);
   std::copy(&shape.d[0], &shape.d[0] + shape.nbDims,
             static_cast<int32_t*>(const_cast<void*>(weights.values)));
+  //sds，如果input是权重，比如2*2的矩阵，返回[2,2]
+  //     如果input是其它层的输出, 2*2,   返回是[-1,2,2]
   return {{weights}};
 }
 
@@ -2150,14 +2272,20 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
   nvinfer1::Permutation perm = attrs.get("perm", default_perm);
   if( input.is_tensor() ) {
     // TRT doesn't support moving the batch dim
-    ASSERT(perm.order[BATCH_DIM] == BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-    perm = remove_first_dim(perm);
+    //sds-temp,del this two line below.
+    //输入的perm是不包含batch这个维度的
+    //ASSERT(perm.order[BATCH_DIM] == BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
+    //perm = remove_first_dim(perm);
+    
+    nvinfer1::Permutation perm_new = add_perm_value(perm);
     // Note: Dimension types kept unchanged in order to avoid TRT complaining about CHW order
     nvinfer1::ITensor* output_tensor =
-        transpose_tensor(ctx, input.tensor(), perm, false);
+        transpose_tensor(ctx, input.tensor(), perm_new, false);
     ASSERT(output_tensor, ErrorCode::kUNSUPPORTED_NODE);
     return {{output_tensor}};
-  } else {
+  }
+  //sds-temp,也要考虑。只支持2d转换
+  else {
     auto weights = input.weights();
     auto new_weights = ctx->createTempWeights(weights.type, weights.shape);
     ASSERT(transposeWeights(weights, perm, &new_weights),
@@ -2167,8 +2295,46 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
   }
 }
 
+
+bool  unsqueeze_scalar(std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+{
+    if(!inputs.at(0).is_weight()) return false;
+
+    auto weights0 = inputs.at(0).weights();
+    nvinfer1::Dims dims0 = weights0.shape;
+    if(dims0.nbDims !=1 || dims0.d[0] !=1) return false;
+
+    int64_t _value = static_cast<int64_t*>(weights0.values)[0];
+
+
+    int ndim = 1;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
+    scale_shape.d[0]=1;
+    newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
+    static_cast<int64_t*>(newWeights.values)[0] = _value;
+    //std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
+
+    return true;
+}
+
+  
+ 
+
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
+
+  //Begin: added by shendasai for output is scalar case, 2019年8月23日14:03:19.
+  bool isOutScalar =false;
+  ShapedWeights newWeights;
+  isOutScalar = unsqueeze_scalar(inputs, newWeights);
+  if(isOutScalar)
+  {
+      return newWeights;
+  }
+  //End: added by shendasai for input is scalar case, 2019年8月23日14:03:19.
+
+  
   nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
   nvinfer1::Dims old_shape = tensor.getDimensions();
   int ndim_in = old_shape.nbDims;
@@ -2180,10 +2346,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   {
       for (auto& axis : axes)
       {
-          //sds-temp, 
-          //ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-          if(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-          --axis;
+          //sds-temp,下面注释掉
+          #if 0
+          ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);//不能是0
+          --axis;//轴依次-1
+          #endif
+          
       }
   }
 
