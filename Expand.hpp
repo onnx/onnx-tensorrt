@@ -44,6 +44,7 @@ public:
 private:
   int _value;
   unsigned long long _numbers;
+  //nvinfer1::Dims _new_shape;
   float* _lensOfDim;
   float* _mulOfSon;
   unsigned int _rows;
@@ -66,8 +67,10 @@ protected:
     //serialize_value(&buffer, _value);
   }
 public:
-  ExpandPlugin(){
-    //assert(value <= ExpandType::MAX_VALUE);
+  ExpandPlugin(nvinfer1::Dims  new_shape)
+    :output_dims(new_shape) {
+    //assert(axis <= nvinfer1::Dims::MAX_DIMS);
+  }
   }
   ExpandPlugin(void const* serialData, size_t serialLength) {
     this->deserialize(serialData, serialLength);

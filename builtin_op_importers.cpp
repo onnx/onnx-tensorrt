@@ -948,11 +948,29 @@ DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
 //sds-check
 DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+
+  nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+  ASSERT(inputs.at(1).is_weight(), ErrorCode::kINVALID_NODE);
+
+   auto weights = inputs.at(1).weights();
+   nvinfer1::Dims dims = weights.shape;
+   ASSERT(dims.nbDims ==1, ErrorCode::kINVALID_NODE);//必须是1-d的shape
+   
+   nvinfer1::Dims  new_shape;
+   
+   int len = dims.d[0]; 
+   new_shape.nbDims = len;
+   int64_t* pTemp_ = static_cast<int64_t*>(weights.values);
+   std::copy(pTemp_, pTemp_ + len, new_shape.d);
+    
+   new_shape = set_dims_CHW(new_shape);
+
+ 
   //sds,是否需要检查两个输入的维度
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
-        new ExpandPlugin(),
-        {&inputs.at(0).tensor(), &inputs.at(1).tensor()}));
+        new ExpandPlugin(new_shape),
+        {data}));
 }
 
 
@@ -1282,8 +1300,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
     int nbDims = inputs.at(0).shape().nbDims;
-    //sds-temp ,因为外围扩1个维度，所以axis +=1;
-    //(1)embeding处axis+1 (2)shape后的axis+1 (3)其它+1是否成立?
+    //sds-temp 
+    //(1)embeding (2)shape (3)其它  的输出不要含有batch
     //axis +=1;
     TRT_CHECK(convert_axis(axis, nbDims));
     //sds

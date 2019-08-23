@@ -34,19 +34,13 @@ nvinfer1::Dims ExpandPlugin::getOutputDimensions(int index,
   
   assert(index == 0);// only one output
   // input and shape
-  assert(nbInputs == 2);
-
+  assert(nbInputs == 1);
+  
   return output_dims;
 }
 
 int ExpandPlugin::initialize() {
   nvinfer1::Dims const& input_dims1 =this->getInputDims(0);
-  nvinfer1::Dims const& input_dims2 = this->getInputDims(1);
-  assert(input_dims1.nbDims == input_dims2.nbDims);
-  
-  for( int i=0; i<=input_dims1.nbDims-1; i++ ) {
-	output_dims.d[i] = input_dims1.d[i]*input_dims2.d[i];
-  }
   input_dims = input_dims1;
   return 0;
 }
