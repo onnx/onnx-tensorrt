@@ -39,6 +39,9 @@ enum class MyElementWiseType : int {
     Less,
     Where,
     Not,
+    Add,
+    Mul,
+    Pow,
     MAX_VALUE //no mean
 };
 class MyElementWisePlugin final : public onnx2trt::PluginV2 {

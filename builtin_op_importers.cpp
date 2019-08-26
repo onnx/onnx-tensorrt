@@ -647,13 +647,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Acosh)
 {
     return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kACOSH);
 }
-
+#if 1
 DEFINE_BUILTIN_OP_IMPORTER(Add) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM, true);
 }
-
+#endif
 #if NV_TENSORRT_MAJOR >= 4
 DEFINE_BUILTIN_OP_IMPORTER(ArgMax)
 {
@@ -801,6 +801,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
 }
 
 //sds-check
+//faiseq ”√¡À“ª¥Œ£¨◊™Int32
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Get input node.
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -808,6 +809,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Check if datatype casted to is valid.
     nvinfer1::DataType dtype = nvinfer1::DataType::kFLOAT;
     ASSERT(convert_dtype(attrs.get<int32_t>("to"), &dtype), ErrorCode::kUNSUPPORTED_NODE);
+    //sds,≤ª÷ß≥÷INT32≤Ÿ◊˜£¨◊™≥…16
+    //sds-temp,ƒø«∞÷ª‘⁄nonzero∫Û√Êª·◊ﬂµΩ° 0~127£int16πª”√¡À°£
+    if(dtype == nvinfer1::DataType::kINT32)
+        dtype = nvinfer1::DataType::kFLOAT;
     // Add the layer.
     nvinfer1::IIdentityLayer* layer = ctx->network()->addIdentity(inputs.at(0).tensor());
     layer->setPrecision(dtype);
@@ -826,7 +831,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip) {
 bool  concat_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
 {
 
-    std::vector<int64_t> temp_value;
+    std::vector<int32_t> temp_value;
     for( auto& input : inputs )
     {
         //±ÿ–Î «weights
@@ -837,18 +842,18 @@ bool  concat_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs,
         nvinfer1::Dims dims = weights.shape;
         if(dims.nbDims !=1 || dims.d[0] != 1) return false;
     
-        int64_t temp = static_cast<int64_t*>(weights.values)[0];
+        int32_t temp = static_cast<int32_t*>(weights.values)[0];
         temp_value.push_back(temp);
     }
 
     int _size = temp_value.size();
     int ndim = 1;
-    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
     auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
     scale_shape.d[0]=_size;
     newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
     //static_cast<float*>(newWeights.values)[0] = scale_value;
-    std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
+    std::copy(temp_value.begin(), temp_value.end(), static_cast<int32_t *>(newWeights.values));
 
 
     return true;
@@ -914,7 +919,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape) {
 
     int len = dims.d[0]; 
     new_shape.nbDims = len;
-    int64_t* pTemp_ = static_cast<int64_t*>(weights.values);
+    int32_t* pTemp_ = static_cast<int32_t*>(weights.values);
     std::copy(pTemp_, pTemp_ + len, new_shape.d);
 
     new_shape = set_dims_CHW(new_shape);
@@ -931,6 +936,24 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape) {
   //∑Ω∑®3: π”√plugin µœ÷
   
 }
+#if 0
+DEFINE_BUILTIN_OP_IMPORTER(Add) {
+  ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  return combineTensorsMyElementwise(
+      ctx, node, inputs, MyElementWiseType::Add, true);
+}
+DEFINE_BUILTIN_OP_IMPORTER(Mul) {
+  ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  return combineTensorsMyElementwise(
+      ctx, node, inputs, MyElementWiseType::Mul, true);
+}
+DEFINE_BUILTIN_OP_IMPORTER(Pow) {
+  ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
+  return combineTensorsMyElementwise(
+      ctx, node, inputs, MyElementWiseType::Pow, true);
+}
+#endif
+
 
 DEFINE_BUILTIN_OP_IMPORTER(Equal) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
@@ -961,10 +984,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Where) {
 //sds-check
 DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
   ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+
+  nvinfer1::Dims dims_ = inputs.at(0).shape();
+
+  #if 0
+  unsigned int _rows = _dims.nbDims;
+  unsigned long long _numbers = 1;
+  for(int i = 0; i <_rows ;i++)
+  {
+      _numbers *= _dims.d[i];
+  }
+  #endif
+  
   
   RETURN_FIRST_OUTPUT(
       ctx->addPluginV2(
-        new NonZeroPlugin(),
+        new NonZeroPlugin(( unsigned int)0, (unsigned long long)0),
         {&inputs.at(0).tensor()}));
 }
 //sds-check
@@ -982,7 +1017,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
    
    int len = dims.d[0]; 
    new_shape.nbDims = len;
-   int64_t* pTemp_ = static_cast<int64_t*>(weights.values);
+   int32_t* pTemp_ = static_cast<int32_t*>(weights.values);
    std::copy(pTemp_, pTemp_ + len, new_shape.d);
     
    new_shape = set_dims_CHW(new_shape);
@@ -1284,21 +1319,21 @@ bool  gather_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs,
     auto weights1 = inputs.at(1).weights();
     nvinfer1::Dims dims1 = weights1.shape;
     if(dims1.nbDims !=1 ||  dims1.d[0] !=1) return false;
-    int64_t _index = static_cast<int64_t*>(weights1.values)[0];
+    int32_t _index = static_cast<int32_t*>(weights1.values)[0];
 
     if(_index >= dims0.d[0])
     {
         return false;   
     }
-    int64_t _value = static_cast<int64_t*>(weights0.values)[_index];
+    int32_t _value = static_cast<int32_t*>(weights0.values)[_index];
 
 
     int ndim = 1;
-    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
     auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
     scale_shape.d[0]=1;
     newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
-    static_cast<int64_t*>(newWeights.values)[0] = _value;
+    static_cast<int32_t*>(newWeights.values)[0] = _value;
     //std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
 
 
@@ -1649,13 +1684,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Min) {
   return combineTensorsElementwise(
     ctx, node, inputs, nvinfer1::ElementWiseOperation::kMIN);
 }
-
+#if 1
 DEFINE_BUILTIN_OP_IMPORTER(Mul) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD, true);
 }
-
+#endif
 DEFINE_BUILTIN_OP_IMPORTER(Neg) {
   return apply_unary_function(ctx, inputs.at(0), nvinfer1::UnaryOperation::kNEG);
 }
@@ -1702,13 +1737,13 @@ DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus) {
     float beta = attrs.get<float>("beta");
     return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSOFTPLUS, &alpha, &beta);
 }
-
+#if 1
 DEFINE_BUILTIN_OP_IMPORTER(Pow) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
 }
-
+#endif
 // TODO: Prelu is currently ONLY supported with a constant scale factor, making it
 // identcal with LeakyRelu. Removing the op from the registry until it is fully supported.
 
@@ -1840,10 +1875,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     {
         ShapedWeights new_shape_weights = new_shape_input.weights();
         ASSERT(new_shape_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-        ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT64,
+        ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT32,
                ErrorCode::kINVALID_NODE);
-        int64_t const* new_shape_ptr =
-          static_cast<int64_t const*>(new_shape_weights.values);
+        int32_t const* new_shape_ptr =
+          static_cast<int32_t const*>(new_shape_weights.values);
         new_shape.nbDims = new_shape_weights.shape.d[0];
         std::copy(new_shape_ptr, new_shape_ptr + new_shape.nbDims, new_shape.d);
     }
@@ -2237,7 +2272,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze) {
     if( !axes_set.count(i) ) {
       new_shape.d[j++] = old_shape.d[i];
     } else {
-      ASSERT(old_shape.d[i] == 1, ErrorCode::kINVALID_NODE);
+      //sds-temp, onnx“™«Û£¨»Áπ˚axis = a,µ´a’‚∏ˆ÷·µƒdNum≤ª «1£¨ƒ«√¥‘Ú≤ª◊˜¥¶¿Ì
+      //ASSERT(old_shape.d[i] == 1, ErrorCode::kINVALID_NODE);
+      if(old_shape.d[i] != 1)
+      {
+          new_shape.d[j++] = old_shape.d[i];
+          new_shape.nbDims +=1;
+      }
     }
   }
   nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
@@ -2348,15 +2389,15 @@ bool  unsqueeze_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inpu
     nvinfer1::Dims dims0 = weights0.shape;
     if(dims0.nbDims !=1 || dims0.d[0] !=1) return false;
 
-    int64_t _value = static_cast<int64_t*>(weights0.values)[0];
+    int32_t _value = static_cast<int32_t*>(weights0.values)[0];
 
 
     int ndim = 1;
-    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT64;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
     auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
     scale_shape.d[0]=1;
     newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
-    static_cast<int64_t*>(newWeights.values)[0] = _value;
+    static_cast<int32_t*>(newWeights.values)[0] = _value;
     //std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
 
     return true;

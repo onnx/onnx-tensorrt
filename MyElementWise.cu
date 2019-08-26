@@ -104,6 +104,38 @@ __global__ void not_kernel(const int n, T const* __restrict__ a, T * __restrict_
     }
   }
 
+template<typename T>
+__global__ void add_kernel(const int n, T const* __restrict__ a,
+    T const* __restrict__ b, T * __restrict__ y) {
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
+    {
+        //sds-temp,未考虑溢出
+        y[index] = a[index] + b[index];
+    }
+  }
+
+template<typename T>
+__global__ void mul_kernel(const int n, T const* __restrict__ a,
+    T const* __restrict__ b, T * __restrict__ y) {
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
+    {
+        //sds-temp,未考虑溢出
+        y[index] = a[index] * b[index];
+    }
+  }
+
+template<typename T>
+__global__ void pow_kernel(const int n, T const* __restrict__ a,
+    T const* __restrict__ b, T * __restrict__ y) {
+    for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < (n); index += blockDim.x * gridDim.x)
+    {
+        //sds-temp,未考虑溢出
+        y[index] = a[index] + b[index];
+    }
+  }
+
+
+
 
 //sds:这里的inputs是在显存，outputs是在内存。
 //sds:每个plugin进入enqueue，带过来的inputs有可能在内存或者显存，由addPluginV2时传入的inputs决定
@@ -155,6 +187,25 @@ int MyElementWisePlugin::enqueue(int batchSize,
   case(MyElementWiseType::Not):
     not_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, odatas);
     break;
+  case(MyElementWiseType::Add): 
+  {
+    float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+    add_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2, odatas);
+    break;
+  }
+  case(MyElementWiseType::Mul): 
+    {
+      float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+      mul_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2, odatas);
+      break;
+    }
+  case(MyElementWiseType::Pow): 
+  {
+    float  const* idata2    = reinterpret_cast<float  const*>(inputs[1]);
+    pow_kernel<<<grid, block, 0, stream>>>(_numbers, idata1, idata2, odatas);
+    break;
+  }
+
   default:
     break;
   }

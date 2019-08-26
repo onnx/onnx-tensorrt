@@ -69,7 +69,7 @@ protected:
     //serialize_value(&buffer, _value);
   }
 public:
-  NonZeroPlugin(){
+  NonZeroPlugin(unsigned int rows, unsigned long long numbers):_rows(rows),_numbers(numbers){
     //assert(value <= NonZeroType::MAX_VALUE);
   }
   NonZeroPlugin(void const* serialData, size_t serialLength) {
@@ -79,7 +79,7 @@ public:
 
   virtual void destroy() override {if(_lensOfDim!=nullptr)cudaFree(_lensOfDim);  if(_mulOfSon!=nullptr)cudaFree(_mulOfSon);delete this; }
 
-  virtual nvinfer1::IPluginV2* clone() const override { return new NonZeroPlugin{}; }
+  virtual nvinfer1::IPluginV2* clone() const override { return new NonZeroPlugin{_rows, _numbers}; }
 
   virtual const char* getPluginVersion() const override { return NONZERO_PLUGIN_VERSION; }
 

@@ -28,6 +28,7 @@
 
 //sds:对于这个split来说，这里的index必须是0，表示只有一个输出
 //sds: index,The index of the output tensor.
+//sds,仅有此函数是创建引擎时执行。不要依赖其他函数
 nvinfer1::Dims NonZeroPlugin::getOutputDimensions(int index,
                                                 const nvinfer1::Dims *inputDims,
                                                 int nbInputs) {
@@ -38,22 +39,38 @@ nvinfer1::Dims NonZeroPlugin::getOutputDimensions(int index,
   //output_dims == input_dims[0]
   //nvinfer1::Dims output_dims(input_dims.nbDims, _numbers);
   //sds 输入的每个lement必须都是非0(实际上前层是constantOfShape,每个element都是1).满足这个条件，则输出必是rows*numbers
+
+  _rows = input_dims.nbDims;
+  _numbers = 1;
+  for(int i = 0; i <_rows ;i++)
+  {
+      _numbers *= input_dims.d[i];
+  }
+
   nvinfer1::Dims output_dims;
   output_dims.nbDims=2;
   output_dims.d[0]=_rows;
   output_dims.d[1]=_numbers;
+
+
+  output_dims.type[0] = nvinfer1::DimensionType::kCHANNEL;
+  for( int i=1; i<output_dims.nbDims; ++i ) {
+    output_dims.type[i] = nvinfer1::DimensionType::kSPATIAL;
+  }
+
   return output_dims;
 }
 
+//sds,此函数是运行时执行.创建引擎时不会执行。
 int NonZeroPlugin::initialize() {
   nvinfer1::Dims dims = this->getInputDims(0);
-  _rows = dims.nbDims;
-  _numbers = 1;
+  //_rows = dims.nbDims;
+  //_numbers = 1;
   
   int* hLensOfDim = new int[_rows];
   int* hmulOfSon = new int[_rows];
   for( int i=0; i<=dims.nbDims-1; i++ ) {
-    _numbers *= dims.d[i];
+    //_numbers *= dims.d[i];
     hLensOfDim[i]= dims.d[i];
   }
 
