@@ -64,6 +64,7 @@ __global__ void equal_kernel(const int n, T const* __restrict__ a,
     {
         T temp=0;
         if(a[index] == b[index])
+        //if(fabs(a[index] - b[index]) < 1e-6)
             temp = 1;
         y[index] = temp;
     }

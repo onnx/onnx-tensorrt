@@ -43,6 +43,19 @@ bool convertINT64(void* weightValues, const size_t nbWeights, std::vector<int32_
   return true;
 }
 
+bool convertINT642FLOAT(void* weightValues, const size_t nbWeights, std::vector<float>& converted_weights)
+{
+  int64_t * weights = static_cast<int64_t *>(weightValues);
+  for (size_t i = 0; i < nbWeights; i++)
+  {
+    {
+      converted_weights[i] = static_cast<float>(weights[i]);
+    }
+  }
+  return true;
+}
+
+
 size_t ShapedWeights::count() const {
   if( this->shape.nbDims == 0 ) {
     return 0;
@@ -77,6 +90,7 @@ return (bool)this->values;
 ShapedWeights::operator nvinfer1::Weights() const {
   nvinfer1::Weights w {};
   // If INT64 weights, check if all the values can be cast down to INT32.
+  #if 0
   if (this->type == ::ONNX_NAMESPACE::TensorProto::INT64)
   {
     cout << "WARNING: Your ONNX model has been generated with INT64 weights, "
@@ -96,9 +110,36 @@ ShapedWeights::operator nvinfer1::Weights() const {
       void * int32_weights_ptr = static_cast<void *>(int32_weights.data());
       std::memcpy(this->values, int32_weights_ptr, int32_weights.size() * sizeof(int32_t));
       w.values = this->values;
-      cout << "Successfully casted down to INT32." << endl;
+      cout << "Successfully casted down from int64 to  INT32 in weights()." << endl;
     }
   }
+  
+  #else
+ 
+  if (this->type == ::ONNX_NAMESPACE::TensorProto::INT64)
+  {
+    cout << "WARNING: Your ONNX model has been generated with INT64 weights, "
+         << "while TensorRT does not natively support INT64. "
+         << "Attempting to cast down to sds float." << endl;
+    std::vector<float> int32_weights;
+    int32_weights.resize(this->count());
+
+    if (!onnx2trt::convertINT642FLOAT(this->values, this->count(), int32_weights))
+    {
+      cerr << "ERROR: Weights cannot be cast down to float." << endl;
+      // Return empty w on failure
+      return w;
+    }
+    else
+    {
+      void * int32_weights_ptr = static_cast<void *>(int32_weights.data());
+      std::memcpy(this->values, int32_weights_ptr, int32_weights.size() * sizeof(float));
+      w.values = this->values;
+      cout << "Successfully casted down from int64 to float in weights()." << endl;
+    }
+  }
+
+   #endif
   else
   {
     w.values = this->values;

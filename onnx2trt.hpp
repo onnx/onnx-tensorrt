@@ -54,6 +54,9 @@ struct IImporterContext {
   virtual nvinfer1::IPluginV2Layer* addPluginV2(
       PluginV2* plugin,
       std::vector<nvinfer1::ITensor*> const& inputs) = 0;
+   virtual nvinfer1::IPluginV2Layer* addPluginV2Ext(
+      PluginV2Ext* plugin,
+      std::vector<nvinfer1::ITensor*> const& inputs) = 0;
   virtual int64_t getOpsetVersion(const char* domain="") const = 0;
 protected:
   virtual ~IImporterContext() {}

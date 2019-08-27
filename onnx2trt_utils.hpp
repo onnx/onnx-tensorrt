@@ -76,6 +76,135 @@ inline std::ostream& operator<<(std::ostream& stream, google::protobuf::Message 
 }
 */
 namespace onnx2trt {
+
+inline bool convertINT32ToFloat(void* weightValues, size_t nbWeights, std::vector<float>& converted_weights)
+{
+  int32_t * weights = static_cast<int32_t *>(weightValues);
+  for (size_t i = 0; i < nbWeights; i++)
+  {
+    if (weights[i] > INT32_MAX || weights[i] < INT32_MIN)
+    {
+      return false;
+    }
+    else
+    {
+      converted_weights[i] = static_cast<float>(weights[i]);
+    }
+  }
+  return true;
+}
+
+inline bool convertFloatToInt32(void* weightValues, size_t nbWeights, std::vector<int32_t>& converted_weights)
+{
+  float * weights = static_cast<float *>(weightValues);
+  for (size_t i = 0; i < nbWeights; i++)
+  {
+    if (weights[i] > INT32_MAX || weights[i] < INT32_MIN)
+    {
+      return false;
+    }
+    else
+    {
+      converted_weights[i] = static_cast<int32_t>(weights[i]);
+    }
+  }
+  return true;
+}
+
+inline bool getNewWeights(ShapedWeights& w , ShapedWeights& newW){
+  //int64的，在初始化时已经被转成了int32,所以实际是int32到float的转化
+  if ((w.type) == (int32_t)::ONNX_NAMESPACE::TensorProto::INT64  && newW.type ==(int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT )
+  {
+    std::vector<float> _weights;
+    _weights.resize(w.count());
+
+    if (!onnx2trt::convertINT32ToFloat(w.values, w.count(), _weights))
+    {
+      cerr << "ERROR: Weights cannot be cast down to FLOAT." << endl;
+      // Return empty w on failure
+      return false;
+    }
+    else
+    {
+      void * _weights_ptr = static_cast<void *>(_weights.data());
+      std::memcpy(newW.values, _weights_ptr, _weights.size() * sizeof(float));
+      cout << "Successfully casted down from int64 to float." << endl;
+    }
+  }
+  else
+  {
+    cout << "only support int32 to float now." << endl;
+    return false;
+  }
+  
+  //newW.type= (int32_t)nvinfer1::DataType::kFLOAT;
+ // newW.count =w.count();
+  return true;
+}
+
+inline bool newWghFloat2Int(ShapedWeights& w , ShapedWeights& newW){
+
+  if ((w.type) == (int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT  && newW.type ==(int32_t)::ONNX_NAMESPACE::TensorProto::INT32 )
+  {
+    std::vector<int32_t> _weights;
+    _weights.resize(w.count());
+
+    if (!onnx2trt::convertFloatToInt32(w.values, w.count(), _weights))
+    {
+      cerr << "ERROR: Weights cannot be cast down to FLOAT." << endl;
+      // Return empty w on failure
+      return false;
+    }
+    else
+    {
+      void * _weights_ptr = static_cast<void *>(_weights.data());
+      std::memcpy(newW.values, _weights_ptr, _weights.size() * sizeof(int32_t));
+      cout << "Successfully casted down from float to INT32." << endl;
+    }
+  }
+  else
+  {
+    cout << "only support float to int32 now." << endl;
+    return false;
+  }
+  
+  //newW.type= (int32_t)nvinfer1::DataType::kFLOAT;
+ // newW.count =w.count();
+  return true;
+}
+
+inline bool newWghInt64ToInt(ShapedWeights& w , ShapedWeights& newW){
+
+  if ((w.type) == (int32_t)::ONNX_NAMESPACE::TensorProto::INT64  && newW.type ==(int32_t)::ONNX_NAMESPACE::TensorProto::INT32 )
+  {
+    std::vector<int32_t> _weights;
+    _weights.resize(w.count());
+
+    if (!onnx2trt::convertINT64(w.values, w.count(), _weights))
+    {
+      cerr << "ERROR: Weights cannot be cast down to FLOAT." << endl;
+      // Return empty w on failure
+      return false;
+    }
+    else
+    {
+      void * _weights_ptr = static_cast<void *>(_weights.data());
+      std::memcpy(newW.values, _weights_ptr, _weights.size() * sizeof(int32_t));
+      cout << "Successfully casted down from int64 to  INT32." << endl;
+    }
+  }
+  else
+  {
+    cout << "only support float to int32 now." << endl;
+    return false;
+  }
+
+  //newW.type= (int32_t)nvinfer1::DataType::kFLOAT;
+ // newW.count =w.count();
+  return true;
+}
+
+
 #if 0
 inline nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape) 
 {
@@ -194,7 +323,8 @@ inline bool convert_dtype(int32_t onnx_dtype,
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
 #if NV_TENSORRT_MAJOR >= 4
   // See ShapedWeights.cpp for sanity check if all values can be safetly downcasted to INT32
-  case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+ //case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
   case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
   case ::ONNX_NAMESPACE::TensorProto::BOOL:   *trt_dtype = nvinfer1::DataType::kINT32; break;//sds
 #endif
@@ -214,7 +344,8 @@ inline bool convert_input_dtype(int32_t onnx_dtype,
   case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF;  break;
 #if NV_TENSORRT_MAJOR >= 4
   //modify:added by shendasai for solver not support input int64. no check!
-  case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+  //case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kINT32; break;
+  case ::ONNX_NAMESPACE::TensorProto::INT64:   *trt_dtype = nvinfer1::DataType::kFLOAT; break;
   case ::ONNX_NAMESPACE::TensorProto::INT32:   *trt_dtype = nvinfer1::DataType::kINT32; break;
 #endif
   default:
@@ -364,7 +495,14 @@ inline nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterConte
     {
         // Handle non-tensor indices input by adding a new constant layer to the network.
         const ShapedWeights& weights = input.weights();
-        return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+#if 0
+        //sds-temp转成float
+    ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT;
+    
+    auto newW = ctx->createTempWeights(_type, weights.shape);
+    bool ret = onnx2trt::getNewWeights(weights, newW);
+#endif
+  return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
         //addConstant中申请显存会在batchsize这一维度上作broadcast吗?
         //注意看下这里的getOutput是什么维度
         //sds_check?
@@ -383,7 +521,7 @@ inline nvinfer1::ITensor& convert_output_weight_to_tensor(TensorOrWeights& input
         // Convert weight output to tensor output. Strip batch dimension here.
         const ShapedWeights& weights = input.weights();
         nvinfer1::Dims tensor_shape = weights.shape;
-		//sds，DCHW->CHW, 去除了batch dimension.
+        //sds，DCHW->CHW, 去除了batch dimension.
         tensor_shape= set_dims_CHW(remove_dim(tensor_shape, 0));
         return *(ctx->network()->addConstant(tensor_shape, weights)->getOutput(0));
     }
@@ -512,7 +650,11 @@ inline void update_padded_values(std::vector<float>&pad_values, const nvinfer1::
       }
     }
   }
-}
+
 
 
 } // namespace onnx2trt
+
+
+}
+

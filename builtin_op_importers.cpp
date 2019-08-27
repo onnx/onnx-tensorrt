@@ -29,8 +29,11 @@
 #include "MyElementWise.hpp"
 #include "ConstantOfShape.hpp"
 #include "Expand.hpp"
+#include "MyLocalCast.hpp"
+#include "MyCast.hpp"
 #include "NonZero.hpp"
 #include "InstanceNormalization.hpp"
+
 
 #include <numeric> // For std::iota
 #include <iostream>
@@ -165,7 +168,17 @@ nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType sc
 {
     ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{0});
     static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
-    return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
+
+    #if 0
+    //sds-temp转成float
+    ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT;
+    
+    auto newW = ctx->createTempWeights(_type, scalarWeights.shape);
+    bool ret = onnx2trt::getNewWeights(scalarWeights, newW);
+    
+    return ctx->network()->addConstant(newW.shape, newW);
+	#endif
+	return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
 }
 
 NodeImportResult
@@ -317,6 +330,16 @@ combineTensorsElementwise(IImporterContext* ctx,
         ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
         weights.shape = remove_dim(weights.shape, BATCH_DIM);
       }
+#if 0
+      //sds-temp转成float
+      ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT;
+
+      auto newW = ctx->createTempWeights(_type, weights.shape);
+      bool ret = onnx2trt::getNewWeights(weights, newW);
+
+      
+      auto* layer = ctx->network()->addConstant(newW.shape, newW);
+#endif
       auto* layer = ctx->network()->addConstant(weights.shape, weights);
       ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
       tensor_ptr = layer->getOutput(0);
@@ -334,13 +357,35 @@ combineTensorsElementwise(IImporterContext* ctx,
 #endif
     input_tensors.push_back(tensor_ptr);
   }
-  nvinfer1::ITensor* combined = input_tensors.at(0);
-  if( input_tensors.size() == 1 ) {
+#if 1
+  //转成float类型，elementwise不支持int32
+  nvinfer1::DataType  dtype= nvinfer1::DataType::kFLOAT;
+  std::vector<nvinfer1::ITensor*> input_tensors2;
+  for (int i = 0; i < input_tensors.size(); i++)
+  {
+    nvinfer1::ITensor* tensor = input_tensors.at(i);
+    if(tensor->getType() != nvinfer1::DataType::kINT32)
+    {
+        input_tensors2.push_back(tensor);
+        continue;
+    }
+    tensor->setType(nvinfer1::DataType::kFLOAT);
+    nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
+        new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
+        {tensor});
+    nvinfer1::ITensor* cast_tensor = layer_ptr->getOutput(0);
+    input_tensors2.push_back(cast_tensor);
+  }
+#endif
+    
+    
+  nvinfer1::ITensor* combined = input_tensors2.at(0);
+  if( input_tensors2.size() == 1 ) {
     // Note: Single input must be wrapped in identity to avoid messing up network outputs
     return {{identity(ctx, combined)}};
   }
-  for( size_t i=1; i<input_tensors.size(); ++i ) {
-    nvinfer1::ITensor* tensor = input_tensors.at(i);
+  for( size_t i=1; i<input_tensors2.size(); ++i ) {
+    nvinfer1::ITensor* tensor = input_tensors2.at(i);
     ASSERT(tensor->getDimensions().nbDims == combined->getDimensions().nbDims,
            ErrorCode::kUNSUPPORTED_NODE);
     auto* layer = ctx->network()->addElementWise(
@@ -399,6 +444,16 @@ combineTensorsMyElementwise(IImporterContext* ctx,
         ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
         weights.shape = remove_dim(weights.shape, BATCH_DIM);
       }
+#if 0
+      //sds-temp转成float
+      ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT;
+
+      auto newW = ctx->createTempWeights(_type, weights.shape);
+      bool ret = onnx2trt::getNewWeights(weights, newW);
+
+      
+      auto* layer = ctx->network()->addConstant(newW.shape, newW);
+#endif
       auto* layer = ctx->network()->addConstant(weights.shape, weights);
       ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
       tensor_ptr = layer->getOutput(0);
@@ -416,16 +471,45 @@ combineTensorsMyElementwise(IImporterContext* ctx,
 #endif
     input_tensors.push_back(tensor_ptr);
   }
-  nvinfer1::ITensor* combined = input_tensors.at(0);
-  if( input_tensors.size() == 1 ) {
+
+
+
+#if 1
+    //转成float类型，elementwise不支持int32
+    nvinfer1::DataType  dtype= nvinfer1::DataType::kFLOAT;
+    std::vector<nvinfer1::ITensor*> input_tensors2;
+    for (int i = 0; i < input_tensors.size(); i++)
+    {
+      nvinfer1::ITensor* tensor = input_tensors.at(i);
+      if(tensor->getType() != nvinfer1::DataType::kINT32)
+      {
+          input_tensors2.push_back(tensor);
+          continue;
+      }
+      tensor->setType(nvinfer1::DataType::kFLOAT);
+      nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
+          new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
+          {tensor});
+      nvinfer1::ITensor* cast_tensor = layer_ptr->getOutput(0);
+      input_tensors2.push_back(cast_tensor);
+    }
+#endif
+
+
+
+
+
+  
+  nvinfer1::ITensor* combined = input_tensors2.at(0);
+  if( input_tensors2.size() == 1 ) {
     // Note: Single input must be wrapped in identity to avoid messing up network outputs
     return {{identity(ctx, combined)}};
   }
   nvinfer1::IPluginV2Layer* layer2 = nullptr;
   // 'Equal' or 'Less'
-  if(input_tensors.size()==2) 
+  if(input_tensors2.size()==2) 
   {
-    nvinfer1::ITensor* tensor = input_tensors.at(1);
+    nvinfer1::ITensor* tensor = input_tensors2.at(1);
     ASSERT(tensor->getDimensions().nbDims == combined->getDimensions().nbDims,
            ErrorCode::kUNSUPPORTED_NODE);
     //add plugin for this op
@@ -436,10 +520,10 @@ combineTensorsMyElementwise(IImporterContext* ctx,
   }
 
   //'where'
-  if(input_tensors.size() ==3)
+  if(input_tensors2.size() ==3)
   {
-      nvinfer1::ITensor* tensor1 = input_tensors.at(1);
-      nvinfer1::ITensor* tensor2 = input_tensors.at(2);
+      nvinfer1::ITensor* tensor1 = input_tensors2.at(1);
+      nvinfer1::ITensor* tensor2 = input_tensors2.at(2);
       ASSERT(tensor1->getDimensions().nbDims == combined->getDimensions().nbDims,
              ErrorCode::kUNSUPPORTED_NODE);
       ASSERT(tensor2->getDimensions().nbDims == combined->getDimensions().nbDims,
@@ -802,6 +886,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
 
 //sds-check
 //faiseq 用了一次，转Int32
+//很奇怪，这个实现并不能使得输入输出的数据类型改变。而是只选择了精度  
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Get input node.
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
@@ -816,6 +901,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
     // Add the layer.
     nvinfer1::IIdentityLayer* layer = ctx->network()->addIdentity(inputs.at(0).tensor());
     layer->setPrecision(dtype);
+
+    //layer->setOutputType(0, nvinfer1::DataType::kINT8);
     RETURN_FIRST_OUTPUT(layer);
 }
 
@@ -1319,13 +1406,51 @@ bool  gather_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs,
     auto weights1 = inputs.at(1).weights();
     nvinfer1::Dims dims1 = weights1.shape;
     if(dims1.nbDims !=1 ||  dims1.d[0] !=1) return false;
-    int32_t _index = static_cast<int32_t*>(weights1.values)[0];
+    int32_t _index = 0;
+    switch(weights1.type)
+    {
+        case((int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT):
+        {
+             _index = (int32_t)(static_cast<float*>(weights1.values)[0]);
+            break;
+        }
+        case((int32_t)::ONNX_NAMESPACE::TensorProto::INT32):
+        {
+             _index = (int32_t)(static_cast<int32_t *>(weights1.values)[0]);
+            break;
+        }
+        //inputs[2]有可能是从文件读的
+        case((int32_t)::ONNX_NAMESPACE::TensorProto::INT64):
+        {
+             _index = (int32_t)(static_cast<int64_t *>(weights1.values)[0]);
+            break;
+        }
+        default:
+            break;
+    }
 
     if(_index >= dims0.d[0])
     {
         return false;   
     }
-    int32_t _value = static_cast<int32_t*>(weights0.values)[_index];
+    int32_t _value = 0;
+
+    switch(weights0.type)
+    {
+        case((int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT):
+        {
+             _value = (int32_t)(static_cast<float*>(weights0.values)[_index]);
+            break;
+        }
+        case((int32_t)::ONNX_NAMESPACE::TensorProto::INT32):
+        {
+             _value = (int32_t)(static_cast<int32_t *>(weights0.values)[_index]);
+            break;
+        }
+        //input[1]一定是传递过来的，不是从文件读的
+        default:
+            break;
+    }
 
 
     int ndim = 1;
@@ -1356,8 +1481,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     }
     //End: added by shendasai for output is scalar case.
 
+    //如果输入是
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
+    //如果indices是float类型，转化为int32类型
+    if(indices.getType() == nvinfer1::DataType::kFLOAT)
+    {
+        indices.setType(nvinfer1::DataType::kINT32);
+    }
+    #if 1
+    nvinfer1::ILayer* layer_ptr = ctx->addPluginV2Ext(
+        new MyCastPlugin(nvinfer1::DataType::kFLOAT, nvinfer1::DataType::kINT32),
+        {&indices});
+
+    nvinfer1::ITensor* indices_new = layer_ptr->getOutput(0);
+    #endif
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
     int nbDims = inputs.at(0).shape().nbDims;
@@ -1366,7 +1504,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     //axis +=1;
     TRT_CHECK(convert_axis(axis, nbDims));
     //sds
-    RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, indices, axis));
+    RETURN_FIRST_OUTPUT(ctx->network()->addGather(data, *indices_new, axis));
 }
 #endif // NV_TENSORRT_MAJOR >= 4
 
@@ -1603,7 +1741,40 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
     nvinfer1::MatrixOperation opA = getMatrixOp(inputA);
     nvinfer1::MatrixOperation opB = getMatrixOp(inputB);
 
-    RETURN_FIRST_OUTPUT(ctx->network()->addMatrixMultiply(inputA, opA, inputB, opB));
+    //sds-temp
+    //如果inputB's rank比inputA小。则unsqueeze。
+    int a_n = inputA.getDimensions().nbDims;
+    int b_n = inputB.getDimensions().nbDims;
+    
+    if(a_n > b_n)
+    {
+        int sub_n = a_n - b_n;
+        nvinfer1::Dims new_shape;
+        new_shape.nbDims = a_n;
+        for(int i = 0; i < new_shape.nbDims ; i++)
+        {
+            if(i < sub_n)
+                new_shape.d[i] = 1;
+            else
+                new_shape.d[i] = inputB.getDimensions().d[i-sub_n];
+               
+        }
+
+        nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(inputB);
+        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+        layer->setReshapeDimensions(new_shape);
+        //ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) == get_shape_size(old_shape),
+          //ErrorCode::kUNSUPPORTED_NODE);
+        nvinfer1::ITensor* pNewB = layer->getOutput(0);
+        nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, *pNewB, opB);
+        ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
+        return {{layer_ptr->getOutput(0)}}; 
+    }
+    
+  
+    nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, inputB, opB);
+    ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
+    return {{layer_ptr->getOutput(0)}}; 
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Max) {
@@ -1684,8 +1855,99 @@ DEFINE_BUILTIN_OP_IMPORTER(Min) {
   return combineTensorsElementwise(
     ctx, node, inputs, nvinfer1::ElementWiseOperation::kMIN);
 }
+
+
+bool  mul_scalar(IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, ShapedWeights& newWeights)
+{
+
+    for( auto& input : inputs )
+    {
+        //必须是weights
+        if(!input.is_weights()) return false;
+    }
+
+    
+
+    auto weights0 = inputs.at(0).weights();
+    nvinfer1::Dims dims0 = weights0.shape;
+    if(dims0.nbDims !=1 ||  dims0.d[0] !=1) return false;
+
+    auto weights1 = inputs.at(1).weights();
+    nvinfer1::Dims dims1 = weights1.shape;
+    if(dims1.nbDims !=1 ||  dims1.d[0] !=1) return false;
+    int32_t _b = 0;
+    switch(weights1.type)
+    {
+       case((int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT):
+       {
+            _b = (int32_t)(static_cast<float*>(weights1.values)[0]);
+           break;
+       }
+       case((int32_t)::ONNX_NAMESPACE::TensorProto::INT32):
+       {
+            _b = (int32_t)(static_cast<int32_t *>(weights1.values)[0]);
+           break;
+       }
+       //inputs[2]有可能是从文件读的
+       case((int32_t)::ONNX_NAMESPACE::TensorProto::INT64):
+       {
+            _b = (int32_t)(static_cast<int64_t *>(weights1.values)[0]);
+           break;
+       }
+       default:
+           break;
+    }
+
+
+    int32_t _a = 0;
+
+    switch(weights0.type)
+    {
+       case((int32_t)::ONNX_NAMESPACE::TensorProto::FLOAT):
+       {
+            _a = (int32_t)(static_cast<float*>(weights0.values)[0]);
+           break;
+       }
+       case((int32_t)::ONNX_NAMESPACE::TensorProto::INT32):
+       {
+            _a = (int32_t)(static_cast<int32_t *>(weights0.values)[0]);
+           break;
+       }
+       //input[1]一定是传递过来的，不是从文件读的
+       default:
+           break;
+    }
+
+    int32_t out_value = _a * _b;
+    int ndim = 1;
+    auto scale_dtype = ::ONNX_NAMESPACE::TensorProto::INT32;
+    auto scale_shape = nvinfer1::Dims{ndim, {1, 1, 1, 1, 1, 1, 1, 1}};
+    scale_shape.d[0]=1;
+    newWeights = ctx->createTempWeights(scale_dtype, scale_shape);
+    static_cast<int32_t*>(newWeights.values)[0] = out_value;
+    //std::copy(temp_value.begin(), temp_value.end(), static_cast<int64_t *>(newWeights.values));
+
+    return true;
+}
+
+
 #if 1
 DEFINE_BUILTIN_OP_IMPORTER(Mul) {
+
+  bool isScalar =false;
+
+  //Begin:added by shendasai ,2019-8-23
+  ShapedWeights newWeights;
+  isScalar = mul_scalar(ctx, inputs, newWeights);
+
+  if(isScalar)
+  {
+      return {{newWeights}};
+  }
+
+
+  
+
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
   return combineTensorsElementwise(
       ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD, true);
@@ -1843,6 +2105,24 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceProd) {
   return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kPROD);
 }
 DEFINE_BUILTIN_OP_IMPORTER(ReduceSum) {
+
+      //转成float类型，elementwise不支持int32
+  if(inputs.at(0).is_tensor())
+  {
+      nvinfer1::DataType  dtype= nvinfer1::DataType::kFLOAT;
+      nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+      if(tensor.getType() == nvinfer1::DataType::kINT32)
+      {
+          tensor.setType(nvinfer1::DataType::kFLOAT);
+       
+          nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
+                    new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
+                    {&tensor});
+          nvinfer1::ITensor* cast_tensor = layer_ptr->getOutput(0);
+          TensorOrWeights _tmp(cast_tensor);
+          return reduceTensor(ctx, node, _tmp, nvinfer1::ReduceOperation::kSUM);
+      }
+  }
   return reduceTensor(ctx, node, inputs.at(0), nvinfer1::ReduceOperation::kSUM);
 }
 DEFINE_BUILTIN_OP_IMPORTER(ReduceSumSquare) {
@@ -1873,8 +2153,28 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     //sds-temp,输入的shape必须是weights。itensor在创建engine时值是不确定的.
     ASSERT(new_shape_input.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     {
+
         ShapedWeights new_shape_weights = new_shape_input.weights();
         ASSERT(new_shape_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
+
+        //if float, convert to int32
+        if(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
+        {
+          ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::INT32;
+    
+          auto newW = ctx->createTempWeights(_type, new_shape_weights.shape);
+          bool ret = onnx2trt::newWghFloat2Int(new_shape_weights, newW);
+          if(ret)new_shape_weights = newW;
+        }
+        else if(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
+        {
+          ShapedWeights::DataType _type = (int32_t)::ONNX_NAMESPACE::TensorProto::INT32;
+    
+          auto newW = ctx->createTempWeights(_type, new_shape_weights.shape);
+          bool ret = onnx2trt::newWghInt64ToInt(new_shape_weights, newW);
+          if(ret)new_shape_weights = newW;
+        }
+        
         ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT32,
                ErrorCode::kINVALID_NODE);
         int32_t const* new_shape_ptr =
@@ -1887,7 +2187,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
     new_shape = attrs.get<nvinfer1::Dims>("shape");
   }
     int infer_dim = -1;
-    //sds,暂时不考虑input[0]是权重的问题。  实际上，当前faiseq网络input[0]都是tensor
+    //sds-temp, gather输出的scalar 会走进这里
     if( input.is_weights() ) {
       auto weights = input.weights();
       TRT_CHECK(get_infer_dim(infer_dim,new_shape));
@@ -1927,6 +2227,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
       //不存在-1
       if (infer_dim < 0) {
         //input[0]和input[1]的大小要一致
+        //sds-temp, trt默认不支持broadcast
         ASSERT(get_shape_size(new_shape) ==
                    get_shape_size(tensor.getDimensions()),
                ErrorCode::kUNSUPPORTED_NODE);

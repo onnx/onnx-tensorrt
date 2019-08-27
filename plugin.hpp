@@ -115,6 +115,46 @@ protected:
   virtual ~PluginV2() {}
 };
 
+class PluginV2Ext : public nvinfer1::IPluginV2Ext {
+ public:
+   PluginV2Ext() { }
+
+   PluginV2Ext(const void* serialized_data, size_t length) {}
+
+ // TrtPlugin(const TrtPlugin& rhs) : namespace_(rhs.namespace_) {}
+
+  int initialize() override { return 0; }
+
+  void terminate() override {}
+
+  void destroy() override { delete this; }
+
+  void setPluginNamespace(const char* plugin_namespace) override {
+    namespace_ = plugin_namespace;
+  }
+
+  const char* getPluginNamespace() const override { return namespace_.c_str(); }
+
+ protected:
+  template <typename T>
+  void WriteToBuffer(const T& val, char** buffer) const {
+    *reinterpret_cast<T*>(*buffer) = val;
+    *buffer += sizeof(T);
+  }
+
+  template <typename T>
+  T ReadFromBuffer(const char** buffer) {
+    T val = *reinterpret_cast<const T*>(*buffer);
+    *buffer += sizeof(T);
+    return val;
+  }
+
+ private:
+  std::string namespace_;
+};
+
+
+
 class PluginAdapter : public PluginV2 {
 protected:
   nvinfer1::IPluginV2*     _pluginV2;
