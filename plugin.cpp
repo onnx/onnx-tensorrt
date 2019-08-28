@@ -51,7 +51,7 @@ namespace onnx2trt {
 
   bool Plugin::supportsFormat(nvinfer1::DataType type,
                               nvinfer1::PluginFormat format) const {
-    return ((type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kHALF)  &&
+    return ((type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kHALF || type == nvinfer1::DataType::kINT32)  &&
             (format == nvinfer1::PluginFormat::kNCHW));
   }
 

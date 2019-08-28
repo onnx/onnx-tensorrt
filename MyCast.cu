@@ -86,7 +86,8 @@ nvinfer1::DataType MyCastPlugin::getOutputDataType(int index, const nvinfer1::Da
   }
 
 bool MyCastPlugin::supportsFormat(nvinfer1::DataType type, nvinfer1::PluginFormat format) const{
-    return type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kINT32;
+    return type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kINT32 || type == nvinfer1::DataType::kHALF;
+    //return true;
   }
   
 

@@ -29,7 +29,7 @@
 #include "MyElementWise.hpp"
 #include "ConstantOfShape.hpp"
 #include "Expand.hpp"
-#include "MyLocalCast.hpp"
+//#include "MyLocalCast.hpp"
 #include "MyCast.hpp"
 #include "NonZero.hpp"
 #include "InstanceNormalization.hpp"
@@ -369,7 +369,7 @@ combineTensorsElementwise(IImporterContext* ctx,
         input_tensors2.push_back(tensor);
         continue;
     }
-    tensor->setType(nvinfer1::DataType::kFLOAT);
+    //tensor->setType(nvinfer1::DataType::kFLOAT);
     nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
         new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
         {tensor});
@@ -486,7 +486,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
           input_tensors2.push_back(tensor);
           continue;
       }
-      tensor->setType(nvinfer1::DataType::kFLOAT);
+      //tensor->setType(nvinfer1::DataType::kFLOAT);
       nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
           new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
           {tensor});
@@ -501,11 +501,15 @@ combineTensorsMyElementwise(IImporterContext* ctx,
 
   
   nvinfer1::ITensor* combined = input_tensors2.at(0);
+
+  nvinfer1::IPluginV2Layer* layer2 = nullptr;
+
   if( input_tensors2.size() == 1 ) {
     // Note: Single input must be wrapped in identity to avoid messing up network outputs
-    return {{identity(ctx, combined)}};
+    //return {{identity(ctx, combined)}};
+    layer2 = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined});
   }
-  nvinfer1::IPluginV2Layer* layer2 = nullptr;
+  
   // 'Equal' or 'Less'
   if(input_tensors2.size()==2) 
   {
@@ -1485,10 +1489,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather) {
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
     //如果indices是float类型，转化为int32类型
-    if(indices.getType() == nvinfer1::DataType::kFLOAT)
-    {
-        indices.setType(nvinfer1::DataType::kINT32);
-    }
     #if 1
     nvinfer1::ILayer* layer_ptr = ctx->addPluginV2Ext(
         new MyCastPlugin(nvinfer1::DataType::kFLOAT, nvinfer1::DataType::kINT32),
@@ -2113,7 +2113,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceSum) {
       nvinfer1::ITensor& tensor = inputs.at(0).tensor();
       if(tensor.getType() == nvinfer1::DataType::kINT32)
       {
-          tensor.setType(nvinfer1::DataType::kFLOAT);
+          //tensor.setType(nvinfer1::DataType::kFLOAT);
        
           nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
                     new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),

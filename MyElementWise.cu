@@ -23,8 +23,12 @@
 #include <algorithm>
 #include <cuda_fp16.h>
 #include <cassert>
+#include <vector>
+#include <set>
 
 #include "MyElementWise.hpp"
+
+using namespace std;
 
 //sds:对于这个split来说，这里的index必须是0
 //sds: index,The index of the output tensor.
@@ -34,9 +38,57 @@ nvinfer1::Dims MyElementWisePlugin::getOutputDimensions(int index,
   // 'not' is 1, 'equal' and 'less' is 2, 'where' is 3
   assert(nbInputs == 1 || nbInputs == 2 || nbInputs == 3);
   assert(index == 0);// only one output
-  nvinfer1::Dims const& input_dims = inputDims[0];
   //output_dims == input_dims[0]
-  nvinfer1::Dims output_dims = input_dims;
+  nvinfer1::Dims output_dims;
+  if(nbInputs != 3)
+  {
+      output_dims = inputDims[0];
+  }
+  else
+  {
+      //检查rank要一致
+      assert(inputDims[0].nbDims == inputDims[1].nbDims);
+      assert(inputDims[2].nbDims == inputDims[1].nbDims);
+      vector<set<int>> _sets;
+      _sets.resize(inputDims[0].nbDims);
+      //broadcast,选择维度最多的作为输出
+      int max_num =0;
+      int max_index = 0;
+      for(int i = 0; i < nbInputs; i++)
+      {
+
+          nvinfer1::Dims const& _temp = inputDims[i];
+          int total_num;
+          for(int j=0; j<_temp.nbDims;j++)
+          {
+             int d_num =  _temp.d[j];
+             _sets[j].insert(d_num);
+             total_num +=d_num;
+          }
+
+          if(max_num < total_num)
+          {
+              max_num = total_num;
+              max_index = i;
+          }
+      }
+
+      //判断是否满足broadcast条件
+      for(int i=0; i< _sets.size(); i++)
+      {
+          set<int>& _set = _sets[i];
+          if(_set.size() != 1 && _set.size() !=2)
+            cout << "MyElementWisePlugin->getOutputDimensions(), the dims must allow broadcast 1! error!" << endl;
+          //两个值，必定有一个是1
+          if(_set.size() ==2 && !_set.count(1))
+            cout << "MyElementWisePlugin->getOutputDimensions(), the dims must allow broadcast 2! error!" << endl;
+            
+      }      
+            
+      
+      output_dims = inputDims[max_index];            
+          
+  }
   return output_dims;
 }
 
