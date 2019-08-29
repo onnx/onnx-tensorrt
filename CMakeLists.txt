@@ -71,7 +71,13 @@ set(PLUGIN_SOURCES
   FancyActivation.cu
   ResizeNearest.cu
   Split.cu
+  MyElementWise.cu
+  NonZero.cu
+  ConstantOfShape.cu
+  Expand.cu
   InstanceNormalization.cpp
+  MyLocalCast.cu
+  MyCast.cu
   plugin.cpp
   )
 

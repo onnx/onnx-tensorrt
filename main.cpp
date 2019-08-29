@@ -208,7 +208,7 @@ int main(int argc, char* argv[]) {
       cerr << "ERROR: Failed to read from file " << onnx_filename << endl;
       return -4;
     }
-    //模型解析
+	//模型解析
     if( !trt_parser->parse(onnx_buf.data(), onnx_buf.size()) ) {
       int nerror = trt_parser->getNbErrors();
       for( int i=0; i<nerror; ++i ) {
@@ -257,7 +257,7 @@ int main(int argc, char* argv[]) {
       return -5;
     }
     trt_builder->setDebugSync(debug_builder);
-    //sds:生成引擎
+	//sds:生成引擎
     auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
 
     auto engine_plan = common::infer_object(trt_engine->serialize());
