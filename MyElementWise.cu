@@ -494,7 +494,7 @@ int MyElementWisePlugin::enqueue(int batchSize,
 
     
     break;
-  }w
+  }
   case(MyElementWiseType::Not):
   {
 
