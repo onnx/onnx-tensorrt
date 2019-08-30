@@ -57,11 +57,9 @@ __global__ void constant_shape_kernel(unsigned long long n, T value, T * __restr
   }
 
 
-  
-//sds:这里的inputs是在显存，outputs是在内存。
-//sds:每个plugin进入enqueue，带过来的inputs有可能在内存或者显存，由addPluginV2时传入的inputs决定
-//    inputs是一个指针，维度信息需要自己初始化，比如在initialize中或者enqueue中。
-//    outputs? outputs已经按照getOutputDims指定的初始化，应该都是gpu指针吧?
+
+
+//sds-temp,仅支持input[0] 是shape, input[1]是scalar的输入
 int ConstantOfShapePlugin::enqueue(int batchSize,
                          const void *const *inputs, void **outputs,
                          void *workspace, cudaStream_t stream) {
@@ -71,8 +69,9 @@ int ConstantOfShapePlugin::enqueue(int batchSize,
 
   dim3 block(512);
   dim3 grid((_numbers + 512 - 1) / 512);
-      
   constant_shape_kernel<<<grid, block, 0, stream>>>(_numbers, _value, odatas);
+
+  gdb_copy_to_cpu("constantOfShape", odatas, _numbers);
 
   return cudaGetLastError() != cudaSuccess;
 }

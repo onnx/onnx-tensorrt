@@ -123,3 +123,5 @@ template<typename T>
 inline void deserialize_value(void const** buffer, size_t* buffer_size, T* value) {
   return Serializer<T>::deserialize(buffer, buffer_size, value);
 }
+
+

@@ -487,6 +487,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
           continue;
       }
       //tensor->setType(nvinfer1::DataType::kFLOAT);
+      //sds-temp,只有tensor 且int32会走进来   
       nvinfer1::ILayer* layer_ptr =  ctx->addPluginV2Ext(
           new MyCastPlugin(nvinfer1::DataType::kINT32, nvinfer1::DataType::kFLOAT),
           {tensor});
@@ -508,6 +509,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
     // Note: Single input must be wrapped in identity to avoid messing up network outputs
     //return {{identity(ctx, combined)}};
     layer2 = ctx->addPluginV2(new MyElementWisePlugin(my_op_type),{combined});
+    
   }
   
   // 'Equal' or 'Less'
@@ -551,6 +553,7 @@ combineTensorsMyElementwise(IImporterContext* ctx,
     for( int i=0; i<noutput; ++i ) 
     {
         outputs.push_back(layer2->getOutput(i));
+        
     }
     return outputs;
 }
@@ -892,6 +895,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil) {
 //faiseq 用了一次，转Int32
 //很奇怪，这个实现并不能使得输入输出的数据类型改变。而是只选择了精度  
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
+//sds-temp, do nothing
+#if 0
     // Get input node.
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
@@ -908,6 +913,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast) {
 
     //layer->setOutputType(0, nvinfer1::DataType::kINT8);
     RETURN_FIRST_OUTPUT(layer);
+#endif
+    return inputs;
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Clip) {
@@ -1100,6 +1107,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
   ASSERT(inputs.at(1).is_weights(), ErrorCode::kINVALID_NODE);
 
+   //shape 必须是weights
    auto weights = inputs.at(1).weights();
    nvinfer1::Dims dims = weights.shape;
    ASSERT(dims.nbDims ==1, ErrorCode::kINVALID_NODE);//必须是1-d的shape

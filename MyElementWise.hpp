@@ -48,21 +48,48 @@ class MyElementWisePlugin final : public onnx2trt::PluginV2 {
 private:
   MyElementWiseType _type;
   unsigned long long _numbers;
+  nvinfer1::Dims output_dims;
   //int _nx, _ny, _nz;
   //int _x_stride, _y_stride, _z_stride;
   //thrust::device_vector<int> _d_segment_offsets;
   //thrust::device_vector<float*> _d_output_ptrs;
+
+  int rank;
+  //输入1 2 3 ， 输出1。共四个。
+  thrust::device_vector<int> dims_a;
+  thrust::device_vector<int> dims_a_mul;
+  thrust::device_vector<int> dims_b;
+  thrust::device_vector<int> dims_b_mul;
+  thrust::device_vector<int> dims_c;
+  thrust::device_vector<int> dims_c_mul;
+  thrust::device_vector<int> dims_y;
+  thrust::device_vector<int> dims_y_mul;
+
+
+  
+    thrust::host_vector<int> h_dims_a;
+    thrust::host_vector<int> h_dims_a_mul  ;
+    thrust::host_vector<int> h_dims_b  ;
+    thrust::host_vector<int> h_dims_b_mul ;
+    thrust::host_vector<int> h_dims_c ;
+    thrust::host_vector<int> h_dims_c_mul ;
+    thrust::host_vector<int> h_dims_y ;
+    thrust::host_vector<int> h_dims_y_mul  ;
+
+        
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
     deserialize_value(&serialData, &serialLength, &_type);
+     deserialize_value(&serialData, &serialLength, &output_dims);
   }
   virtual size_t getSerializationSize() const override {
-    return serialized_size(_type) + getBaseSerializationSize();
+    return serialized_size(_type) + serialized_size(output_dims) +getBaseSerializationSize();
   }
   virtual void serialize(void *buffer) const override {
     serializeBase(buffer);
     serialize_value(&buffer, _type);
+    serialize_value(&buffer, output_dims);
   }
 public:
   MyElementWisePlugin(MyElementWiseType op)

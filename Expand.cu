@@ -46,7 +46,7 @@ int ExpandPlugin::initialize() {
 }
 
 
-//sds，以下写法只满足是二维的输入
+//sds-temp，以下写法只满足是二维的输入
 template<typename T>
 __global__ void expand_kernel(const int rows, const int columns, const int dim_src_y, const int dim_src_x,T const* __restrict__ x, T * __restrict__ y) {
     int x_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -61,17 +61,21 @@ __global__ void expand_kernel(const int rows, const int columns, const int dim_s
     
   }
 
-
+//sds-temp,当前仅测试了一种场景，1*128扩展到10*128
 int ExpandPlugin::enqueue(int batchSize,
                          const void *const *inputs, void **outputs,
                          void *workspace, cudaStream_t stream) {
 
-  float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
+  float const * idata1 = reinterpret_cast<float const *>(inputs[0]);
   float * odatas = reinterpret_cast<float *>(outputs[0]);
 
   dim3 block(32, 16);
-  dim3 grid((output_dims.d[0]+32-1)/32, (output_dims.d[1]+16-1) / 16);
+  //sds-temp, trt里的0对应最高维度
+  dim3 grid((output_dims.d[1]+32-1)/32, (output_dims.d[0]+16-1) / 16);
   expand_kernel<<<grid, block, 0, stream>>>(output_dims.d[0],output_dims.d[1], input_dims.d[0], input_dims.d[1], idata1, odatas);
+
+  gdb_copy_to_cpu("Expand input", (float *)idata1, input_dims.d[0] * input_dims.d[1]);
+  gdb_copy_to_cpu("Expand output", odatas, output_dims.d[0] * output_dims.d[1]);
 
   return cudaGetLastError() != cudaSuccess;
 }

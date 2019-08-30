@@ -83,6 +83,7 @@ public:
   virtual const char* getPluginType() const = 0;
 
   virtual const char* getPluginVersion() const = 0;
+ int getInputDimsNum() const { return _input_dims.size(); }
 
   nvinfer1::Dims const&  getInputDims(int index) const { return _input_dims.at(index); }
   size_t                 getMaxBatchSize()       const { return _max_batch_size; }
@@ -221,3 +222,7 @@ public:
 };
 
 } // namespace onnx2trt
+
+
+bool gdb_copy_to_cpu(std::string opType, float* data, int size);
+

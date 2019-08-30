@@ -58,13 +58,14 @@ protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
     //deserialize_value(&serialData, &serialLength, &_value);
+    deserialize_value(&serialData, &serialLength, &output_dims);
   }
   virtual size_t getSerializationSize() const override {
-    return  getBaseSerializationSize();
+    return   serialized_size(output_dims) + getBaseSerializationSize();
   }
   virtual void serialize(void *buffer) const override {
     serializeBase(buffer);
-    //serialize_value(&buffer, _value);
+    serialize_value(&buffer, output_dims);
   }
 public:
   ExpandPlugin(nvinfer1::Dims  new_shape)

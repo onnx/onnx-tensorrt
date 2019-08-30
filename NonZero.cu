@@ -106,7 +106,7 @@ __global__ void non_zero_kernel(const int columns, int* _lenOfDim, int* _mulOfSo
     
   }
 
-
+//sds-temp,仅支持特例 : 所有element 都是1. output dim在初始化引擎时确定. 此情况下输出满足特定规律。
 int NonZeroPlugin::enqueue(int batchSize,
                          const void *const *inputs, void **outputs,
                          void *workspace, cudaStream_t stream) {
@@ -114,10 +114,14 @@ int NonZeroPlugin::enqueue(int batchSize,
   //float  const* idata1    = reinterpret_cast<float  const*>(inputs[0]);
   float * odatas = reinterpret_cast<float *>(outputs[0]);
 
-  dim3 block(_rows, 512);
-  dim3 grid(1, (_numbers + 512 - 1) / 512);
+  //dims(x,y,z)
+  dim3 block(512, _rows);
+  dim3 grid( (_numbers + 512 - 1) / 512,  1);
   extern __shared__ int lensOfDim[];
+  
   non_zero_kernel<<<grid, block, 0, stream>>>(_numbers, _lensOfDim, _mulOfSon, odatas);
+
+  gdb_copy_to_cpu("NonZero output", odatas, _numbers);
 
   return cudaGetLastError() != cudaSuccess;
 }
