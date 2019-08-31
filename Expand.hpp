@@ -42,18 +42,23 @@ class ExpandPlugin final : public onnx2trt::PluginV2 {
 public:
 
 private:
-  int _value;
   unsigned long long _numbers;
-  //nvinfer1::Dims _new_shape;
-  float* _lensOfDim;
-  float* _mulOfSon;
-  unsigned int _rows;
   nvinfer1::Dims output_dims;
-  nvinfer1::Dims input_dims;
-  //int _nx, _ny, _nz;
-  //int _x_stride, _y_stride, _z_stride;
-  //thrust::device_vector<int> _d_segment_offsets;
-  //thrust::device_vector<float*> _d_output_ptrs;
+
+    int rank;
+  //输入1 2 3 ， 输出1。共四个。
+  thrust::device_vector<int> dims_a;
+  thrust::device_vector<int> dims_a_mul;
+  thrust::device_vector<int> dims_y;
+  thrust::device_vector<int> dims_y_mul;
+
+
+  
+  thrust::host_vector<int> h_dims_a;
+  thrust::host_vector<int> h_dims_a_mul  ;
+  thrust::host_vector<int> h_dims_y ;
+  thrust::host_vector<int> h_dims_y_mul  ;
+  
 protected:
   void deserialize(void const* serialData, size_t serialLength) {
     deserializeBase(serialData, serialLength);
@@ -78,7 +83,7 @@ public:
   }
   virtual const char* getPluginType() const override { return EXPAND_PLUGIN_NAME; }
 
-  virtual void destroy() override { if(_lensOfDim!=nullptr)cudaFree(_lensOfDim);  if(_mulOfSon!=nullptr)cudaFree(_mulOfSon);delete this; }
+  virtual void destroy() override { delete this; }
 
   virtual nvinfer1::IPluginV2* clone() const override { return new ExpandPlugin{output_dims}; }
 

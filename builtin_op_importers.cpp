@@ -1121,13 +1121,27 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
     
    new_shape = set_dims_CHW(new_shape);
 
- 
-  //sds,是否需要检查两个输入的维度
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(
-        new ExpandPlugin(new_shape),
-        {&data}));
-       // {&inputs.at(0).tensor()}));
+ // Support broadcasting for tensor inputs by expanding dimensions.
+ //保证rank 一样
+  if (data.getDimensions().nbDims != new_shape.nbDims)
+  {
+    nvinfer1::Dims new_dims = expand_dims(data.getDimensions(), new_shape.nbDims);
+    nvinfer1::ITensor* tensor_ptr = reshape_tensor(ctx, data, new_dims);
+
+    RETURN_FIRST_OUTPUT(
+        ctx->addPluginV2(
+          new ExpandPlugin(new_shape),
+          {tensor_ptr}));
+  }
+  else
+  {
+    RETURN_FIRST_OUTPUT(
+        ctx->addPluginV2(
+          new ExpandPlugin(new_shape),
+          {&data}));
+
+  }
+       
 
 }
 
