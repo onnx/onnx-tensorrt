@@ -283,13 +283,14 @@ int main(int argc, char** argv)
     for (int i = 0; i < 1*128; i++)
         data[i] = 1;
     //Keeping the Secret of Genetic Testing
-    data[0] = 8119;
-    data[1] = 7;
-    data[2] = 10465;
-    data[3] = 12;
-    data[4] = 26009;
-    data[5] = 16832;
-    data[6] = 2;
+	//2019/9/2, 当前模型是left-pad.(如果用right-pad,需要重新导出模型）
+    data[121] = 8119;
+    data[122] = 7;
+    data[123] = 10465;
+    data[124] = 12;
+    data[125] = 26009;
+    data[126] = 16832;
+    data[127] = 2;
 
     // deserialize the engine
     IRuntime* runtime = createInferRuntime(gLogger);
