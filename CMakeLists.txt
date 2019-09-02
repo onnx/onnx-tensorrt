@@ -78,6 +78,7 @@ set(PLUGIN_SOURCES
   InstanceNormalization.cpp
   MyLocalCast.cu
   MyCast.cu
+  Print.cu
   plugin.cpp
   )
 

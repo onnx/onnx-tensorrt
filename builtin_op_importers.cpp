@@ -29,6 +29,7 @@
 #include "MyElementWise.hpp"
 #include "ConstantOfShape.hpp"
 #include "Expand.hpp"
+#include "Print.hpp"
 //#include "MyLocalCast.hpp"
 #include "MyCast.hpp"
 #include "NonZero.hpp"
@@ -43,6 +44,31 @@ namespace onnx2trt {
 namespace {
 
 enum { BATCH_DIM = 0 };
+bool debug_on = true;
+
+//sds-temp, add print plugin
+
+nvinfer1::ITensor* add_print_plugin(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor* tensor)
+{
+
+    std::vector<int> names;
+    for( std::string name: node.output()) 
+    {
+        int num = atoi(name.c_str());
+        names.push_back(num);
+      
+    }
+
+    nvinfer1::IPluginV2Layer* layer = nullptr;
+
+    if( tensor != nullptr) 
+    {
+        layer = ctx->addPluginV2(new PrintPlugin(names),{tensor});
+    }
+    return layer->getOutput(0);
+}
+
+
 
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 bool is_transpose_required(nvinfer1::Dims const& shape,
@@ -391,7 +417,10 @@ combineTensorsElementwise(IImporterContext* ctx,
     auto* layer = ctx->network()->addElementWise(
       *combined, *tensor, binary_op);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    combined = layer->getOutput(0);
+    if(debug_on)
+        combined = add_print_plugin(ctx, node,layer->getOutput(0));
+    else
+        combined = layer->getOutput(0);
   }
   return {{combined}};
 }
@@ -550,10 +579,15 @@ combineTensorsMyElementwise(IImporterContext* ctx,
     int noutput =1;//just one output
     ASSERT(layer2->getNbOutputs() == noutput, ErrorCode::kINTERNAL_ERROR);
     std::vector<TensorOrWeights> outputs;
+
+    //add_print_plugin(ctx, node, layer2->getOutput(0));
+    
     for( int i=0; i<noutput; ++i ) 
     {
+    if(debug_on)
+        outputs.push_back(add_print_plugin(ctx, node,layer2->getOutput(i)));
+    else
         outputs.push_back(layer2->getOutput(i));
-        
     }
     return outputs;
 }
@@ -988,7 +1022,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat) {
   auto* layer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
   ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
   layer->setAxis(axis);
-  RETURN_FIRST_OUTPUT(layer);
+  if(debug_on)
+    return {{add_print_plugin(ctx, node,layer->getOutput(0))}};
+  else
+    RETURN_FIRST_OUTPUT(layer);
 }
 //sds,并没有调用tensorrt的constant layer，而是直接返回了一个TensorOrWeight
 DEFINE_BUILTIN_OP_IMPORTER(Constant) {
@@ -1796,7 +1833,12 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
   
     nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, inputB, opB);
     ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
-    return {{layer_ptr->getOutput(0)}}; 
+
+    if(debug_on)
+        return {{add_print_plugin(ctx, node,layer2->getOutput(i))}};
+    else
+        return {{layer_ptr->getOutput(0)}}; 
+    
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Max) {
@@ -2074,8 +2116,15 @@ NodeImportResult reduceTensor(IImporterContext* ctx,
     TRT_CHECK(convert_axis(axis, ndim));
     axis_mask |= 1 << axis;
   }
-  RETURN_FIRST_OUTPUT(
-      ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
+  //RETURN_FIRST_OUTPUT(
+    //  ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
+
+    nvinfer1::ILayer* layer_ptr =  ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
+    if(debug_on)
+        return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
+    else
+        return {{layer_ptr->getOutput(0)}};
+    
 }
 DEFINE_BUILTIN_OP_IMPORTER(ReduceL1) {
   NodeImportResult abs_result = apply_unary_function(

@@ -175,7 +175,7 @@ bool getEngine(const std::string& modelFile, // name of the onnx model
 
     return true;
 }
-void doInference(IExecutionContext& context, int64_t* input, float* output1, float* output2, int64_t* output3, int batchSize)
+void doInference(IExecutionContext& context, float* input, float* output1, float* output2, float* output3, int batchSize)
 {
     const ICudaEngine& engine = context.getEngine();
     // input and output buffer pointers that we pass to the engine - the engine requires exactly IEngine::getNbBindings(),
@@ -198,20 +198,21 @@ void doInference(IExecutionContext& context, int64_t* input, float* output1, flo
     }
 
     // create GPU buffers and a stream
-    CHECK(cudaMalloc(&buffers[inputIndex], batchSize * 1*128 * sizeof(int64_t)));
-    CHECK(cudaMalloc(&buffers[outputIndex[0]], batchSize * 128*1*512 * sizeof(float)));
-    CHECK(cudaMalloc(&buffers[outputIndex[1]], batchSize * 1*128 * sizeof(float)));
-    CHECK(cudaMalloc(&buffers[outputIndex[2]], batchSize * 1*128 * sizeof(int64_t)));
+    CHECK(cudaMalloc(&buffers[inputIndex], batchSize * 1*128 * sizeof(float)));
+    // 253 931 0
+    CHECK(cudaMalloc(&buffers[outputIndex[1]], batchSize * 128*1*512 * sizeof(float)));
+    CHECK(cudaMalloc(&buffers[outputIndex[0]], batchSize * 1*128 * sizeof(float)));
+    CHECK(cudaMalloc(&buffers[outputIndex[2]], batchSize * 1*128 * sizeof(float)));
 
     cudaStream_t stream;
     CHECK(cudaStreamCreate(&stream));
 
     // DMA the input to the GPU,  execute the batch asynchronously, and DMA it back:
-    CHECK(cudaMemcpyAsync(buffers[inputIndex], input, batchSize * 1*128 * sizeof(int64_t), cudaMemcpyHostToDevice, stream));
+    CHECK(cudaMemcpyAsync(buffers[inputIndex], input, batchSize * 1*128 * sizeof(float), cudaMemcpyHostToDevice, stream));
     context.enqueue(batchSize, buffers, stream, nullptr);
-    CHECK(cudaMemcpyAsync(output1, buffers[outputIndex[0]], batchSize * 128*1*512 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaMemcpyAsync(output2, buffers[outputIndex[1]], batchSize * 128*1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
-    CHECK(cudaMemcpyAsync(output3, buffers[outputIndex[2]], batchSize * 128*1 * sizeof(int64_t), cudaMemcpyDeviceToHost, stream));
+    CHECK(cudaMemcpyAsync(output2, buffers[outputIndex[1]], batchSize * 128*1*512 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CHECK(cudaMemcpyAsync(output1, buffers[outputIndex[0]], batchSize * 128*1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    CHECK(cudaMemcpyAsync(output3, buffers[outputIndex[2]], batchSize * 128*1 * sizeof(float), cudaMemcpyDeviceToHost, stream));
     cudaStreamSynchronize(stream);
 
     // release the stream and the buffers
@@ -278,7 +279,7 @@ int main(int argc, char** argv)
         gLogInfo << (" .:-=+*#%@"[fileData[i] / 26]) << (((i + 1) % INPUT_W) ? "" : "\n");
     gLogInfo << std::endl;
 
-    int64_t data[1*128];
+    float data[1*128];
     for (int i = 0; i < 1*128; i++)
         data[i] = 1;
     //Keeping the Secret of Genetic Testing
@@ -299,16 +300,16 @@ int main(int argc, char** argv)
     }
 
     ICudaEngine* engine = nullptr;
-    if (!getEngine("sds_del_input1_253.onnx", 1, &engine))
+    if (!getEngine("sds_del_input1_253_input0float.onnx", 1, &engine))
         gLogger.reportFail(sampleTest);
     assert(engine != nullptr);
     //trtModelStream->destroy();
     IExecutionContext* context = engine->createExecutionContext();
     assert(context != nullptr);
     // run inference
-    float prob1[1*128*512];
-    float prob2[1*128];
-    int64_t prob3[1*128];
+    float prob1[1*128];
+    float prob2[1*128*512];
+    float prob3[1*128];
     doInference(*context, data, prob1, prob2, prob3, 1);
 
     // destroy the engine
@@ -328,8 +329,15 @@ int main(int argc, char** argv)
     gLogInfo << "Output:\n";
     for (int i = 0; i < 128; i++)
     {
-
         gLogInfo << " Prob1 " << i << "  " << std::fixed << std::setw(5) << std::setprecision(4) << prob1[i] << "\n ";
+    }
+    for (int i = 0; i < 128; i++)
+    {
+        gLogInfo << " Prob2 " << i << "  " << std::fixed << std::setw(5) << std::setprecision(4) << prob2[i] << "\n ";
+    }
+    for (int i = 0; i < 128; i++)
+    {
+        gLogInfo << " Prob3 " << i << "  " << std::fixed << std::setw(5) << std::setprecision(4) << prob3[i] << "\n ";
     }
     gLogInfo << std::endl;
 
