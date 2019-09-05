@@ -35,9 +35,9 @@ See [here](https://developer.nvidia.com/cuda-gpus) for finding what maximum comp
 
     mkdir build
     cd build
-    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir>
+    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir> -DCUDA_INCLUDE_DIRS=<tensorrt_include_dir>
     OR
-    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir> -DGPU_ARCHS="61"
+    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir> -DCUDA_INCLUDE_DIRS=<tensorrt_include_dir> -DGPU_ARCHS="61"
     make -j8
     sudo make install
 
