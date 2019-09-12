@@ -33,6 +33,9 @@
 //#include "MyLocalCast.hpp"
 #include "MyCast.hpp"
 #include "NonZero.hpp"
+#include "SkipLayerNormPlugin.hpp"
+#include "QKVToContextPlugin.hpp"
+
 #include "InstanceNormalization.hpp"
 
 
@@ -353,7 +356,7 @@ combineTensorsElementwise(IImporterContext* ctx,
       if (weights.shape.nbDims == tensors_ndim_max + 1) {
         // The weights contain a batch dim, which must be removed
         // Note: TRT Constant layer has implicit batch dim of 1
-        ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
+           ASSERT(weights.shape.d[BATCH_DIM] == 1, ErrorCode::kUNSUPPORTED_NODE);
         weights.shape = remove_dim(weights.shape, BATCH_DIM);
       }
 #if 0
@@ -1137,6 +1140,8 @@ DEFINE_BUILTIN_OP_IMPORTER(NonZero) {
         new NonZeroPlugin(( unsigned int)0, (unsigned long long)0),
         {&inputs.at(0).tensor()}));
 }
+
+
 //sds-check
 DEFINE_BUILTIN_OP_IMPORTER(Expand) {
   ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
@@ -1181,7 +1186,72 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
        
 
 }
+DEFINE_BUILTIN_OP_IMPORTER(FC) 
+{
+    nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+    ShapedWeights weights = inputs.at(1).weights();
+    //if (!transB)
+    //{
+     // auto transposedWeights = ctx->createTempWeights(weights.type, weights.shape);
+     // ASSERT(transposeWeights(weights, {1, 0}, &transposedWeights),
+    //         ErrorCode::kUNSUPPORTED_NODE);
+     // weights = transposedWeights;
+   // }
+    ShapedWeights biases = inputs.at(2).weights();
+    RETURN_FIRST_OUTPUT(ctx->network()->addFullyConnected(tensor, biases.shape.d[0], weights, biases));
+}
 
+
+DEFINE_BUILTIN_OP_IMPORTER(SkipLayerNorm) 
+{
+    //128*10*512
+    nvinfer1::ITensor& tensor1 = inputs.at(0).tensor();
+    nvinfer1::ITensor& tensor2 = inputs.at(1).tensor();
+    ShapedWeights weights = inputs.at(2).weights();
+    ShapedWeights biases = inputs.at(3).weights();
+
+    int hiddeSize = tensor1.getDimensions().d[2];
+        
+    nvinfer1::ILayer* layer_ptr = ctx->addPluginV2(
+          new SkipLayerNormPlugin("skipln", 512, biases, weights),
+          {&tensor1, &tensor2});
+
+
+    if(debug_on)
+     return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
+    else
+     RETURN_FIRST_OUTPUT(layer_ptr);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(QKVToContext) 
+{
+    //128*10*1536
+    nvinfer1::ITensor& tensor1 = inputs.at(0).tensor();//128*10*1536
+    nvinfer1::ITensor& tensor2 = inputs.at(1).tensor();//mask, 10*128
+
+    
+    nvinfer1::Dims idims = tensor1.getDimensions();
+    int hiddenSize = idims.d[2]; //1536
+    const int S = idims.d[0];//128
+    const int numHeads = 8;//
+    const int headSize = hiddenSize / numHeads;
+
+    assert(hiddenSize % numHeads == 0);
+
+  
+    const bool hasMask = true;
+    
+    nvinfer1::ILayer* layer_ptr = ctx->addPluginV2Ext(
+          new QKVToContextPlugin("qkv2ctx", hiddenSize/3, numHeads, S, 16, hasMask),
+          {&tensor1, &tensor2});
+       
+
+    if(debug_on)
+     return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
+    else
+     RETURN_FIRST_OUTPUT(layer_ptr);
+  
+}
 
 
 DEFINE_BUILTIN_OP_IMPORTER(Conv) {
@@ -1833,12 +1903,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
   
     nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, inputB, opB);
     ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
-
-    if(debug_on)
-        return {{add_print_plugin(ctx, node,layer2->getOutput(i))}};
-    else
-        return {{layer_ptr->getOutput(0)}}; 
-    
+    return {{layer_ptr->getOutput(0)}}; 
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Max) {
@@ -2116,15 +2181,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx,
     TRT_CHECK(convert_axis(axis, ndim));
     axis_mask |= 1 << axis;
   }
-  //RETURN_FIRST_OUTPUT(
-    //  ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
-
-    nvinfer1::ILayer* layer_ptr =  ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
-    if(debug_on)
-        return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
-    else
-        return {{layer_ptr->getOutput(0)}};
-    
+  RETURN_FIRST_OUTPUT(
+      ctx->network()->addReduce(tensor, operation, axis_mask, keepdims));
 }
 DEFINE_BUILTIN_OP_IMPORTER(ReduceL1) {
   NodeImportResult abs_result = apply_unary_function(

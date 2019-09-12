@@ -28,7 +28,8 @@ else()
   project(onnx2trt LANGUAGES CXX C CUDA)
 endif() 
 
-
+message("sds:"${CMAKE_CXX_FLAGS_RELEASE})
+message("sds:"${CMAKE_BUILD_TYPE})
 #
 # CUDA Configuration
 # This is no longer necessary, https://cmake.org/cmake/help/latest/module/FindCUDA.html
@@ -79,6 +80,8 @@ set(PLUGIN_SOURCES
   MyLocalCast.cu
   MyCast.cu
   Print.cu
+  QKVToContextPlugin.cu
+  SkipLayerNormPlugin.cu
   plugin.cpp
   )
 
@@ -152,12 +155,14 @@ set(CUDA_VERBOSE_BUILD ON)
 
 # Generate SASS for each architecture
 foreach(arch ${GPU_ARCHS})
-    set(GENCODES "${GENCODES} -gencode arch=compute_${arch},code=sm_${arch}")
+#    set(GENCODES "${GENCODES} -gencode arch=compute_${arch},code=sm_${arch}")
 endforeach()
 # Generate PTX for the last architecture
 list(GET GPU_ARCHS -1 LATEST_GPU_ARCH)
 set(GENCODES "${GENCODES} -gencode arch=compute_${LATEST_GPU_ARCH},code=compute_${LATEST_GPU_ARCH}")
 
+message("sds gencodes:"${GENCODES})
+message("sds latest gpu arch:"${LATEST_GPU_ARCH})
 if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
   if(NOT "${CUDA_NVCC_FLAGS}" MATCHES "-cudart" )
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -cudart static")
@@ -233,8 +238,11 @@ find_package_handle_standard_args(
 if(NOT TENSORRT_FOUND)
   message(ERROR "Cannot find TensorRT library.")
 endif()
+message("sds-tensorrt-library:"${TENSORRT_LIBRARY})
 
+set(CUBLAS_LIBRARY "/usr/local/cuda/lib64/libcublas.so")
 set(CUDA_INCLUDE_DIRS "/usr/local/cuda/include")
+set(CUB_INCLUDE_DIRS "/home/odin/shendasai/onnx/onnx-tensorrt-master2/onnx-tensorrt/")
 # --------------------------------
 # Plugin library
 # --------------------------------
@@ -246,8 +254,8 @@ else()
   include_directories(${CUDNN_INCLUDE_DIR} ${TENSORRT_INCLUDE_DIR})
   add_library(nvonnxparser_plugin STATIC ${PLUGIN_SOURCES})
 endif()
-target_include_directories(nvonnxparser_plugin PUBLIC ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
-target_link_libraries(nvonnxparser_plugin ${TENSORRT_LIBRARY})
+target_include_directories(nvonnxparser_plugin PUBLIC ${CUB_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDNN_INCLUDE_DIR})
+target_link_libraries(nvonnxparser_plugin ${TENSORRT_LIBRARY} ${CUBLAS_LIBRARY})
 
 # --------------------------------
 # Importer library
