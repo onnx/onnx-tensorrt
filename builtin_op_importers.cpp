@@ -1897,13 +1897,23 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul) {
         nvinfer1::ITensor* pNewB = layer->getOutput(0);
         nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, *pNewB, opB);
         ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
+
+        if(debug_on)
+        return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
+    else
         return {{layer_ptr->getOutput(0)}}; 
+    
+        //return {{layer_ptr->getOutput(0)}}; 
     }
     
   
     nvinfer1::ILayer* layer_ptr = ctx->network()->addMatrixMultiply(inputA, opA, inputB, opB);
     ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); 
-    return {{layer_ptr->getOutput(0)}}; 
+    if(debug_on)
+        return {{add_print_plugin(ctx, node,layer_ptr->getOutput(0))}};
+    else
+        return {{layer_ptr->getOutput(0)}}; 
+    
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Max) {
@@ -2382,7 +2392,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
       layer->setReshapeDimensions(new_shape);
       ASSERT(get_shape_size(layer->getOutput(0)->getDimensions()) ==
              get_shape_size(input.shape()), ErrorCode::kUNSUPPORTED_NODE);
-      RETURN_FIRST_OUTPUT(layer);
+      //RETURN_FIRST_OUTPUT(layer);
+
+      if(debug_on)
+        return {{add_print_plugin(ctx, node,layer->getOutput(0))}};
+      else
+        return {{layer->getOutput(0)}}; 
+
+    
 #endif // NV_TENSORRT_MAJOR >= 4
   }
 }
@@ -2797,7 +2814,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose) {
     nvinfer1::ITensor* output_tensor =
         transpose_tensor(ctx, input.tensor(), perm, false);
     ASSERT(output_tensor, ErrorCode::kUNSUPPORTED_NODE);
-    return {{output_tensor}};
+
+    if(debug_on)
+        return {{add_print_plugin(ctx, node,output_tensor)}};
+    else
+        return {{output_tensor}}; 
+    
   }
   //sds-temp,也要考虑。只支持2d转换
   else {

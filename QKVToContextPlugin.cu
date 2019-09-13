@@ -224,6 +224,8 @@ int qkvToCtx(cublasHandle_t& cublas, const int B, const int S, const int numHead
     const T* kptr = qptr + tsize;
     const T* vptr = kptr + tsize;
 
+    //gdb_copy_to_cpu("launchTransQkv ", (float *)tptr, 3*tsize);
+
     cublasSetStream(cublas, stream);
     CublasConfigHelper helper(cublas);
 
@@ -233,8 +235,9 @@ int qkvToCtx(cublasHandle_t& cublas, const int B, const int S, const int numHead
     // P * V: BxNxSxH (output)
 
     // compute Q*K' (as K'*Q)
-    CHECK(cublasGemmStridedBatched<T>(cublas, CUBLAS_OP_T, CUBLAS_OP_N, S, S, headSize, 0.125f, kptr, headSize, imatSize,
+    CHECK(cublasGemmStridedBatched<T>(cublas, CUBLAS_OP_T, CUBLAS_OP_N, S, S, headSize, 1.0f, kptr, headSize, imatSize,
         qptr, headSize, imatSize, 0.f, qkptr, S, omatSize, numMats));
+    //gdb_copy_to_cpu("cublasGemmStridedBatched ", (float *)qkptr, tsize);
     // return cublasSgemmStridedBatched(
     //    handle, transa, transb, m, n, k, &alpha, A, lda, strideA, B, ldb, strideB, &beta, C, ldc, strideC, batchCount);
 
@@ -243,6 +246,7 @@ int qkvToCtx(cublasHandle_t& cublas, const int B, const int S, const int numHead
     { // if we have a mask
         //sds-temp, go this branch
         computeMaskedScaledSoftmax<T>(stream, S, B, numHeads, rsqrtHeadSize, maskIdx, qkptr, pptr);
+      //computeMaskedScaledSoftmax<T>(stream, S, B, numHeads, 1.0f, maskIdx, qkptr, pptr);
     }
     else
     { // if we don't have a mask
