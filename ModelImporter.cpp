@@ -519,6 +519,8 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
                            uint32_t weight_count,
                            onnxTensorDescriptorV1 const *weight_descriptors) {
   _importer_ctx.clearOpsets();
+  ASSERT(!_importer_ctx.network()->hasImplicitBatchDimension() &&
+        "This version of the ONNX parser only supports networks with an explicit batch dimension", ErrorCode::kINVALID_VALUE);
   for( int i = 0; i < model.opset_import().size(); ++i ) {
     std::string domain  = model.opset_import(i).domain();
     int64_t     version = model.opset_import(i).version();
