@@ -26,9 +26,9 @@
 #include "NvInfer.h"
 #include "NvOnnxParserTypedefs.h"
 
-#define NV_ONNX_PARSER_MAJOR 0
-#define NV_ONNX_PARSER_MINOR 1
-#define NV_ONNX_PARSER_PATCH 0
+#define NV_ONNX_PARSER_MAJOR 6
+#define NV_ONNX_PARSER_MINOR 0
+#define NV_ONNX_PARSER_PATCH 1
 
 static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) +
                                            (NV_ONNX_PARSER_MINOR * 100) +

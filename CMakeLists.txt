@@ -44,7 +44,7 @@ set(CMAKE_CXX_STANDARD  11)
 
 # Enable compiler warnings
 if ( CMAKE_COMPILER_IS_GNUCC )
-    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wno-deprecated-declarations -Wno-unused-function -Wno-unused-but-set-variable")
 endif()
 if ( MSVC )
     set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /W4")
@@ -59,9 +59,9 @@ set(RUNTIME_LINKER_SCRIPT ${ONNX2TRT_ROOT}/libnvonnxparser_runtime.version)
 #--------------------------------------------------
 # Version information
 #--------------------------------------------------
-set(ONNX2TRT_MAJOR 0)
-set(ONNX2TRT_MINOR 1)
-set(ONNX2TRT_PATCH 0)
+set(ONNX2TRT_MAJOR 6)
+set(ONNX2TRT_MINOR 0)
+set(ONNX2TRT_PATCH 1)
 
 #--------------------------------------------------
 # Build configurations, global to all projects
@@ -159,6 +159,7 @@ if(${CMAKE_VERSION} VERSION_LESS ${CMAKE_VERSION_THRESHOLD})
     -lineinfo \
     -g \
     --expt-extended-lambda \
+    -Xcompiler -Wno-deprecated-declarations \
     ${GENCODES} \
     ")
   
@@ -174,6 +175,7 @@ else()
     -lineinfo \
     -g \
     --expt-extended-lambda \
+    -Xcompiler -Wno-deprecated-declarations \
     ${GENCODES} \
     ")
 

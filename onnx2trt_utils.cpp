@@ -24,33 +24,38 @@
 
 namespace onnx2trt {
 
+void setAttr(nvinfer1::Dims * trtAttr, ::ONNX_NAMESPACE::AttributeProto const* onnxAttr, int nbSpatialDims, int defaultVal){
+  assert(trtAttr->nbDims == nbSpatialDims);
+  int ndim = onnxAttr->ints().size();
+  for(int i = 0; i < nbSpatialDims; ++i){
+      if(i < ndim){
+        trtAttr->d[i] = onnxAttr->ints(i);
+      } else {
+        trtAttr->d[i] = defaultVal;
+      }
+  }
+}
+
 void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
-                       nvinfer1::DimsHW const& input_shape,
-                       nvinfer1::DimsHW* kernel_size,
-                       nvinfer1::DimsHW* strides,
-                       nvinfer1::DimsHW* beg_padding,
-                       nvinfer1::DimsHW* end_padding,
+                       nvinfer1::Dims* kernel_size,
+                       nvinfer1::Dims* strides,
+                       nvinfer1::Dims* beg_padding,
+                       nvinfer1::Dims* end_padding,
                        nvinfer1::PaddingMode& paddingMode,
-                       nvinfer1::DimsHW* dilations,
-                       nvinfer1::DimsHW const* output_shape) {
+                       nvinfer1::Dims* dilations) {
+  const int nbSpatialDims = kernel_size->nbDims;
   OnnxAttrs attrs(onnx_node);
   if( attrs.count("kernel_shape") ) {
     auto const* onnx_kernel_size = attrs.at("kernel_shape");
-    int ndim = onnx_kernel_size->ints().size();
-    kernel_size->h() = onnx_kernel_size->ints(0);
-    kernel_size->w() = ndim > 1 ? onnx_kernel_size->ints(1) : 1;
+    setAttr(kernel_size, onnx_kernel_size, nbSpatialDims, 1);
   }
   if( attrs.count("strides") ) {
     auto const* onnx_strides = attrs.at("strides");
-    int ndim = onnx_strides->ints().size();
-    strides->h() = onnx_strides->ints(0);
-    strides->w() = ndim > 1 ? onnx_strides->ints(1) : 1;
+    setAttr(strides, onnx_strides, nbSpatialDims, 1);
   }
   if( dilations && attrs.count("dilations") ) {
     auto const* onnx_dilations = attrs.at("dilations");
-    int ndim = onnx_dilations->ints().size();
-    dilations->h() = onnx_dilations->ints(0);
-    dilations->w() = ndim > 1 ? onnx_dilations->ints(1) : 1;
+    setAttr(dilations, onnx_dilations, nbSpatialDims, 1);
   }
   paddingMode = nvinfer1::PaddingMode::kEXPLICIT_ROUND_DOWN;
   auto onnx_auto_pad = attrs.get("auto_pad", std::string("NOTSET"));
@@ -58,11 +63,15 @@ void get_kernel_params(::ONNX_NAMESPACE::NodeProto const& onnx_node,
     if( attrs.count("pads") ) {
       auto onnx_padding = attrs.get<std::vector<int>>("pads");
       int ndim = onnx_padding.size() / 2;
-      int i = 0;
-      beg_padding->h() = onnx_padding.at(i++);
-      beg_padding->w() = ndim > 1 ? onnx_padding.at(i++) : 0;
-      end_padding->h() = onnx_padding.at(i++);
-      end_padding->w() = ndim > 1 ? onnx_padding.at(i++) : 0;
+      for(int i = 0; i < nbSpatialDims; ++i){
+        if(i < ndim){
+          beg_padding->d[i] = onnx_padding.at(i);
+          end_padding->d[i] = onnx_padding.at(i + ndim);
+        } else {
+          beg_padding->d[i] = 0;
+          end_padding->d[i] = 0;
+        }
+      }
     }
   } else { // SAME_* padding
     assert(!attrs.count("pads"));

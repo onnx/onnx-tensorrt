@@ -44,11 +44,16 @@ bool convertINT64(void* weightValues, const size_t nbWeights, std::vector<int32_
 }
 
 size_t ShapedWeights::count() const {
-  if( this->shape.nbDims == 0 ) {
+  if( this->values == nullptr && this->shape.nbDims == 0 )
+  {
     return 0;
-  } else {
+  }
+  else 
+  {
+    // TRT supports scalars, so 0D tensors should have a count of 1.
     size_t c = 1;
-    for( int i=0; i<this->shape.nbDims; ++i ) {
+    for( int i=0; i<this->shape.nbDims; ++i )
+    {
       c *= this->shape.d[i];
     }
     return c;

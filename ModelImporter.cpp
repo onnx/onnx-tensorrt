@@ -132,6 +132,21 @@ Status importInputs(ImporterContext* importer_ctx,
     ASSERT_INPUT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH,input.name());
     tensors->insert({input.name(), tensor});
   }
+  
+  // According to the ONNX spec: initializers do not have to be specified as agraph input.
+  // In order for these initializers to be populated down to TRT, we need to add them to the tensors list.
+  for (auto initializer : initializer_map)
+  {
+      const std::string initializer_name = initializer.first;
+      if (!tensors->count(initializer_name))
+      {
+        const auto& initializer_weight = *initializer.second;
+        ShapedWeights weights;
+        ASSERT(convert_onnx_weights(initializer_weight, &weights), ErrorCode::kUNSUPPORTED_NODE);
+        tensors->insert({initializer_name, weights});
+      }
+  }
+
   return Status::success();
 }
 
