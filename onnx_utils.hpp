@@ -21,10 +21,39 @@
  */
 
 #include <onnx/onnx_pb.h>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
 #include <sstream>
+#include <iostream>
+#include <fstream>
+
+using std::cerr;
+using std::endl;
+
+#pragma once
 
 namespace {
+
+// Helper function to convert ONNX dims to TRT dims
+template<typename OnnxDims>
+inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims)
+{
+  std::vector<int> onnx_dims_vector;
+  std::vector<nvinfer1::DimensionType> onnx_type_vector;
+  for( auto const& onnx_dim : onnx_dims ) {
+    onnx_dims_vector.push_back((onnx_dim.dim_param() == "" ? onnx_dim.dim_value() : -1));
+    onnx_type_vector.push_back(static_cast<nvinfer1::DimensionType>(0));
+  }
+
+  trt_dims.nbDims = onnx_dims_vector.size();
+  if (trt_dims.nbDims > nvinfer1::Dims::MAX_DIMS){
+    return false;
+  }
+  std::copy(onnx_dims_vector.begin(), onnx_dims_vector.end(), trt_dims.d);
+  std::copy(onnx_type_vector.begin(), onnx_type_vector.end(), trt_dims.type);
+  return true;
+}
 
 // Removes raw data from the text representation of an ONNX model
 inline void remove_raw_data_strings(std::string& s) {
@@ -83,3 +112,48 @@ inline std::ostream& operator<<(std::ostream& stream, ::ONNX_NAMESPACE::NodeProt
   stream << pretty_print_onnx_to_string(message);
   return stream;
 }
+
+
+//...
+//...Consider moving all of the below functions into a stand alone
+//...
+
+inline bool ParseFromFile_WAR(google::protobuf::Message* msg,
+                       const char*                filename) {
+  
+  std::ifstream stream(filename, std::ios::in | std::ios::binary);
+  if (!stream) {
+      cerr <<  "Could not open file " << std::string(filename) <<endl;
+      return false;
+  }
+  google::protobuf::io::IstreamInputStream rawInput(&stream);
+  
+  google::protobuf::io::CodedInputStream coded_input(&rawInput);
+  // Note: This WARs the very low default size limit (64MB)
+  coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(),
+                                 std::numeric_limits<int>::max()/4);
+  return msg->ParseFromCodedStream(&coded_input);
+}
+
+inline bool ParseFromTextFile(google::protobuf::Message* msg,
+                       const char*                filename) {
+  std::ifstream stream(filename, std::ios::in );
+  if (!stream) {
+      cerr <<  "Could not open file " << std::string(filename) <<endl;
+      return false;
+  }
+      
+  google::protobuf::io::IstreamInputStream rawInput(&stream);
+  
+  return google::protobuf::TextFormat::Parse(&rawInput, msg);
+}
+
+inline std::string onnx_ir_version_string(int64_t ir_version=::ONNX_NAMESPACE::IR_VERSION) {
+int onnx_ir_major = ir_version / 1000000;
+int onnx_ir_minor = ir_version % 1000000 / 10000;
+int onnx_ir_patch = ir_version % 10000;
+return (std::to_string(onnx_ir_major) + "." +
+std::to_string(onnx_ir_minor) + "." +
+std::to_string(onnx_ir_patch));
+}
+

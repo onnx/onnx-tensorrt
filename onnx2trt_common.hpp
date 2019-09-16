@@ -75,5 +75,6 @@ struct OwnableDeleter {
 
 using UniqueOwnable = std::unique_ptr<IOwnable, OwnableDeleter>;
 class Plugin;
+class PluginV2;
 
 } // namespace onnx2trt

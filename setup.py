@@ -18,11 +18,36 @@
  # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  # DEALINGS IN THE SOFTWARE.
 
+import os
+import argparse
 from setuptools import setup, find_packages, Extension
 
 __version__ = '0.1.0'
 
-INC_DIRS = []
+parser = argparse.ArgumentParser(description='Setup to build ONNX TensorRT parser')
+parser.add_argument('action', nargs='*')
+
+parser.add_argument('--build-lib', type=str,
+                    help='A location of the build directory')
+
+parser.add_argument('--include-dirs', type=str,
+                    help='A location of the include directories, semicolon separated')
+
+
+
+args = parser.parse_args()
+
+print(args)
+
+if args.build_lib == None:
+    args.build_lib = 'build'
+
+TRT_ROOT = os.getenv('TRT_ROOT')
+
+if TRT_ROOT == None:
+    INC_DIRS = []
+else:
+    INC_DIRS = [TRT_ROOT + '/include']
 
 SWIG_OPTS = [
     '-c++',
@@ -55,23 +80,14 @@ EXTRA_COMPILE_ARGS =  [
 EXTRA_LINK_ARGS = [
 ]
 
+
+
 nv_onnx_parser_module = Extension(
     'onnx_tensorrt.parser._nv_onnx_parser_bindings',
     sources=['nv_onnx_parser_bindings.i'],
     swig_opts=SWIG_OPTS,
     extra_objects=[
-        'build/libnvonnxparser.so',
-    ],
-    include_dirs=INC_DIRS,
-    extra_compile_args=EXTRA_COMPILE_ARGS,
-    extra_link_args=EXTRA_LINK_ARGS)
-
-nv_onnx_runtime_module = Extension(
-    'onnx_tensorrt.runtime._nv_onnx_runtime_bindings',
-    sources=['nv_onnx_runtime_bindings.i'],
-    swig_opts=SWIG_OPTS,
-    extra_objects=[
-        'build/libnvonnxparser_runtime.so',
+        args.build_lib + '/libnvonnxparser.so',
     ],
     include_dirs=INC_DIRS,
     extra_compile_args=EXTRA_COMPILE_ARGS,
