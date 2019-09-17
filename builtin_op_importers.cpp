@@ -35,6 +35,7 @@
 #include "NonZero.hpp"
 #include "SkipLayerNormPlugin.hpp"
 #include "QKVToContextPlugin.hpp"
+#include "EmbedPosition.hpp"
 
 #include "InstanceNormalization.hpp"
 
@@ -47,7 +48,7 @@ namespace onnx2trt {
 namespace {
 
 enum { BATCH_DIM = 0 };
-bool debug_on = true;
+bool debug_on = false;
 
 //sds-temp, add print plugin
 
@@ -704,9 +705,9 @@ bool registerBuiltinOpImporter(std::string op,
                               std::vector<TensorOrWeights>& inputs)
 
 #define RETURN_FIRST_OUTPUT(layer) do { \
-  nvinfer1::ILayer* layer_ptr = layer; \
-  ASSERT(layer_ptr, ErrorCode::kUNSUPPORTED_NODE); \
-  return {{layer_ptr->getOutput(0)}}; \
+  nvinfer1::ILayer* _layer_ptr_tmp = layer; \
+  ASSERT(_layer_ptr_tmp, ErrorCode::kUNSUPPORTED_NODE); \
+  return {{_layer_ptr_tmp->getOutput(0)}}; \
 } while(0)
 
 #define RETURN_IDENTITY(input) do { \
@@ -1188,7 +1189,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand) {
 }
 DEFINE_BUILTIN_OP_IMPORTER(FC) 
 {
-    nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+    nvinfer1::ITensor& tensor0 = inputs.at(0).tensor();
+
+    nvinfer1::IShuffleLayer* layer0 = ctx->network()->addShuffle(tensor0);
+      nvinfer1::Dims shape = tensor0.getDimensions();
+      {
+        nvinfer1::Dims new_shape;
+        new_shape.nbDims = 4;
+        new_shape.d[0] = shape.d[0]*shape.d[1];
+        new_shape.d[1] = shape.d[2];
+        new_shape.d[2] = 1;
+        new_shape.d[3] = 1;
+        layer0->setReshapeDimensions(new_shape);
+      }
+
+    nvinfer1::ITensor& tensor1 = *layer0->getOutput(0);
     ShapedWeights weights = inputs.at(1).weights();
     //if (!transB)
     //{
@@ -1198,7 +1213,27 @@ DEFINE_BUILTIN_OP_IMPORTER(FC)
      // weights = transposedWeights;
    // }
     ShapedWeights biases = inputs.at(2).weights();
-    RETURN_FIRST_OUTPUT(ctx->network()->addFullyConnected(tensor, biases.shape.d[0], weights, biases));
+    nvinfer1::ILayer* layer1 = ctx->network()->addFullyConnected(tensor1, biases.shape.d[0], weights, biases);
+    
+
+    nvinfer1::ITensor& tensor2 = *layer1->getOutput(0);
+
+    nvinfer1::IShuffleLayer* layer2 = ctx->network()->addShuffle(tensor2);
+
+    nvinfer1::Dims new_shape2;
+    new_shape2.nbDims = 3;
+    new_shape2.d[0] = shape.d[0];
+    new_shape2.d[1] = shape.d[1];
+    new_shape2.d[2] = biases.shape.d[0];
+    layer2->setReshapeDimensions(new_shape2);
+
+
+    if(debug_on)
+        return {{add_print_plugin(ctx, node,layer2->getOutput(0))}};
+    else
+        return {{layer2->getOutput(0)}}; 
+
+    
 }
 
 
@@ -1253,6 +1288,37 @@ DEFINE_BUILTIN_OP_IMPORTER(QKVToContext)
   
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(EmbedPosition) 
+{
+    //128*10*512
+    nvinfer1::ITensor& tensor1 = inputs.at(0).tensor();
+    //nvinfer1::ITensor& tensor2 = inputs.at(1).tensor();
+    //ShapedWeights weights = inputs.at(1).weights();
+    //ShapedWeights biases = inputs.at(3).weights();
+
+    //int hiddeSize = weights.values[0];
+    int padType = 0;     
+    nvinfer1::ILayer* layer_ptr = ctx->addPluginV2(
+          new EmbedPositionPlugin(padType),
+          {&tensor1});
+
+    nvinfer1::Dims shape = tensor1.getDimensions();
+    ASSERT(shape.nbDims==2,  ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::ITensor& tensor2 = *layer_ptr->getOutput(0);
+    nvinfer1::IShuffleLayer* layer2 = ctx->network()->addShuffle(tensor2);
+    
+    nvinfer1::Dims new_shape2;
+    new_shape2.nbDims = 1;
+    new_shape2.d[0] = shape.d[0]* shape.d[1];
+    layer2->setReshapeDimensions(new_shape2);
+       
+
+    if(debug_on)
+     return {{add_print_plugin(ctx, node,layer2->getOutput(0))}};
+    else
+     RETURN_FIRST_OUTPUT(layer2);
+}
 
 DEFINE_BUILTIN_OP_IMPORTER(Conv) {
     ASSERT(inputs.at(0).is_tensor(),  ErrorCode::kUNSUPPORTED_NODE);
