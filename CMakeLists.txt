@@ -173,6 +173,8 @@ endif()
 # Specify the cuda host compiler to use the same compiler as cmake.
 set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
 
+# Add an include headers' directory for CUDA, explicitly.
+set(CUDA_INCLUDE_DIRS /usr/local/cuda/include/)
 
 # CUDNN
 set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")

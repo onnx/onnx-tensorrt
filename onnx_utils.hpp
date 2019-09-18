@@ -28,6 +28,8 @@
 #include <iostream>
 #include <fstream>
 
+#include <limits>
+
 using std::cerr;
 using std::endl;
 

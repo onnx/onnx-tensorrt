@@ -195,8 +195,8 @@ protected:
 
 } // namespace nvonnxparser
 
-extern "C" TENSORRTAPI void* createNvOnnxParser_INTERNAL(void* network, void* logger, int version);
-extern "C" TENSORRTAPI int getNvOnnxParserVersion();
+extern "C" void* createNvOnnxParser_INTERNAL(void* network, void* logger, int version);
+extern "C" int getNvOnnxParserVersion();
 
 namespace nvonnxparser
 {
