@@ -89,7 +89,7 @@ Important typedefs required for parsing ONNX models are declared in this header:
 Build the onnx_tensorrt Docker image by running:
 
     cp /path/to/TensorRT-6.0.*.tar.gz .
-    docker build -t onnx_tensorrt .
+    docker build -f onnx-tensorrt.Dockerfile --tag=onnx-tensorrt:6.0.6 .
 
 Note that don't foget clone this repository with an option, `--recurse-submodules`.
 
