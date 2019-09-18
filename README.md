@@ -91,6 +91,8 @@ Build the onnx_tensorrt Docker image by running:
     cp /path/to/TensorRT-6.0.*.tar.gz .
     docker build -t onnx_tensorrt .
 
+Note that don't foget clone this repository with an option, `--recurse-submodules`.
+
 ### Tests
 
 After installation (or inside the Docker container), ONNX backend tests can be run as follows:
