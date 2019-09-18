@@ -42,11 +42,6 @@ RUN git clone --recurse-submodules https://github.com/onnx/onnx.git && \
     git checkout dee6d89 && \
     python2 setup.py build && \
     python2 setup.py install && \
-    cd ../ && \
-    rm -rf onnx/
-RUN git clone --recurse-submodules https://github.com/onnx/onnx.git && \
-    cd onnx && \
-    git checkout dee6d89 && \
     python3 setup.py build && \
     python3 setup.py install && \
     cd ../ && \
