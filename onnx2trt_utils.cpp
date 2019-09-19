@@ -627,11 +627,19 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
     const std::string& pluginVersion, const std::string& nodeName, const std::vector<nvinfer1::PluginField>& pluginFields)
 {
     const auto mPluginRegistry = getPluginRegistry();
+
+    const auto pluginCreator = mPluginRegistry->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), "");
+
+    if (!pluginCreator)
+    {
+      return nullptr;
+    }
+
     nvinfer1::PluginFieldCollection fc;
     fc.nbFields = pluginFields.size();
     fc.fields = pluginFields.data();
 
-    return mPluginRegistry->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), "")->createPlugin(nodeName.c_str(), &fc);
+    return pluginCreator->createPlugin(nodeName.c_str(), &fc);
 }
 
 bool is_transpose_required(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm)
