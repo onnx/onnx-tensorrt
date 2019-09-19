@@ -964,6 +964,8 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     // Create plugin from registry
     nvinfer1::IPluginV2* plugin = importPluginFromRegistry(ctx, pluginName, pluginVersion, node.name(), f);
 
+    ASSERT(plugin != nullptr && "InstanceNormalization plugin was not found in the plugin registry!", ErrorCode::kINTERNAL_ERROR);
+
     RETURN_FIRST_OUTPUT(ctx->network()->addPluginV2(&tensor_ptr, 1, *plugin));
 }
 
