@@ -1,8 +1,8 @@
 FROM nvcr.io/nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
 
-
 # Install package dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
         autoconf \
         automake \
         libtool \
@@ -22,10 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         swig \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Build and install onnx
-RUN pip2 install onnx==1.5 
-RUN pip2 install pytest==4.6.5
+RUN pip2 install onnx==1.5 pytest==4.6.5
 RUN pip3 install onnx==1.5 pytest==5.1.2
 
 # Install TensorRT
@@ -50,13 +48,11 @@ RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     rm -rf TensorRT-${TENSORRT_VERSION}*
 
 # Build the library
-
 ENV ONNX2TRT_VERSION 0.1.0
 
 WORKDIR /opt/onnx2trt
 COPY . .
 
-# For python2.
 RUN rm -rf build/ && \
     mkdir build && \
     cd build && \
@@ -65,18 +61,10 @@ RUN rm -rf build/ && \
     make install && \
     ldconfig && \
     cd .. && \
+    # For python2.
     python2 setup.py build && \
     python2 setup.py install && \
-    rm -rf ./build/
-
-# For python3.
-RUN mkdir build && \
-    cd build && \
-    cmake .. && \
-    make -j$(nproc) && \
-    make install && \
-    ldconfig && \
-    cd .. && \
+    # For python3.
     python3 setup.py build && \
     python3 setup.py install && \
     rm -rf ./build/
