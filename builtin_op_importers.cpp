@@ -108,8 +108,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Acosh)
 
 DEFINE_BUILTIN_OP_IMPORTER(Add)
 {
-    bool isAnyOperandInt32 = check_for_int32(inputs);
-    if (inputs.at(0).is_tensor() != inputs.at(1).is_tensor() && !isAnyOperandInt32)
+    if (check_for_scale(inputs))
     {
       return scaleHelper(
           ctx, node, inputs, ScaleOp::kSHIFT);
@@ -646,7 +645,6 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
     return {{tensor_ptr}};
 }
 
-DECLARE_BUILTIN_OP_IMPORTER(Mul);
 DEFINE_BUILTIN_OP_IMPORTER(Div)
 {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
@@ -1382,8 +1380,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Min)
 
 DEFINE_BUILTIN_OP_IMPORTER(Mul)
 {  
-    bool isAnyOperandInt32 = check_for_int32(inputs);
-    if (inputs.at(0).is_tensor() != inputs.at(1).is_tensor() && !isAnyOperandInt32)
+    if (check_for_scale(inputs))
     {
         return scaleHelper(
             ctx, node, inputs, ScaleOp::kSCALE);

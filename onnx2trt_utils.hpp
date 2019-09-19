@@ -101,6 +101,9 @@ bool check_for_input(::ONNX_NAMESPACE::NodeProto const& node, std::string const&
 // Helper function to check if node inputs are INT32 type
 bool check_for_int32(std::vector<TensorOrWeights>const & inputs);
 
+// Helper function to check if a scale layer can be used of elementwise
+bool check_for_scale(std::vector<TensorOrWeights>const & inputs);
+
 // Helper function to convert an ONNX axis into a TRT axis (supports negative indexing)
 Status convert_axis(int& axis, int nbDims);
 

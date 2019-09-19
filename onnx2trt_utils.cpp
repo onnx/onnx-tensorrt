@@ -341,6 +341,22 @@ bool check_for_int32(std::vector<TensorOrWeights>const & inputs)
     return isInt32;
 }
 
+bool check_for_scale(std::vector<TensorOrWeights>const & inputs)
+{
+    bool useScale = true;
+    // Inputs cannot be int32.
+    useScale &= !(check_for_int32(inputs));
+    // One input must be a tensor and the other one must be a weight.
+    useScale &= inputs.at(0).is_tensor() != inputs.at(1).is_tensor();
+    // Tensor input must be at least 4D.
+    if (useScale)
+    {
+        const nvinfer1::ITensor& tensor = inputs.at(0).is_tensor() ? inputs.at(0).tensor() : inputs.at(1).tensor();
+        useScale &= tensor.getDimensions().nbDims >= 4;
+    }
+    return useScale;
+}
+
 Status convert_axis(int& axis, int nbDims)
 {
   // Support negative indexing
@@ -351,25 +367,6 @@ Status convert_axis(int& axis, int nbDims)
   ASSERT(axis >= 0 && axis < nbDims, ErrorCode::kUNSUPPORTED_NODE);
   return Status::success();
 }
-
-// template<typename OnnxDims>
-// bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims)
-// {
-//   std::vector<int> onnx_dims_vector;
-//   std::vector<nvinfer1::DimensionType> onnx_type_vector;
-//   for( auto const& onnx_dim : onnx_dims ) {
-//     onnx_dims_vector.push_back((onnx_dim.dim_param() == "" ? onnx_dim.dim_value() : -1));
-//     onnx_type_vector.push_back(static_cast<nvinfer1::DimensionType>(0));
-//   }
-
-//   trt_dims.nbDims = onnx_dims_vector.size();
-//   if (trt_dims.nbDims > nvinfer1::Dims::MAX_DIMS){
-//     return false;
-//   }
-//   std::copy(onnx_dims_vector.begin(), onnx_dims_vector.end(), trt_dims.d);
-//   std::copy(onnx_type_vector.begin(), onnx_type_vector.end(), trt_dims.type);
-//   return true;
-// }
 
 bool convert_dtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
 {
