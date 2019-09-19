@@ -349,20 +349,9 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       else
       {
         // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-        // around MAKE_INPUT_ERROR. Check for dynamic input and set entire graph as unsupported if found.
+        // around MAKE_INPUT_ERROR.
         input_node = error->file();
-        auto found = input_node.find("_TRT_DYNAMIC_SHAPES");
-        if (found != std::string::npos)
-        {
-          cout << "Found dynamic input: " << input_node.substr(0, found) << endl;
-          cout << "Marking entire graph as unsupported." << endl;
-          return false;
-        }
-        else
-        {
-          cout << "Found unsupported input: " << input_node << endl;
-        }
-
+        cout << "Found unsupported input: " << input_node << endl;
       }
     }
   }
@@ -441,10 +430,12 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
           }
           // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
+          // The split_after graph is marked as unsupported.
           else if (node_index == 0)
           {
             NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
             sub_graph_collection[graph_index].first = split_after;
+            sub_graph_collection[graph_index].second = false;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
           else if (node_index == subgraph.size() - 1)
