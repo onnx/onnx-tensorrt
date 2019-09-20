@@ -26,9 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         swig \
     && rm -rf /var/lib/apt/lists/*
 
-# Build and install onnx
-RUN pip2 install onnx==1.5 pytest==4.6.5 pycuda==2019.1.2
-RUN pip3 install onnx==1.5 pytest==5.1.2 pycuda==2019.1.2
 
 WORKDIR /opt/onnx-tensorrt
 COPY . .
@@ -50,6 +47,10 @@ RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     pip3 install uff/uff-*-py2.py3-none-any.whl && \
     cd ../ && \
     rm -rf TensorRT-${TENSORRT_VERSION}*
+
+# Build and install onnx
+RUN pip2 install onnx==1.5 pytest==4.6.5 pycuda==2019.1.2
+RUN pip3 install onnx==1.5 pytest==5.1.2 pycuda==2019.1.2
 
 # Build the library
 ENV ONNX2TRT_VERSION 0.1.0
