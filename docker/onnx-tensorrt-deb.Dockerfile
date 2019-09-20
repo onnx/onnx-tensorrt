@@ -39,8 +39,8 @@ RUN dpkg -i nv-tensorrt-repo-ubuntu1804-cuda10.1-trt${TENSORRT_VERSION}-ga-20190
 RUN dpkg -l | grep TensorRT
 
 # Build and install onnx
-RUN pip2 install onnx==1.5 pytest==4.6.5 pycuda==2019.1.2
-RUN pip3 install onnx==1.5 pytest==5.1.2 pycuda==2019.1.2
+RUN pip2 install onnx==1.5 pytest==4.6.5
+RUN pip3 install onnx==1.5 pytest==5.1.2
 
 # Build the library
 ENV ONNX2TRT_VERSION 0.1.0
