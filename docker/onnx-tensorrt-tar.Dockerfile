@@ -74,6 +74,6 @@ RUN rm -rf build/ && \
 
 WORKDIR /workspace
 
-RUN cp /opt/onnx2trt/onnx_backend_test.py .
+RUN cp /opt/onnx-tensorrt/onnx_backend_test.py .
 
 RUN ["/bin/bash"]
