@@ -14,6 +14,24 @@ For version 5.1, clone and build from the [5.1 branch](https://github.com/onnx/o
 
 For versions < 5.1, clone and build from the [5.0 branch](https://github.com/onnx/onnx-tensorrt/tree/v5.0)
 
+## Full Dimensions + Dynamic Shapes
+
+Building INetwork objects in full dimensions mode with dynamic shape support requires calling the following API:
+
+C++
+
+    const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    builder->createNetworkV2(explicitBatch)
+
+Python
+
+    import tensorrt
+    explicit_batch = 1 << (int)(tensorrt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    builder.create_network(explicit_batch)
+
+For examples of usage of these APIs see:
+* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleOnnxMNIST)
+* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleDynamicReshape)
 
 ## Supported Operators
 
