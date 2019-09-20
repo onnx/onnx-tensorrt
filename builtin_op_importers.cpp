@@ -715,10 +715,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
 
     // Indicies must have at least one dimension in TRT 6.0.
     bool expandIndices = indices->getDimensions().nbDims == 0;
+    // Input tensor to gather on must be at least two dimensions in TRT 6.0
+    bool expandInput = nbDims == 1;
+
     if (expandIndices)
     {
         nvinfer1::Dims oneD {1, {1}};
         indices = reshape_tensor(ctx, *indices, oneD);
+    }
+
+    if (expandInput)
+    {
+        nvinfer1::Dims twoD {2, {1, dataDims.d[0]}};
+        data = reshape_tensor(ctx, *data, twoD);
+        // update nbDims and axis since we expanded the input to 2D.
+        nbDims = data->getDimensions().nbDims;
+        axis = axis + 1;
     }
 
     TRT_CHECK(convert_axis(axis, nbDims));
@@ -745,6 +757,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
         }
 
         layerOutput = reshape_tensor(ctx, *layerOutput, newDims);
+    }
+
+    // Remove leading dimension if it was added to make output a scalar.
+    if (expandInput)
+    {
+        nvinfer1::Dims zeroD {0};
+        layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
     }
 
     return {{layerOutput}};
