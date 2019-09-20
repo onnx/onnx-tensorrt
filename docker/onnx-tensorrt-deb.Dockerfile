@@ -26,8 +26,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Build and install onnx
-RUN pip2 install onnx==1.5 pytest==4.6.5
-RUN pip3 install onnx==1.5 pytest==5.1.2
+RUN pip2 install onnx==1.5 pytest==4.6.5 pycuda==2019.1.2
+RUN pip3 install onnx==1.5 pytest==5.1.2 pycuda==2019.1.2
 
 WORKDIR /opt/onnx-tensorrt
 COPY . .
