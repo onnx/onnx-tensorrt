@@ -1,4 +1,5 @@
 FROM nvcr.io/nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
+ARG TENSORRT_VERSION=6.0.1.5
 
 # Install package dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,37 +29,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip2 install onnx==1.5 pytest==4.6.5
 RUN pip3 install onnx==1.5 pytest==5.1.2
 
-# Install TensorRT
-ENV TENSORRT_VERSION 6.0.1.5
-ENV PY3_VERSION 36
-COPY TensorRT-${TENSORRT_VERSION}.*.tar.gz .
-RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
-    cd TensorRT-${TENSORRT_VERSION}/ && \
-    cp lib/lib* /usr/lib/x86_64-linux-gnu/ && \
-    rm /usr/lib/x86_64-linux-gnu/libnv*.a && \
-    cp include/* /usr/include/x86_64-linux-gnu/ && \
-    cp bin/* /usr/bin/ && \
-    mkdir /usr/share/doc/tensorrt && \
-    cp -r doc/* /usr/share/doc/tensorrt/ && \
-    mkdir /usr/src/tensorrt && \
-    cp -r samples /usr/src/tensorrt/  && \
-    pip2 install python/tensorrt-${TENSORRT_VERSION}-cp27-none-linux_x86_64.whl && \
-    pip3 install python/tensorrt-${TENSORRT_VERSION}-cp${PY3_VERSION}-none-linux_x86_64.whl && \
-    pip2 install uff/uff-*-py2.py3-none-any.whl && \
-    pip3 install uff/uff-*-py2.py3-none-any.whl && \
-    cd ../ && \
-    rm -rf TensorRT-${TENSORRT_VERSION}*
+WORKDIR /opt/onnx-tensorrt
+COPY . .
+
+RUN dpkg -i nv-tensorrt-repo-ubuntu1804-cuda10.1-trt${TENSORRT_VERSION}-ga-20190913_1-1_amd64.deb&& \
+    apt-key add /var/nv-tensorrt-repo-cuda10.1-trt${TENSORRT_VERSION}-ga-20190913/7fa2af80.pub && \
+    apt-get update && \
+    apt-get install -y tensorrt && \
+    apt-get install -y python-libnvinfer-dev && \
+    apt-get install -y python3-libnvinfer-dev && \
+    apt-get install -y uff-converter-tf && \
+    rm nv-tensorrt-repo-ubuntu1804-cuda10.1-trt${TENSORRT_VERSION}-ga-20190913_1-1_amd64.deb
+RUN dpkg -l | grep TensorRT
 
 # Build the library
 ENV ONNX2TRT_VERSION 0.1.0
 
-WORKDIR /opt/onnx2trt
-COPY . .
+WORKDIR /opt/onnx-tensorrt
 
 RUN rm -rf build/ && \
-    mkdir build && \
+    mkdir -p build && \
     cd build && \
-    cmake .. && \
+    cmake -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include/ .. && \
     make -j$(nproc) && \
     make install && \
     ldconfig && \
