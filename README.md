@@ -16,7 +16,7 @@ For versions < 5.1, clone and build from the [5.0 branch](https://github.com/onn
 
 ## Full Dimensions + Dynamic Shapes
 
-Building INetwork objects in full dimensions mode with dynamic shape support requires the following API:
+Building INetwork objects in full dimensions mode with dynamic shape support requires calling the following API:
 
 C++
 
@@ -25,7 +25,8 @@ C++
 
 Python
 
-    explicit_batch = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    import tensorrt
+    explicit_batch = 1 << (int)(tensorrt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     builder.create_network(explicit_batch)
 
 For examples of usage of these APIs see:
