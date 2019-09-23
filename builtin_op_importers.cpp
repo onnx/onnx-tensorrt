@@ -759,11 +759,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
         layerOutput = reshape_tensor(ctx, *layerOutput, newDims);
     }
 
-    // Remove leading dimension if it was added to make output a scalar.
+    // Remove leading dimension if it was added to make output a scalar or squeeze back to 1D.
     if (expandInput)
     {
+        const auto currentDims = layerOutput->getDimensions().nbDims;
         nvinfer1::Dims zeroD {0};
-        layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
+        nvinfer1::Dims oneD {1, dataDims.d[0]};
+        layerOutput = currentDims == 1 ? reshape_tensor(ctx, *layerOutput, zeroD) : reshape_tensor(ctx, *layerOutput, oneD);
     }
 
     return {{layerOutput}};
