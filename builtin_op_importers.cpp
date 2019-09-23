@@ -759,11 +759,21 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
         layerOutput = reshape_tensor(ctx, *layerOutput, newDims);
     }
 
-    // Remove leading dimension if it was added to make output a scalar.
+    // Remove leading dimension if it was added to make output a scalar or squeeze back to 1D.
     if (expandInput)
     {
-        nvinfer1::Dims zeroD {0};
-        layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
+        const auto currentDims = layerOutput->getDimensions().nbDims;
+        ASSERT(currentDims == 1 || currentDims == 2, ErrorCode::kUNSUPPORTED_NODE);
+        if (currentDims == 1)
+        {
+            nvinfer1::Dims zeroD {0};
+            layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
+        }
+        else
+        {
+            nvinfer1::Dims oneD {1, layerOutput->getDimensions().d[1]};
+            layerOutput = reshape_tensor(ctx, *layerOutput, oneD);
+        }
     }
 
     return {{layerOutput}};
@@ -1515,6 +1525,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
     nvinfer1::ReduceOperation operation)
 {
     nvinfer1::ITensor& tensor = convertToTensor(input, ctx);
+    // TensorRT 6.0 limitation
+    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32 && "Reduce layer does not accept INT32 inputs.", ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
     bool keepdims = attrs.get("keepdims", 1);
     int ndim = tensor.getDimensions().nbDims;
