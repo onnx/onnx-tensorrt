@@ -1517,6 +1517,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
     nvinfer1::ReduceOperation operation)
 {
     nvinfer1::ITensor& tensor = convertToTensor(input, ctx);
+    // TensorRT 6.0 limitation
+    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32 && "Reduce layer does not accept INT32 inputs.", ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
     bool keepdims = attrs.get("keepdims", 1);
     int ndim = tensor.getDimensions().nbDims;
