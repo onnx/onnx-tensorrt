@@ -763,9 +763,17 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     if (expandInput)
     {
         const auto currentDims = layerOutput->getDimensions().nbDims;
-        nvinfer1::Dims zeroD {0};
-        nvinfer1::Dims oneD {1, dataDims.d[0]};
-        layerOutput = currentDims == 1 ? reshape_tensor(ctx, *layerOutput, zeroD) : reshape_tensor(ctx, *layerOutput, oneD);
+        ASSERT(currentDims == 1 || currentDims == 2, ErrorCode::kUNSUPPORTED_NODE);
+        if (currentDims == 1)
+        {
+            nvinfer1::Dims zeroD {0};
+            layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
+        }
+        else
+        {
+            nvinfer1::Dims oneD {1, layerOutput->getDimensions().d[1]};
+            layerOutput = reshape_tensor(ctx, *layerOutput, oneD);
+        }
     }
 
     return {{layerOutput}};
