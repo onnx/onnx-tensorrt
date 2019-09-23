@@ -770,6 +770,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
 
     return {{layerOutput}};
 }
+
 // Adds a constant scalar to the network in the form of a constant layer.
 template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
