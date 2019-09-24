@@ -33,8 +33,8 @@ inline bool is_CHW(nvinfer1::Dims const& dims) {
 }
 
 nvinfer1::Dims ArgMaxPlugin::getOutputDimensions(int index,
-                                                        const nvinfer1::Dims *inputDims,
-                                                        int nbInputs) {
+                                                 const nvinfer1::Dims *inputDims,
+                                                 int nbInputs) {
   assert(nbInputs == 1);
   nvinfer1::Dims const& input = inputDims[0];
   assert(is_CHW(input));
@@ -42,7 +42,6 @@ nvinfer1::Dims ArgMaxPlugin::getOutputDimensions(int index,
   assert(index == 0);
   nvinfer1::Dims output;
   output.nbDims = input.nbDims;
-  int s = 0;
   for( int d=0; d<input.nbDims; ++d ) {
     output.type[d] = input.type[d];
     if( input.type[d] == nvinfer1::DimensionType::kCHANNEL ) {
@@ -63,54 +62,62 @@ int ArgMaxPlugin::initialize() {
   return 0;
 }
 
-template <typename Data>
 __global__
-void argmax_kernel(int nbatch,
-                  int c,
-                  int2 osize,
-                  Data const* idata, int istride, int ibatchstride,
-                  Data*       odata, int ostride, int obatchstride)
+void argmax_kernel(int channels, int osize, float const * idata, unsigned char * odata) 
 {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    if ((x >= osize.x*osize.y) || (x < 0)) return;
-    float max = -1e6;
-    int am = 0;
-    for (int i = 0; i < c; i++)
-        if ((float)idata[x+i*osize.x*osize.y]>=max) {
-        max = (float)idata[x+i*osize.x*osize.y];
-        am = (float)i;
-    }
-    odata[x]=am;
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  float max = -1e6;
+  unsigned char am = 0;
+  
+  for (unsigned char i = 0; i < channels; ++i) {
+    float v = idata[x + i * osize]; 
+    if (v >= max) {
+      max = v;
+      am = i;
+    } 
+  }
+  
+  odata[x] = am;
 }
 
+__global__
+void argmax_kernel(int channels, int osize, __half const * idata, unsigned char * odata) 
+{
+
+}
 
 int ArgMaxPlugin::enqueue(int batchSize,
-                                 const void *const *inputs, void **outputs,
-                                 void *workspace, cudaStream_t stream) {
-  auto const& input_dims = this->getInputDims(0);
-  int nchan = input_dims.d[0];
+                          const void *const *inputs, 
+                          void **outputs,
+                          void *workspace,
+                          cudaStream_t stream) {
+  
+  auto const & input_dims = this->getInputDims(0);
+  int channels = input_dims.d[0];
+  int osize = _output_dims.d[2] * _output_dims.d[1];
+  unsigned char * output = static_cast<unsigned char *>(outputs[0]);
 
-    int2 osize = {_output_dims.d[2], _output_dims.d[1]};
-    int istride =   input_dims.d[2];
-    int ostride = _output_dims.d[2];
-    int ibatchstride =   input_dims.d[1] * istride;
-    int obatchstride = _output_dims.d[1] * ostride;
-    dim3 block(1024, 1);
-    dim3 grid(osize.x * osize.y + 1 );
+  cudaDeviceProp dev_prop;
+  cudaGetDeviceProperties(&dev_prop, 0);
+  
+  dim3 block(dev_prop.maxThreadsPerBlock, 1);
+  dim3 grid(std::ceil(osize / block.x));
 
-      //  std::cout << "bilinear" << std::endl;
-        if (getDataType()==nvinfer1::DataType::kFLOAT) {
-            argmax_kernel<<<grid, block, 0, stream>>>
-                                                               (batchSize * nchan, nchan, osize,
-                                                                static_cast<float const*>( inputs[0]), istride, ibatchstride,
-                    static_cast<float*      >(outputs[0]), ostride, obatchstride);
-        } else {
-            argmax_kernel<<<grid, block, 0, stream>>>
-                                                               (batchSize * nchan, nchan, osize,
-                                                                static_cast<__half const*>( inputs[0]), istride, ibatchstride,
-                    static_cast<__half*      >(outputs[0]), ostride, obatchstride);
-        }
+  if (getDataType() == nvinfer1::DataType::kFLOAT) {
+    argmax_kernel<<<grid, block, 0, stream>>>(
+      channels,
+      osize,
+      static_cast<float const *>(inputs[0]), 
+      output
+    );
+  } else if (getDataType() == nvinfer1::DataType::kHALF) {
+    argmax_kernel<<<grid, block, 0, stream>>>(
+      channels,
+      osize,
+      static_cast<__half const *>(inputs[0]), 
+      output
+    );
+  }
 
-    return cudaGetLastError() != cudaSuccess;
-
+  return cudaGetLastError() != cudaSuccess;
 }
