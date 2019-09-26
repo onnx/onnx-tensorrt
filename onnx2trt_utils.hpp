@@ -180,6 +180,9 @@ nvinfer1::ScaleMode get_scale_mode(nvinfer1::Dims const& weights_shape, nvinfer1
 // Helper function to create a Dims object with the specified number of dims and value
 nvinfer1::Dims makeDims(int nbDims, int val);
 
+// Helper function to create a shape tensor from a Dims object for dynamic reshape
+nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims);
+
 // Helper function to reshape a tensor to a specified size
 nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 

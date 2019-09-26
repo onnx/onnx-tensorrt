@@ -1629,92 +1629,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Relu)
 
 DEFINE_BUILTIN_OP_IMPORTER(Reshape)
 {
-    auto input = inputs.at(0);
-    nvinfer1::Dims new_shape;
-    bool newshape_is_set = false;
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& newShape = convertToTensor(inputs.at(1), ctx);
 
-    if (ctx->getOpsetVersion() >= 5)
-    {
-        ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-        auto new_shape_input = inputs.at(1);
+    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(input);
+    layer->setInput(1, newShape);
 
-        if (new_shape_input.is_weights())
-        {
-            ShapedWeights new_shape_weights = new_shape_input.weights();
-            ASSERT(new_shape_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-            ASSERT(new_shape_weights.type == ::ONNX_NAMESPACE::TensorProto::INT64, ErrorCode::kINVALID_NODE);
-            int64_t const* new_shape_ptr = static_cast<int64_t const*>(new_shape_weights.values);
-            new_shape.nbDims = new_shape_weights.shape.d[0];
-            std::copy(new_shape_ptr, new_shape_ptr + new_shape.nbDims, new_shape.d);
-            newshape_is_set = true;
-        }
-    }
-    else
-    {
-        OnnxAttrs attrs(node);
-        new_shape = attrs.get<nvinfer1::Dims>("shape");
-        newshape_is_set = true;
-    }
-
-    // Copy dimensions from the input
-    if (newshape_is_set)
-    {
-        for (int i = 0; i < new_shape.nbDims; i++)
-        {
-            if (new_shape.d[i] == 0)
-            {
-                new_shape.d[i] = input.shape().d[i];
-            }
-        }
-    }
-
-    int infer_dim = -1;
-    if (input.is_weights())
-    {
-        auto weights = input.weights();
-        TRT_CHECK(get_infer_dim(infer_dim, new_shape));
-        if (infer_dim >= 0)
-        {
-            // Update the dim to the correct value
-            int new_dim = get_shape_size(weights.shape) / (-1 * get_shape_size(new_shape));
-            new_shape.d[infer_dim] = new_dim;
-        }
-        ASSERT(get_shape_size(new_shape) == get_shape_size(weights.shape), ErrorCode::kUNSUPPORTED_NODE);
-        weights.shape = new_shape;
-        return {{weights}};
-    }
-    else
-    {
-        nvinfer1::ITensor& tensor = input.tensor();
-        if (newshape_is_set)
-        {
-            TRT_CHECK(get_infer_dim(infer_dim, new_shape));
-            if (infer_dim >= 0)
-            {
-                // Update the dim to the correct value
-                int new_dim = get_shape_size(tensor.getDimensions()) / (-1 * get_shape_size(new_shape));
-                new_shape.d[infer_dim] = new_dim;
-            }
-        }
-
-        nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-
-        if (!newshape_is_set)
-        {
-            layer->setInput(1, inputs.at(1).tensor());
-        }
-        else
-        {
-            layer->setReshapeDimensions(new_shape);
-        }
-        
-        nvinfer1::ITensor* tensor_ptr = layer->getOutput(0);
-        return {{tensor_ptr}};
-    }
+    RETURN_FIRST_OUTPUT(layer);
 }
-
-
 
 DEFINE_BUILTIN_OP_IMPORTER(ScaledTanh)
 {

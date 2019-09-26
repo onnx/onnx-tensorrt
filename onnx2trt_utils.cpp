@@ -256,6 +256,7 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
         // Otherwise, we need to squeeze the axis dimension - we achieve this by reshaping.
         // The new dimensions are just the old dimensions with all values after axis shifted over.
         nvinfer1::Dims reshapeDims = indices->getDimensions();
+        std::cout << "reshapeDims: " << reshapeDims << std::endl;
         --reshapeDims.nbDims;
         // The axis dimension should be reduced to size 1 after performing the reduction.
         ASSERT(reshapeDims.d[axis] == 1, ErrorCode::kINVALID_VALUE);
@@ -288,11 +289,20 @@ void broadcast_tensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::
         smallTensor = t1;
     }
 
-    nvinfer1::Dims largeDims = largeTensor->getDimensions();
-    nvinfer1::Dims smallDims = smallTensor->getDimensions();
-    nvinfer1::Dims newDims = expand_dims(smallDims, largeDims.nbDims);
+    int diff = largeTensor->getDimensions().nbDims - smallTensor->getDimensions().nbDims;
 
-    t1 == smallTensor ? t1 = reshape_tensor(ctx, *t1, newDims) : t2 = reshape_tensor(ctx, *t2, newDims);
+    // Concat number of leading dimensions to the shape of the smaller tensor to broadcast.
+    nvinfer1::Dims expandedDims = makeDims(diff, 1);
+    auto* leadingShape = &makeShapeTensor(ctx, expandedDims);
+    auto* shape = ctx->network()->addShape(*smallTensor)->getOutput(0);
+
+    std::vector<nvinfer1::ITensor*> tensors{leadingShape, shape};
+
+    auto* concatLayer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
+    auto* reshapeLayer = ctx->network()->addShuffle(*smallTensor);
+    reshapeLayer->setInput(1, *concatLayer->getOutput(0));
+
+    t1 == smallTensor ? t1 = reshapeLayer->getOutput(0) : t2 = reshapeLayer->getOutput(0);
 }
 
 Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs, nvinfer1::Dims const& dims)
@@ -569,43 +579,14 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
         TRT_CHECK(applyLegacyBinaryOpBroadcasting(ctx, node, inputs[0], inputs[1]));
     }
 
-    std::vector<nvinfer1::ITensor*> input_tensors;
-    int ndim_max = -1;
+    auto* firstInput = &convertToTensor(inputs.at(0), ctx);
+    auto* secondInput = &convertToTensor(inputs.at(1), ctx);
 
-    // Find maximum number of input dimensions
-    for (auto input : inputs)
-    {
-        ndim_max = std::max(ndim_max, input.shape().nbDims);
-    }
+    broadcast_tensors(ctx, firstInput, secondInput);
 
-    // Convert inputs to tensors and expand their dimensions to ndim_max if necessary
-    for (auto input : inputs)
-    {
-        nvinfer1::ITensor* tensor_ptr = &convertToTensor(input, ctx);
-        if (tensor_ptr->getDimensions().nbDims != ndim_max)
-        {
-            nvinfer1::Dims new_dims = expand_dims(tensor_ptr->getDimensions(), ndim_max);
-            tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_dims);
-        }
-        ASSERT(tensor_ptr->getDimensions().nbDims == ndim_max, ErrorCode::kUNSUPPORTED_NODE);
-        input_tensors.push_back(tensor_ptr);
-    }
-    // Use the first tensor input as the base for the elementwise operation
-    nvinfer1::ITensor* combined = input_tensors.at(0);
-    if (input_tensors.size() == 1)
-    {
-        // Note: Single input must be wrapped in identity to avoid messing up network outputs
-        return {{identity(ctx, combined)}};
-    }
-    for (size_t i = 1; i < input_tensors.size(); ++i)
-    {
-        nvinfer1::ITensor* tensor = input_tensors.at(i);
-        ASSERT(tensor->getDimensions().nbDims == combined->getDimensions().nbDims, ErrorCode::kUNSUPPORTED_NODE);
-        auto* layer = ctx->network()->addElementWise(*combined, *tensor, binary_op);
-        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-        combined = layer->getOutput(0);
-    }
-    return {{combined}};
+    auto* output = ctx->network()->addElementWise(*firstInput, *secondInput, binary_op)->getOutput(0);
+
+    return {{output}};
 }
 
 nvinfer1::ITensor* flatten_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis = 0)
@@ -832,18 +813,33 @@ nvinfer1::Dims makeDims(int nbDims, int val)
     return dims;
 }
 
+nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims)
+{
+    auto tempWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_INT32, makeDims(1, dims.nbDims));
+    for(int i = 0; i < dims.nbDims; i++)
+    {
+        static_cast<int32_t*>(tempWeights.values)[i] = dims.d[i];
+    }
+    auto valueWeights = TensorOrWeights{tempWeights};
+    return convertToTensor(valueWeights, ctx);
+}
+
 nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape)
 {
     if (shape == tensor.getDimensions())
     {
         return &tensor;
     }
+
     nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
     if (!layer)
     {
         return nullptr;
     }
+
+    //layer->setInput(1,*inputShapeTensor);
     layer->setReshapeDimensions(shape);
+
     return layer->getOutput(0);
 }
 
