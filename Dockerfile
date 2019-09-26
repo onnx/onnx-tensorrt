@@ -79,7 +79,7 @@ COPY . .
 RUN rm -rf build/ && \
     mkdir build && \
     cd build && \
-    cmake .. && \
+    cmake -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include/ .. && \
     make -j$(nproc) && \
     make install && \
     ldconfig && \
@@ -91,7 +91,7 @@ RUN rm -rf build/ && \
 # For python3.
 RUN mkdir build && \
     cd build && \
-    cmake .. && \
+    cmake -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include/ .. && \
     make -j$(nproc) && \
     make install && \
     ldconfig && \
