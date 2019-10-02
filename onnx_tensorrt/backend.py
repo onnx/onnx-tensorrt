@@ -20,12 +20,13 @@
 
 from __future__ import print_function
 from .tensorrt_engine import Engine
+from .config import Config
 import tensorrt as trt
 from onnx.backend.base import Backend, BackendRep, Device, DeviceType, namedtupledict
 import onnx
 from onnx import helper as onnx_helper
+from onnx import numpy_helper
 import numpy as np
-import sys
 import six
 
 # HACK Should look for a better way/place to do this
@@ -46,16 +47,12 @@ def count_trailing_ones(vals):
         count += 1
     return count
 
-def _tensorrt_version():
-    return [int(n) for n in trt.__version__.split('.')]
+_config = Config()
 
-# If TensorRT major is >= 5, then we use new Python bindings
-USE_PYBIND = _tensorrt_version()[0] >= 5
-
-if USE_PYBIND:
+if _config.USE_PYBIND:
     TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
-if not USE_PYBIND:
+if not _config.USE_PYBIND:
     from . import parser
     from . import runtime as parser_runtime
 
@@ -66,25 +63,20 @@ class TensorRTBackendRep(BackendRep):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)
-
-        if USE_PYBIND:
-            self._logger = TRT_LOGGER
-            self.builder = trt.Builder(self._logger)
-        else:
-            self._logger = trt.infer.ConsoleLogger(trt.infer.LogSeverity.WARNING)
-            self.builder = trt.infer.create_infer_builder(self._logger)
-
-        self.network = self.builder.create_network()
-
-        if USE_PYBIND:
-            self.parser = trt.OnnxParser(self.network, self._logger)
-        else:
-            self.parser = parser.create_parser(self.network, self._logger)
+        self._logger = TRT_LOGGER
+        self.builder = trt.Builder(self._logger)
+        self.network = self.builder.create_network(flags=1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        self.parser = trt.OnnxParser(self.network, self._logger)
 
         if not isinstance(model, six.string_types):
             model_str = model.SerializeToString()
         else:
             model_str = model
+
+        if not trt.init_libnvinfer_plugins(TRT_LOGGER, ""):
+            msg = "Failed to initialize TensorRT's plugin library."
+            raise RuntimeError(msg)
+        
         if not self.parser.parse(model_str):
             error = self.parser.get_error(0)
             msg = "While parsing node number %i:\n" % error.node()
@@ -95,12 +87,8 @@ class TensorRTBackendRep(BackendRep):
         if max_workspace_size is None:
             max_workspace_size = 1 << 28
 
-        if USE_PYBIND:
-            self.builder.max_batch_size = max_batch_size
-            self.builder.max_workspace_size = max_workspace_size
-        else:
-            self.builder.set_max_batch_size(max_batch_size)
-            self.builder.set_max_workspace_size(max_workspace_size)
+        self.builder.max_batch_size = max_batch_size
+        self.builder.max_workspace_size = max_workspace_size
 
         for layer in self.network:
             print(layer.name)
@@ -114,40 +102,32 @@ class TensorRTBackendRep(BackendRep):
             trt_engine = self._serialize_deserialize(trt_engine)
         self.engine = Engine(trt_engine)
         self._output_shapes = {}
+        self._output_dtype = {}
         for output in model.graph.output:
             dims = output.type.tensor_type.shape.dim
             output_shape = tuple([dim.dim_value for dim in dims])
             self._output_shapes[output.name] = output_shape
+            self._output_dtype[output.name] = output.type.tensor_type.elem_type
     def _set_device(self, device):
         self.device = device
         assert(device.type == DeviceType.CUDA)
         cudaSetDevice(device.device_id)
     def _serialize_deserialize(self, trt_engine):
-        if USE_PYBIND:
-            self.runtime = trt.Runtime(TRT_LOGGER)
-        else:
-            self.runtime = trt.infer.create_infer_runtime(self._logger)
-            self.plugin_factory = parser_runtime.create_plugin_factory(self._logger)
-
+        self.runtime = trt.Runtime(TRT_LOGGER)
         serialized_engine = trt_engine.serialize()
         del self.parser # Parser no longer needed for ownership of plugins
-
-        if USE_PYBIND:
-            trt_engine = self.runtime.deserialize_cuda_engine(
+        trt_engine = self.runtime.deserialize_cuda_engine(
                 serialized_engine)
-        else:
-            trt_engine = self.runtime.deserialize_cuda_engine(
-                serialized_engine, self.plugin_factory)
         return trt_engine
     def run(self, inputs, **kwargs):
         """Execute the prepared engine and return the outputs as a named tuple.
-
         inputs -- Input tensor(s) as a Numpy array or list of Numpy arrays.
         """
         if isinstance(inputs, np.ndarray):
             inputs = [inputs]
         outputs = self.engine.run(inputs)
         output_names = [output.name for output in self.engine.outputs]
+
         for i, (name, array) in enumerate(zip(output_names, outputs)):
             output_shape = self._output_shapes[name]
             # HACK WAR for unknown output shape in run_node
@@ -164,8 +144,11 @@ class TensorRTBackendRep(BackendRep):
                             array.shape[:-npadding_dims])
             else:
                 # HACK WAR replace fixed batch dim with variable
-                output_shape = (-1,) + output_shape[1:]
-                outputs[i] = array.reshape(output_shape)
+                if self._output_dtype[name] == onnx.TensorProto.INT64 and array.dtype == np.int32:
+                    casted_output = np.array(outputs[i], dtype=np.int64)
+                    if np.equal(outputs[i], casted_output).all():
+                        outputs[i] = np.array(outputs[i], dtype=np.int64)
+
         outputs_tuple = namedtupledict('Outputs', output_names)(*outputs)
         return namedtupledict('Outputs', output_names)(*outputs)
 
@@ -210,7 +193,6 @@ class TensorRTBackend(Backend):
     @classmethod
     def prepare(cls, model, device='CUDA:0', **kwargs):
         """Build an engine from the given model.
-
         model -- An ONNX model as a deserialized protobuf, or a string or file-
                  object containing a serialized protobuf.
         """
@@ -219,19 +201,15 @@ class TensorRTBackend(Backend):
     @classmethod
     def run_model(cls, model, inputs, device='CUDA:0', **kwargs):
         """Build and run an engine from the given model.
-
         model -- An ONNX model as a deserialized protobuf, or a string or file-
                  object containing a serialized protobuf.
-
         inputs -- Input tensor(s) as a Numpy array or list of Numpy arrays.
         """
         return cls.prepare(model, device, **kwargs).run(inputs)
     @classmethod
     def run_node(cls, node, inputs, device='CUDA:0'):
         """Build and run an engine from the given node.
-
         node -- An ONNX node as a deserialized protobuf.
-
         Note: This function is intended for testing purposes only;
               use prepare() or run_model() for other purposes.
         """

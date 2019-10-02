@@ -26,7 +26,6 @@
 #include "ShapedWeights.hpp"
 #include "TensorOrWeights.hpp"
 #include "Status.hpp"
-#include "plugin.hpp"
 
 #include <onnx/onnx_pb.h>
 #include <NvInfer.h>
@@ -51,9 +50,6 @@ struct IImporterContext {
   virtual nvinfer1::INetworkDefinition* network() = 0;
   virtual ShapedWeights createTempWeights(ShapedWeights::DataType type,
                                           nvinfer1::Dims shape) = 0;
-  virtual nvinfer1::IPluginLayer* addPlugin(
-      Plugin* plugin,
-      std::vector<nvinfer1::ITensor*> const& inputs) = 0;
   virtual int64_t getOpsetVersion(const char* domain="") const = 0;
 protected:
   virtual ~IImporterContext() {}

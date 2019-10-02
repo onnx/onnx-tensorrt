@@ -24,21 +24,25 @@
 #define NV_ONNX_PARSER_H
 
 #include "NvInfer.h"
+#include "NvInferPlugin.h"
 #include "NvOnnxParserTypedefs.h"
 
-#define NV_ONNX_PARSER_MAJOR 0
-#define NV_ONNX_PARSER_MINOR 1
-#define NV_ONNX_PARSER_PATCH 0
+#define NV_ONNX_PARSER_MAJOR 6
+#define NV_ONNX_PARSER_MINOR 0
+#define NV_ONNX_PARSER_PATCH 1
 
-static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) +
-                                           (NV_ONNX_PARSER_MINOR * 100) +
-                                           NV_ONNX_PARSER_PATCH);
+static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) + (NV_ONNX_PARSER_MINOR * 100) + NV_ONNX_PARSER_PATCH);
 
 class onnxTensorDescriptorV1;
+//!
+//! \namespace nvonnxparser
+//!
+//! \brief The TensorRT ONNX parser API namespace
+//!
 namespace nvonnxparser
 {
 
-template<typename T>
+template <typename T>
 inline int EnumMax();
 
 /** \enum ErrorCode
@@ -57,7 +61,7 @@ enum class ErrorCode : int
     kUNSUPPORTED_GRAPH = 7,
     kUNSUPPORTED_NODE = 8
 };
-template<>
+template <>
 inline int EnumMax<ErrorCode>()
 {
     return 9;
@@ -72,7 +76,7 @@ class IParserError
 public:
     /** \brief the error code
      */
-    virtual ErrorCode   code() const = 0;
+    virtual ErrorCode code() const = 0;
     /** \brief description of the error
      */
     virtual const char* desc() const = 0;
@@ -81,18 +85,19 @@ public:
     virtual const char* file() const = 0;
     /** \brief source line at which the error occurred
      */
-    virtual int         line() const = 0;
+    virtual int line() const = 0;
     /** \brief source function in which the error occurred
      */
     virtual const char* func() const = 0;
     /** \brief index of the ONNX model node in which the error occurred
      */
-    virtual int         node() const = 0;
+    virtual int node() const = 0;
+
 protected:
     virtual ~IParserError() {}
 };
 
- /** \class IParser
+/** \class IParser
  *
  * \brief an object for parsing ONNX models into a TensorRT network definition
  */
@@ -131,15 +136,13 @@ public:
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
      *        in bytes
-     * \param coontainer_t to return a collection of supported subgraphs, nodes by index
-     *        if sorted in topological order
      * \return true if the model is supported
      */
     virtual bool supportsModel(void const* serialized_onnx_model,
-                   size_t serialized_onnx_model_size,
-                   SubGraphCollection_t &supportedSubGraphs)
-      = 0;
-    
+                               size_t serialized_onnx_model_size,
+                               SubGraphCollection_t &sub_graph_collection)
+        = 0;
+
     /** \brief Parse a serialized ONNX model into the TensorRT network
      * with consideration of user provided weights
      *
@@ -152,9 +155,10 @@ public:
      * \see getNbErrors() getError()
      */
     virtual bool parseWithWeightDescriptors(
-        void const *serialized_onnx_model, size_t serialized_onnx_model_size,
+        void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         uint32_t weight_count,
-        onnxTensorDescriptorV1 const *weight_descriptors) = 0;
+        onnxTensorDescriptorV1 const* weight_descriptors)
+        = 0;
 
     /** \brief Returns whether the specified operator may be supported by the
      *         parser.
@@ -173,7 +177,7 @@ public:
      *
      * \see getError() clearErrors() IParserError
      */
-    virtual int  getNbErrors() const = 0;
+    virtual int getNbErrors() const = 0;
     /** \brief Get an error that occurred during prior calls to \p parse
      *
      * \see getNbErrors() clearErrors() IParserError
@@ -184,14 +188,15 @@ public:
      * \see getNbErrors() getError() IParserError
      */
     virtual void clearErrors() = 0;
+
 protected:
     virtual ~IParser() {}
 };
 
 } // namespace nvonnxparser
 
-extern "C" void* createNvOnnxParser_INTERNAL(void* network, void* logger, int version);
-extern "C" int   getNvOnnxParserVersion();
+extern "C" TENSORRTAPI void* createNvOnnxParser_INTERNAL(void* network, void* logger, int version);
+extern "C" TENSORRTAPI int getNvOnnxParserVersion();
 
 namespace nvonnxparser
 {
@@ -215,8 +220,13 @@ namespace
  * \return a new parser object or NULL if an error occurred
  * \see IParser
  */
+#ifdef _MSC_VER
+TENSORRTAPI IParser* createParser(nvinfer1::INetworkDefinition& network,
+                                  nvinfer1::ILogger& logger)
+#else
 inline IParser* createParser(nvinfer1::INetworkDefinition& network,
                              nvinfer1::ILogger& logger)
+#endif
 {
     return static_cast<IParser*>(
         createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));

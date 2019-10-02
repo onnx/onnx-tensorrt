@@ -25,6 +25,7 @@
 #include <unistd.h> // For ::getopt
 #include <string>
 #include "NvOnnxParser.h"
+#include "NvInferPlugin.h"
 #include "onnx_utils.hpp"
 #include "common.hpp"
 
@@ -41,10 +42,12 @@ void print_usage() {
 
 void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProto onnx_model)
 {
-    if (subGraphs.size() > 1)
+    if (subGraphs.size() != 1)
     {
         cout << "The model contains unsupported Nodes. It has been partitioned to a set of supported subGraphs." << endl;
         cout << "There are "<< subGraphs.size() << " supported subGraphs: " << endl;
+        cout << "NOTE: Due to some limitations with the parser, the support of specific subgraphs may not have been determined."
+        << " Please refer to the printed subgraphs to see if they are truly supported or not." << endl;
     }
     else 
     {
@@ -54,8 +57,16 @@ void printSubGraphs(SubGraphCollection_t& subGraphs, ::ONNX_NAMESPACE::ModelProt
     for (auto subGraph: subGraphs) 
     {
         cout << "\t{";
-        for (auto idx: subGraph) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
-        cout << "\t}"<<endl;
+        for (auto idx: subGraph.first) cout << "\t" << idx << "," <<onnx_model.graph().node(idx).op_type();
+        cout << "\t}\t - ";
+        if (subGraph.second)
+        {
+            cout << "Fully supported" << endl;
+        }
+        else
+        {
+            cout << "UNKNOWN whether this is fully supported." << endl; 
+        }
     }
 }
 
@@ -92,9 +103,13 @@ int main(int argc, char* argv[]) {
     }
 
     common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
+
     auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
-    auto trt_network = common::infer_object(trt_builder->createNetwork());
+
+    auto trt_network = common::infer_object(trt_builder->createNetworkV2(1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)));
     auto trt_parser  = common::infer_object(nvonnxparser::createParser(*trt_network, trt_logger));
+
+    initLibNvInferPlugins(&trt_logger, "");
 
     cout << "Parsing model: " << onnx_filename << endl;
     
@@ -118,6 +133,7 @@ int main(int argc, char* argv[]) {
 
     SubGraphCollection_t SubGraphCollection;
 
+    // supportsModel() parses the graph and returns a list of supported subgraphs.
     if (!trt_parser->supportsModel(onnx_buf.data(), onnx_buf.size(), SubGraphCollection))
     {
         cout << "Model cannot be fully parsed by TensorRT!" << endl;
@@ -127,10 +143,11 @@ int main(int argc, char* argv[]) {
 
     printSubGraphs(SubGraphCollection, onnx_model);
     
+    // If -e was specified, create and save the TensorRT engine to disk.
+    // Note we do not call trt_parser->parse() here since it's already done above in parser->supportsModel()
     if( !engine_filename.empty() ) {
         trt_builder->setMaxBatchSize(max_batch_size);
         trt_builder->setMaxWorkspaceSize(max_workspace_size);
-        trt_parser->parse(onnx_buf.data(), onnx_buf.size());
 
         cout << "input name: " << trt_network->getInput(0)->getName() << endl;
         cout << "output name: " << trt_network->getOutput(0)->getName() << endl;

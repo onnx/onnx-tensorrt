@@ -29,7 +29,7 @@ namespace onnx2trt {
 
 class ShapedWeights {
 public:
-  typedef int32_t DataType;
+  using DataType = int32_t;
   DataType type;
   void* values;
   nvinfer1::Dims shape;
@@ -45,5 +45,7 @@ public:
 bool transposeWeights(ShapedWeights const& weights,
                       nvinfer1::Permutation const& perm,
                       ShapedWeights* result);
+
+bool convertINT64(void * weightValues, const size_t nbWeights, std::vector<int32_t>& converted_weights);
 
 } // namespace onnx2trt

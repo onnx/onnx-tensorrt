@@ -26,6 +26,5 @@
 
 typedef std::size_t NodeProtoUniqueID;
 typedef std::vector<NodeProtoUniqueID>  NodesContainer_t;
-typedef std::vector<NodesContainer_t>   SubGraphCollection_t; 
-
-
+typedef std::pair<std::vector<NodeProtoUniqueID>, bool> SubGraph_t;
+typedef std::vector<SubGraph_t> SubGraphCollection_t; 

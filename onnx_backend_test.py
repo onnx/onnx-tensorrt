@@ -1,22 +1,22 @@
- # Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
- #
- # Permission is hereby granted, free of charge, to any person obtaining a
- # copy of this software and associated documentation files (the "Software"),
- # to deal in the Software without restriction, including without limitation
- # the rights to use, copy, modify, merge, publish, distribute, sublicense,
- # and/or sell copies of the Software, and to permit persons to whom the
- # Software is furnished to do so, subject to the following conditions:
- #
- # The above copyright notice and this permission notice shall be included in
- # all copies or substantial portions of the Software.
- #
- # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- # DEALINGS IN THE SOFTWARE.
+# Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
 
 from __future__ import absolute_import
 from __future__ import division
@@ -35,164 +35,141 @@ pytest_plugins = 'onnx.backend.test.report',
 
 backend_test = onnx.backend.test.BackendTest(trt, __name__)
 
-# Ops that are not currently supported
-backend_test.exclude(r'[a-z,_]*_cast_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_hardmax_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_slice_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_PReLU_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_prelu_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_tile_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_repeat_[a-z,_]*') # 'Tile' op
-backend_test.exclude(r'[a-z,_]*_cos_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_sin_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_tan_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_acos_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_asin_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_atan_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_acosh_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_asinh_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_atanh_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_cosh_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_sinh_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_erf_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_eyelike_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_expand_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_mvn_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_scan_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_shrink_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_sign_[a-z,_]*')
+# Include all of the nodes that we support. 
+# Onnx native node tests
+backend_test.include(r'.*test_abs.*')
+backend_test.include(r'.*test_acos.*')
+backend_test.include(r'.*test_acosh.*')
+backend_test.include(r'.*test_add.*')
+backend_test.include(r'.*test_argmax.*')
+backend_test.include(r'.*test_argmin.*')
+backend_test.include(r'.*test_asin.*')
+backend_test.include(r'.*test_asinh.*')
+backend_test.include(r'.*test_atan.*')
+backend_test.include(r'.*test_atanh.*')
+backend_test.include(r'.*test_averagepool.*')
+backend_test.include(r'.*test_AvgPool.*')
+backend_test.include(r'.*test_BatchNorm.*eval.*')
+backend_test.include(r'.*test_ceil.*')
+backend_test.include(r'.*test_clip.*')
+backend_test.include(r'.*test_concat.*')
+backend_test.include(r'.*test_constant.*') # May segfault
+backend_test.include(r'.*test_Conv[1-3]d*')
+backend_test.include(r'.*test_cos.*')
+backend_test.include(r'.*test_cosh.*')
+backend_test.include(r'.*test_depthtospace.*')
+backend_test.include(r'.*test_div.*')
+backend_test.include(r'.*test_dropout.*')
+backend_test.include(r'.*test_ELU*')
+backend_test.include(r'.*test_elu.*')
+backend_test.include(r'.*test_Embedding*')
+backend_test.include(r'.*test_exp.*')
+backend_test.include(r'.*test_flatten.*')
+backend_test.include(r'.*test_floor.*')
+backend_test.include(r'.*test_gather.*')
+backend_test.include(r'.*test_globalaveragepool.*')
+backend_test.include(r'.*test_globalmaxpool.*')
+backend_test.include(r'.*test_hardsigmoid.*')
+backend_test.include(r'.*test_identity.*')
+backend_test.include(r'.*test_LeakyReLU*')
+backend_test.include(r'.*test_leakyrelu.*')
+backend_test.include(r'.*test_Linear.*')
+backend_test.include(r'.*test_log.*')
+backend_test.include(r'.*test_logsoftmax.*')
+backend_test.include(r'.*test_LogSoftmax.*')
+backend_test.include(r'.*test_log_softmax.*')
+backend_test.include(r'.*test_lrn.*')
+backend_test.include(r'.*test_matmul.*')
+backend_test.include(r'.*test_max.*')
+backend_test.include(r'.*test_MaxPool[1-9]d.*')
+backend_test.include(r'.*test_mean.*')
+backend_test.include(r'.*test_min.*')
+backend_test.include(r'.*test_mul.*')
+backend_test.include(r'.*test_neg.*')
+backend_test.include(r'.*test_operator_addmm.*')
+backend_test.include(r'.*test_operator_basic.*')
+backend_test.include(r'.*test_operator_clip.*')
+backend_test.include(r'.*test_operator_concat2.*')
+backend_test.include(r'.*test_operator_conv_.*')
+backend_test.include(r'.*test_operator_exp.*')
+backend_test.include(r'.*test_operator_flatten.*')
+backend_test.include(r'.*test_operator_index.*')
+backend_test.include(r'.*test_operator_max_.*')
+backend_test.include(r'.*test_operator_maxpool.*')
+backend_test.include(r'.*test_operator_min.*')
+backend_test.include(r'.*test_operator_non_float_params.*')
+backend_test.include(r'.*test_operator_params.*')
+backend_test.include(r'.*test_operator_permute2.*')
+backend_test.include(r'.*test_operator_pow.*')
+backend_test.include(r'.*test_operator_reduced_mean_.*')
+backend_test.include(r'.*test_operator_reduced_mean_keepdim.*')
+backend_test.include(r'.*test_operator_reduced_sum_.*')
+backend_test.include(r'.*test_operator_reduced_sum_keepdim.*')
+backend_test.include(r'.*test_operator_selu.*')
+backend_test.include(r'.*test_operator_sqrt.*')
+backend_test.include(r'.*test_operator_symbolic_override_nested.*')
+backend_test.include(r'.*test_operator_view.*')
+backend_test.include(r'.*test_pow.*')
+backend_test.include(r'.*test_PoissonNLLLLoss_no_reduce*')
+backend_test.include(r'.*test_reciprocal.*')
+backend_test.include(r'.*test_reduce.*')
+backend_test.include(r'.*test_ReLU*')
+backend_test.include(r'.*test_relu.*')
+backend_test.include(r'.*test_selu.*')
+backend_test.include(r'.*test_Sigmoid*')
+backend_test.include(r'.*test_sigmoid.*')
+backend_test.include(r'.*test_sin.*')
+backend_test.include(r'.*test_sinh.*')
+backend_test.include(r'.*test_Softmax*')
+backend_test.include(r'.*test_softmax.*')
+backend_test.include(r'.*test_Softmin*')
+backend_test.include(r'.*test_Softplus*')
+backend_test.include(r'.*test_softplus.*')
+backend_test.include(r'.*test_softsign.*')
+backend_test.include(r'.*test_sqrt.*')
+backend_test.include(r'.*test_squeeze_cuda')
+backend_test.include(r'.*test_sub.*')
+backend_test.include(r'.*test_sum.*')
+backend_test.include(r'.*test_tan.*')
+backend_test.include(r'.*test_Tanh*')
+backend_test.include(r'.*test_tanh.*')
+backend_test.include(r'.*test_thresholdedrelu.*')
+backend_test.include(r'.*test_transpose.*')
+backend_test.include(r'.*test_unsqueeze.*')
+backend_test.include(r'.*test_ZeroPad2d*')
 
-# No 3D convolutions or pooling
-backend_test.exclude(r'[a-z,_]*_Conv3d_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_AvgPool3d_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_MaxPool3d_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_BatchNorm3d_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_averagepool_3d_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_maxpool_3d_[a-z,_]*')
-# No boolean operations
-backend_test.exclude(r'[a-z,_]*_and[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_not[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_or[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_xor[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_greater_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_less_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_equal_[a-z,_]*')
-# No all-constant models
-backend_test.exclude(r'test_constant_cuda')
-# No arbitrary flatten
-backend_test.exclude(r'test_flatten_axis0_cuda')
-backend_test.exclude(r'test_flatten_axis2_cuda')
-backend_test.exclude(r'test_flatten_axis3_cuda')
-# No operations on axis 0 == BATCH_DIM
-backend_test.exclude(r'[a-z,_]*softmax_axis_0_cuda[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*argmax_default_axis[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*argmin_default_axis[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*test_concat.*_axis_0[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*gather_0[a-z,_]*')
-backend_test.exclude(r'test_reduce_log_sum_asc_axes_cuda')
-backend_test.exclude(r'test_reduce_log_sum_default_cuda')
-backend_test.exclude(r'test_split_variable_parts_1d_cuda')
-backend_test.exclude(r'test_split_variable_parts_default_axis_cuda')
-backend_test.exclude(r'test_squeeze_cuda')
-backend_test.exclude(r'test_unsqueeze_cuda')
-backend_test.exclude(r'test_Embedding_cuda')
-backend_test.exclude(r'test_Embedding_sparse_cuda')
-backend_test.exclude(r'test_operator_index_cuda')
-backend_test.exclude(r'[a-z,_]*transpose_all_permutations[a-z,_]*')
-backend_test.exclude(r'test_transpose_default_cuda')
-backend_test.exclude(r'test_PoissonNLLLLoss_no_reduce_cuda')
-backend_test.exclude(r'test_operator_params_cuda')
-# No slice of batch dim
-backend_test.exclude(r'test_operator_chunk_cuda')
-# No fancy padding
-backend_test.exclude(r'test_constant_pad_cuda')
-backend_test.exclude(r'test_reflect_pad_cuda')
-backend_test.exclude(r'test_edge_pad_cuda')
-backend_test.exclude(r'[a-z,_]*_ReplicationPad[a-z,0-9,_]*')
-backend_test.exclude(r'[a-z,_]*ReflectionPad2d[a-z,_]*')
-# No non-zero padding
-backend_test.exclude(r'test_ConstantPad2d_cuda')
-backend_test.exclude(r'test_operator_pad_cuda')
-# No RNNs yet
-backend_test.exclude(r'[a-z,_]*_rnn_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_lstm_[a-z,_]*')
-backend_test.exclude(r'[a-z,_]*_gru_[a-z,_]*')
-# No reduce over batch dim
-backend_test.exclude(r'test_reduce_[a-z,0-9,_]*_default_axes_[a-z,_]*')
-# No INT64 type inputs
-backend_test.exclude(r'test_argmax_keepdims_example_cuda')
-backend_test.exclude(r'test_argmax_keepdims_random_cuda')
-backend_test.exclude(r'test_argmax_no_keepdims_example_cuda')
-backend_test.exclude(r'test_argmax_no_keepdims_random_cuda')
-backend_test.exclude(r'test_argmin_keepdims_example_cuda')
-backend_test.exclude(r'test_argmin_keepdims_random_cuda')
-backend_test.exclude(r'test_argmin_no_keepdims_example_cuda')
-backend_test.exclude(r'test_argmin_no_keepdims_random_cuda')
-backend_test.exclude(r'test_top_k_cuda')
-backend_test.exclude(r'test_gather_1_cuda')
-backend_test.exclude(r'test_reshape_extended_dims_cuda')
-backend_test.exclude(r'test_reshape_negative_dim_cuda')
-backend_test.exclude(r'test_reshape_one_dim_cuda')
-backend_test.exclude(r'test_reshape_reduced_dims_cuda')
-backend_test.exclude(r'test_reshape_reordered_dims_cuda')
-backend_test.exclude(r'test_shape_cuda')
-backend_test.exclude(r'test_shape_example_cuda')
-backend_test.exclude(r'test_size_cuda')
-backend_test.exclude(r'test_size_example_cuda')
-backend_test.exclude(r'test_operator_non_float_params_cuda')
-# No DOUBLE type inputs
-backend_test.exclude(r'test_operator_add_broadcast_cuda')
-backend_test.exclude(r'test_operator_add_size1_broadcast_cuda')
-backend_test.exclude(r'test_operator_add_size1_right_broadcast_cuda')
-backend_test.exclude(r'test_operator_add_size1_singleton_broadcast_cuda')
-backend_test.exclude(r'test_operator_addconstant_cuda')
-# Weights for Conv, ConvTranspose and Batchnorm MUST be nvinfer1::Weights type. 
-# GEMMs 'B' tensor must be a nvinver1::Weights type.
-backend_test.exclude(r'test_basic_conv_with_padding_cuda')
-backend_test.exclude(r'test_basic_conv_without_padding_cuda')
-backend_test.exclude(r'test_batchnorm_epsilon_cuda')
-backend_test.exclude(r'test_batchnorm_example_cuda')
-backend_test.exclude(r'test_conv_with_strides_no_padding_cuda')
-backend_test.exclude(r'test_conv_with_strides_padding_cuda')
-backend_test.exclude(r'test_convtranspose_1d_cuda')
-backend_test.exclude(r'test_convtranspose_3d_cuda')
-backend_test.exclude(r'test_convtranspose_cuda')
-backend_test.exclude(r'test_convtranspose_kernel_shape_cuda')
-backend_test.exclude(r'test_convtranspose_output_shape_cuda')
-backend_test.exclude(r'test_convtranspose_pad_cuda')
-backend_test.exclude(r'test_convtranspose_pads_cuda')
-backend_test.exclude(r'test_convtranspose_with_kernel_cuda')
-backend_test.exclude(r'test_gemm_broadcast_cuda')
-backend_test.exclude(r'test_gemm_nobroadcast_cuda')
-backend_test.exclude(r'test_instancenorm_epsilon_cuda')
-backend_test.exclude(r'test_instancenorm_example_cuda')
-backend_test.exclude(r'test_matmul_2d_cuda')
-backend_test.exclude(r'test_operator_addmm_cuda')
-backend_test.exclude(r'test_operator_mm_cuda')
-# Can't handle 1D tensor inputs since we strip batch dimension:
-backend_test.exclude(r'test_mul_bcast_cuda')
-backend_test.exclude(r'test_sub_bcast_cuda')
-backend_test.exclude(r'test_add_bcast_cuda')
-backend_test.exclude(r'test_div_bcast_cuda')
-backend_test.exclude(r'test_pow_bcast_array_cuda')
-backend_test.exclude(r'test_pow_bcast_scalar_cuda')
-# Do not support "Indices" output for maxpool
-backend_test.exclude(r'[a-z,_]*maxpool_with_argmax[a-z,_]*')
-# Incompatible padding
-backend_test.exclude(r'test_averagepool_2d_same_lower_cuda')
-# TODO: Fix these tests
-backend_test.exclude(r'test_averagepool_2d_pads_count_include_pad_cuda')
-backend_test.exclude(r'test_averagepool_2d_precomputed_pads_count_include_pad_cuda')
-backend_test.exclude(r'test_logsoftmax_axis_1_cuda')
-backend_test.exclude(r'test_softmax_axis_1_cuda')
-backend_test.exclude(r'[a-z,_]*softmax_default_axis_cuda[a-z,_]*')
+# Onnx native model tests
+backend_test.include(r'.*test_bvlc_alexnet.*')
+backend_test.include(r'.*test_densenet121.*')
+backend_test.include(r'.*test_inception_v1.*')
+backend_test.include(r'.*test_inception_v2.*')
+backend_test.include(r'.*test_resnet50.*')
+backend_test.include(r'.*test_shufflenet.*')
+backend_test.include(r'.*test_squeezenet.*')
+backend_test.include(r'.*test_vgg19.*')
+backend_test.include(r'.*test_zfnet512.*')
 
-if 'TRAVIS' in os.environ:
-    backend_test.exclude('(test_vgg19|test_vgg16)')
-# import all test cases at global scope to make them visible to python.unittest
+# exclude unenabled ops get pulled in with wildcards
+# test_constant_pad gets pulled in with the test_constant* wildcard. Explicitly disable padding tests for now.
+backend_test.exclude(r'.*test_constant_pad.*')
+backend_test.exclude(r'.*test_constantofshape.*')
+backend_test.exclude(r'.*test_expand.*')
+# Operator MATMULINTEGER is not supported by TRT
+backend_test.exclude(r'.*test_matmulinteger.*')
+backend_test.exclude(r'.*test_maxpool.*')
+backend_test.exclude(r'.*test_maxunpool.*')
+
+# Known issues
+backend_test.exclude(r'.*test_gemm.*')
+backend_test.exclude(r'.*test_operator_mm.*')
+backend_test.exclude(r'.*test_shape.*')
+backend_test.exclude(r'.*test_size.*')
+backend_test.exclude(r'.*test_operator_symbolic_override.*')
+
+
 globals().update(backend_test
-                 .enable_report()
-                 .test_cases)
+                .enable_report()
+                .test_cases)
 
 if __name__ == '__main__':
     unittest.main()
