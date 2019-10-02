@@ -29,7 +29,7 @@ namespace onnx2trt {
 
 class ShapedWeights {
 public:
-  typedef int32_t DataType;
+  using DataType = int32_t;
   DataType type;
   void* values;
   nvinfer1::Dims shape;

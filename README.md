@@ -6,10 +6,32 @@ See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT (5.1)](https://developer.nvidia.com/nvidia-tensorrt-download)
+Development on the Master branch is for the latest version of [TensorRT 6.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+
+For version 6.0 without full-dimensions support, clone and build from the [6.0 branch](https://github.com/onnx/onnx-tensorrt/tree/6.0)
+
+For version 5.1, clone and build from the [5.1 branch](https://github.com/onnx/onnx-tensorrt/tree/5.1)
 
 For versions < 5.1, clone and build from the [5.0 branch](https://github.com/onnx/onnx-tensorrt/tree/v5.0)
 
+## Full Dimensions + Dynamic Shapes
+
+Building INetwork objects in full dimensions mode with dynamic shape support requires calling the following API:
+
+C++
+
+    const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    builder->createNetworkV2(explicitBatch)
+
+Python
+
+    import tensorrt
+    explicit_batch = 1 << (int)(tensorrt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    builder.create_network(explicit_batch)
+
+For examples of usage of these APIs see:
+* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleOnnxMNIST)
+* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleDynamicReshape)
 
 ## Supported Operators
 
@@ -19,27 +41,15 @@ Current supported ONNX operators are found in the [operator support matrix](oper
 
 ### Dependencies
 
- - [Protobuf](https://github.com/google/protobuf/releases)
- - [TensorRT](https://developer.nvidia.com/tensorrt)
-
-### Download the code
-Clone the code from GitHub. 
-
-    git clone --recursive https://github.com/onnx/onnx-tensorrt.git
+ - [Protobuf >= 3.8.x](https://github.com/google/protobuf/releases)
+ - [TensorRT 6.0](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 6.0 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
-The TensorRT-ONNX executables and libraries are built with CMAKE. Note by default CMAKE will tell the CUDA compiler generate code for the latest SM version. If you are using a GPU with a lower SM version you can specify which SMs to build for by using the optional `-DGPU_ARCHS` flag. For example, if you have a GTX 1080, you can specify `-DGPU_ARCHS="61"` to generate CUDA code specifically for that card.
+For building on master, we recommend following the instructions on the [master branch of TensorRT](https://github.com/NVIDIA/TensorRT/) as there are new dependencies that were introduced to support these new features.
 
-See [here](https://developer.nvidia.com/cuda-gpus) for finding what maximum compute capability your specific GPU supports.
-
-    mkdir build
-    cd build
-    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir>
-    OR
-    cmake .. -DTENSORRT_ROOT=<tensorrt_install_dir> -DGPU_ARCHS="61"
-    make -j8
-    sudo make install
+To build on older branches refer to their respective READMEs.
 
 
 ## Executable usage
@@ -55,6 +65,15 @@ ONNX models can also be converted to human-readable text:
 See more usage information by running:
 
     onnx2trt -h
+
+### Python modules
+Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. Install them with
+
+    pip install <tensorrt_install_dir>/python/tensorrt-6.0.1.5-cp27-none-linux_x86_64.whl
+
+TensorRT 6.0 supports ONNX release 1.5.0. Install it with:
+
+    pip install onnx==1.5.0
 
 ## ONNX Python backend usage
 
@@ -79,27 +98,15 @@ The model parser library, libnvonnxparser.so, has its C++ API declared in this h
 
     NvOnnxParser.h
 
-TensorRT engines built using this parser must use the plugin factory provided in
-libnvonnxparser_runtime.so, which has its C++ API declared in this header:
+Important typedefs required for parsing ONNX models are declared in this header:
 
-    NvOnnxParserRuntime.h
-
-### Python modules
-Python bindings for the ONNX-TensorRT parser in TensorRT versions >= 5.0 are packaged in the shipped `.whl` files. Install them with
-
-    pip install <tensorrt_install_dir>/python/tensorrt-5.1.6.0-cp27-none-linux_x86_64.whl
-
-For earlier versions of TensorRT, the Python wrappers are built using SWIG.
-Build the Python wrappers and modules by running:
-
-    python setup.py build
-    sudo python setup.py install
+    NvOnnxParserTypedefs.h
 
 ### Docker image
 
 Build the onnx_tensorrt Docker image by running:
 
-    cp /path/to/TensorRT-5.1.*.tar.gz .
+    cp /path/to/TensorRT-6.0.*.tar.gz .
     docker build -t onnx_tensorrt .
 
 ### Tests

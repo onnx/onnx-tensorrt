@@ -45,8 +45,8 @@ public:
     }
     return _attrs.at(key);
   }
-  template<typename T> T get(std::string key) const;
-  template<typename T> T get(std::string key, T const& default_value) const {
+  template<typename T> T get(const std::string& key) const;
+  template<typename T> T get(const std::string& key, T const& default_value) const {
     return _attrs.count(key) ? this->get<T>(key) : default_value;
   }
 };

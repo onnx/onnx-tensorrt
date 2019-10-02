@@ -24,22 +24,25 @@
 
 #include "NvOnnxParser.h"
 #include "ImporterContext.hpp"
-#include "common.hpp"
 #include "utils.hpp"
+#include "onnx_utils.hpp"
 #include "builtin_op_importers.hpp"
+#include "common.hpp"
 
 namespace onnx2trt {
 
-class ModelImporter final : public nvonnxparser::IParser {
+class ModelImporter : public nvonnxparser::IParser {
+protected:
   string_map<NodeImporter> _op_importers;
+  virtual Status importModel(::ONNX_NAMESPACE::ModelProto const &model,
+                     uint32_t weight_count,
+                     onnxTensorDescriptorV1 const *weight_descriptors);
+private:
   ImporterContext _importer_ctx;
   std::list<::ONNX_NAMESPACE::ModelProto> _onnx_models; // Needed for ownership of weights
   int _current_node;
   std::vector<Status> _errors;
 
-  Status importModel(::ONNX_NAMESPACE::ModelProto const &model,
-                     uint32_t weight_count,
-                     onnxTensorDescriptorV1 const *weight_descriptors);
   NodeImportResult importNode(::ONNX_NAMESPACE::NodeProto const& node,
                               std::vector<TensorOrWeights>& inputs,
                               std::vector<std::string>& output_names);
@@ -54,10 +57,9 @@ public:
       onnxTensorDescriptorV1 const *weight_descriptors) override;
   bool parse(void const *serialized_onnx_model,
              size_t serialized_onnx_model_size) override;
-  bool parseFromFile(const char* onnxModelFile, int verbosity) override;
   bool supportsModel(void const *serialized_onnx_model,
                      size_t serialized_onnx_model_size,
-         SubGraphCollection_t &sub_graph_collection) override;
+                     SubGraphCollection_t &sub_graph_collection) override;
 
   bool supportsOperator(const char* op_name) const override;
   void destroy() override { delete this; }
@@ -75,6 +77,10 @@ public:
     return &_errors[index];
   }
   void clearErrors() override { _errors.clear(); }
+
+  //...LG: Move the implementation to .cpp
+  bool parseFromFile(const char* onnxModelFile, int verbosity) override;
+  
 };
 
 } // namespace onnx2trt

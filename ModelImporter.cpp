@@ -33,29 +33,15 @@
 
 namespace onnx2trt {
 
-//Status const& ModelImporter::setInput(const char* name, nvinfer1::ITensor* input) {
-//  _importer_ctx.setUserInput(name, input);
-//  _last_error = Status::success();
-//  return _last_error;
-//}
-//
-//Status const& ModelImporter::setOutput(const char* name, nvinfer1::ITensor** output) {
-//  _importer_ctx.setUserOutput(name, output);
-//  _last_error = Status::success();
-//  return _last_error;
-//}
-
 Status importInput(ImporterContext* importer_ctx,
                    ::ONNX_NAMESPACE::ValueInfoProto const& input,
                    nvinfer1::ITensor** tensor) {
   auto const& onnx_tensor_type = input.type().tensor_type();
   nvinfer1::DataType trt_dtype;
-  ASSERT_INPUT(convert_input_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
-         ErrorCode::kUNSUPPORTED_NODE, input.name());
-  ASSERT_INPUT(onnx_tensor_type.shape().dim().size() > 0,
+  ASSERT_INPUT(convert_dtype(onnx_tensor_type.elem_type(), &trt_dtype),
          ErrorCode::kUNSUPPORTED_NODE, input.name());
   nvinfer1::Dims trt_dims;
-  ASSERT_INPUT(convert_dims(onnx_tensor_type.shape().dim(), trt_dims), ErrorCode::kUNSUPPORTED_GRAPH, input.name() + "_TRT_DYNAMIC_SHAPES");
+  ASSERT_INPUT(convert_dims(onnx_tensor_type.shape().dim(), trt_dims), ErrorCode::kUNSUPPORTED_GRAPH, input.name());
   nvinfer1::ITensor* user_input = importer_ctx->getUserInput(input.name().c_str());
   if( user_input ) {
     ASSERT_INPUT(user_input, ErrorCode::kINVALID_VALUE, input.name());
@@ -66,18 +52,7 @@ Status importInput(ImporterContext* importer_ctx,
     *tensor = user_input;
     return Status::success();
   }
-#if NV_TENSORRT_MAJOR < 4
-  // WAR for TRT not supporting < 3 input dims
-  for( int i=trt_dims.nbDims; i<3; ++i ) {
-    // Pad with unitary dims
-    ++trt_dims.nbDims;
-    trt_dims.d[i] = 1;
-    trt_dims.type[i] = (i == 0 ?
-                        nvinfer1::DimensionType::kCHANNEL :
-                        nvinfer1::DimensionType::kSPATIAL);
-  }
-  ASSERT_INPUT(trt_dims.nbDims <= 3, ErrorCode::kUNSUPPORTED_NODE, input.name());
-#endif // NV_TENSORRT_MAJOR < 4
+
   ASSERT_INPUT(*tensor = importer_ctx->network()->addInput(
            input.name().c_str(), trt_dtype, trt_dims),
          ErrorCode::kUNSUPPORTED_NODE, input.name());
@@ -85,54 +60,76 @@ Status importInput(ImporterContext* importer_ctx,
 }
 
 Status importInputs(ImporterContext* importer_ctx,
-                    ::ONNX_NAMESPACE::GraphProto const& graph,
-                    string_map<TensorOrWeights>* tensors,
-                    uint32_t weights_count,
-                    onnxTensorDescriptorV1 const* weight_descriptors) {
-  // The weights may come from two sources:
-  // either Initializer list in onnx graph
-  // or User specified weight through onnxifi
-  string_map<::ONNX_NAMESPACE::TensorProto const*> initializer_map;
-  for( ::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer() ) {
-    ASSERT(!initializer_map.count(initializer.name()), ErrorCode::kINVALID_GRAPH);
-    initializer_map.insert({initializer.name(), &initializer});
-  }
-  ASSERT(weights_count == 0 || initializer_map.empty(),
-         ErrorCode::kINVALID_VALUE);
-  ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
-  string_map<onnxTensorDescriptorV1 const*> weight_map;
-  for (uint32_t i = 0; i < weights_count; ++i) {
-    onnxTensorDescriptorV1 const* desc = weight_descriptors + i;
-    ASSERT(weight_map.emplace(desc->name, desc).second,
-           ErrorCode::kINVALID_VALUE);
-  }
-  for( ::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input() ) {
-    TensorOrWeights tensor;
-    if( initializer_map.count(input.name()) ) {
-      ::ONNX_NAMESPACE::TensorProto const& initializer = *initializer_map.at(input.name());
-      ShapedWeights weights;
-      ASSERT_INPUT(convert_onnx_weights(initializer, &weights),
-             ErrorCode::kUNSUPPORTED_NODE,input.name());
-      tensor = weights;
-    } else if (weight_map.count(input.name())) {
-      onnxTensorDescriptorV1 const& weight_desc = *weight_map.at(input.name());
-      ShapedWeights weights;
-      // We only support grabbing weight from CPU memory now
-      ASSERT_INPUT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU,
-             ErrorCode::kINVALID_VALUE, input.name());
-
-      ASSERT_INPUT(convert_weight_descriptor(weight_desc, &weights),
-             ErrorCode::kUNSUPPORTED_NODE, input.name());
-      tensor = weights;
-    } else {
-      nvinfer1::ITensor* tensor_ptr;
-      TRT_CHECK(importInput(importer_ctx, input, &tensor_ptr));
-      tensor = tensor_ptr;
+    ::ONNX_NAMESPACE::GraphProto const& graph,
+    string_map<TensorOrWeights>* tensors,
+    uint32_t weights_count,
+    onnxTensorDescriptorV1 const* weight_descriptors) {
+    // The weights may come from two sources:
+    // either Initializer list in onnx graph
+    // or User specified weight through onnxifi
+    string_map<::ONNX_NAMESPACE::TensorProto const*> initializer_map;
+    for( ::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer() )
+    {
+        ASSERT(!initializer_map.count(initializer.name()), ErrorCode::kINVALID_GRAPH);
+        initializer_map.insert({initializer.name(), &initializer});
     }
-    ASSERT_INPUT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH,input.name());
-    tensors->insert({input.name(), tensor});
-  }
-  return Status::success();
+    ASSERT(weights_count == 0 || initializer_map.empty(),
+    ErrorCode::kINVALID_VALUE);
+    ASSERT(weights_count == 0 || weight_descriptors, ErrorCode::kINVALID_VALUE);
+    string_map<onnxTensorDescriptorV1 const*> weight_map;
+
+    for (uint32_t i = 0; i < weights_count; ++i)
+    {
+        onnxTensorDescriptorV1 const* desc = weight_descriptors + i;
+        ASSERT(weight_map.emplace(desc->name, desc).second,
+        ErrorCode::kINVALID_VALUE);
+    }
+
+    for( ::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input() )
+    {
+        TensorOrWeights tensor;
+        if( initializer_map.count(input.name()) )
+        {
+            ::ONNX_NAMESPACE::TensorProto const& initializer = *initializer_map.at(input.name());
+            ShapedWeights weights;
+            ASSERT(convert_onnx_weights(initializer, &weights), ErrorCode::kUNSUPPORTED_NODE);
+            tensor = weights;
+        }
+        else if (weight_map.count(input.name()))
+        {
+            onnxTensorDescriptorV1 const& weight_desc = *weight_map.at(input.name());
+            ShapedWeights weights;
+            // We only support grabbing weight from CPU memory now
+            ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU, ErrorCode::kINVALID_VALUE);
+
+            ASSERT(convert_weight_descriptor(weight_desc, &weights),
+            ErrorCode::kUNSUPPORTED_NODE);
+            tensor = weights;
+        }
+        else
+        {
+            nvinfer1::ITensor* tensor_ptr;
+            TRT_CHECK(importInput(importer_ctx, input, &tensor_ptr));
+            tensor = tensor_ptr;
+        }
+        ASSERT(!tensors->count(input.name()), ErrorCode::kINVALID_GRAPH);
+        tensors->insert({input.name(), tensor});
+    }
+    // According to the ONNX spec: initializers do not have to be specified as a graph input.
+    // In order for these initializers to be populated down to TRT, we need to add them to the tensors list.
+    for (auto initializer : initializer_map)
+    {
+        const std::string initializer_name = initializer.first;
+        if (!tensors->count(initializer_name))
+        {
+          const auto& initializer_weight = *initializer.second;
+          ShapedWeights weights;
+          ASSERT(convert_onnx_weights(initializer_weight, &weights), ErrorCode::kUNSUPPORTED_NODE);
+          tensors->insert({initializer_name, weights});
+        }
+    }
+
+    return Status::success();
 }
 
 NodeImportResult ModelImporter::importNode(::ONNX_NAMESPACE::NodeProto const& node,
@@ -352,20 +349,9 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       else
       {
         // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-        // around MAKE_INPUT_ERROR. Check for dynamic input and set entire graph as unsupported if found.
+        // around MAKE_INPUT_ERROR.
         input_node = error->file();
-        auto found = input_node.find("_TRT_DYNAMIC_SHAPES");
-        if (found != std::string::npos)
-        {
-          cout << "Found dynamic input: " << input_node.substr(0, found) << endl;
-          cout << "Marking entire graph as unsupported." << endl;
-          return false;
-        }
-        else
-        {
-          cout << "Found unsupported input: " << input_node << endl;
-        }
-
+        cout << "Found unsupported input: " << input_node << endl;
       }
     }
   }
@@ -452,7 +438,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection[graph_index].second = false;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
-          // The split_before graph is marked as supported.
           else if (node_index == subgraph.size() - 1)
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
@@ -460,7 +445,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection[graph_index].second = true;
           }
           // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
-          // Mark split_before as supported and split_after as unsupported.
           else
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
@@ -515,7 +499,8 @@ bool ModelImporter::parseWithWeightDescriptors(
 }
 
 bool ModelImporter::parse(void const *serialized_onnx_model,
-                          size_t serialized_onnx_model_size) {
+                          size_t serialized_onnx_model_size)
+{
   return this->parseWithWeightDescriptors(
       serialized_onnx_model, serialized_onnx_model_size, 0, nullptr);
 }
@@ -525,7 +510,9 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
                            uint32_t weight_count,
                            onnxTensorDescriptorV1 const *weight_descriptors) {
   _importer_ctx.clearOpsets();
-  for( int i=0; i<model.opset_import().size(); ++i ) {
+  ASSERT(!_importer_ctx.network()->hasImplicitBatchDimension() &&
+        "This version of the ONNX parser only supports networks with an explicit batch dimension", ErrorCode::kINVALID_VALUE);
+  for( int i = 0; i < model.opset_import().size(); ++i ) {
     std::string domain  = model.opset_import(i).domain();
     int64_t     version = model.opset_import(i).version();
     _importer_ctx.addOpset(domain, version);
@@ -564,11 +551,11 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
         tensors.insert({node_output_name, output});
       }
     }
-    if( node.output().size() > 0 ) {
+    for (int i = 0; i < node.output().size(); i++) {
       std::stringstream ss;
-      ss << node.output(0) << ":"
+      ss << node.output(i) << ":"
          << node.op_type() << " -> "
-         << outputs.at(0).shape();
+         << outputs.at(i).shape();
       _importer_ctx.logger().log(
            nvinfer1::ILogger::Severity::kINFO, ss.str().c_str());
     }
@@ -577,7 +564,6 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
   // Mark outputs defined in the ONNX model (unless tensors are user-requested)
   for( ::ONNX_NAMESPACE::ValueInfoProto const& output : graph.output() ) {
     ASSERT(tensors.count(output.name()), ErrorCode::kINVALID_GRAPH);
-    ASSERT(tensors.at(output.name()).is_tensor(), ErrorCode::kUNSUPPORTED_GRAPH);
     nvinfer1::ITensor* output_tensor_ptr = &tensors.at(output.name()).tensor();
     if( output_tensor_ptr->isNetworkInput() ) {
       // HACK WAR for TRT not allowing input == output
@@ -594,12 +580,10 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
       ASSERT(convert_dtype(
                  output.type().tensor_type().elem_type(), &output_trt_dtype),
              ErrorCode::kUNSUPPORTED_NODE);
-#if NV_TENSORRT_MAJOR >= 4
       // For INT32 data type, output type must match tensor type
       ASSERT(output_tensor_ptr->getType() != nvinfer1::DataType::kINT32 ||
              output_trt_dtype == nvinfer1::DataType::kINT32,
              ErrorCode::kUNSUPPORTED_NODE);
-#endif // NV_TENSORRT_MAJOR >= 4
       // Note: Without this, output type is always float32
       output_tensor_ptr->setType(output_trt_dtype);
     }
