@@ -259,7 +259,7 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::Dims new_shape({4, {dims.d[0], dims.d[1], dims.d[2], 1}});
+        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
         tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
@@ -372,7 +372,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::Dims new_shape({4, {dims.d[0], dims.d[1], dims.d[2], 1}});
+        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
         tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
@@ -467,7 +467,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     bool need_to_expand_dims = (dims.nbDims == 3);
     if (need_to_expand_dims)
     {
-        nvinfer1::Dims new_shape({4, {dims.d[0], dims.d[1], dims.d[2], 1}});
+        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
         tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
@@ -1028,9 +1028,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LRN)
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
     OnnxAttrs attrs(node);
     int size = attrs.get<int>("size");
-    float alpha = attrs.get<float>("alpha", 0.0001);
-    float beta = attrs.get<float>("beta", 0.75);
-    float bias = attrs.get<float>("bias", 1.0);
+    float alpha = attrs.get<float>("alpha", 0.0001f);
+    float beta = attrs.get<float>("beta", 0.75f);
+    float bias = attrs.get<float>("bias", 1.0f);
     RETURN_FIRST_OUTPUT(ctx->network()->addLRN(tensor, size, alpha, beta, bias));
 }
 
