@@ -1963,56 +1963,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Sqrt)
 
 DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims old_shape = tensor.getDimensions();
-    int ndim_in = old_shape.nbDims;
+    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
+
     OnnxAttrs attrs(node);
     auto axes = attrs.get<std::vector<int>>("axes");
+
+    int rank = tensor_ptr->getDimensions().nbDims;
     for (auto& axis : axes)
     {
-        TRT_CHECK(convert_axis(axis, ndim_in));
-    }
-    std::set<int> axes_set(axes.begin(), axes.end());
-    int ndim_out = ndim_in - axes_set.size();
-    ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims new_shape;
-    new_shape.nbDims = ndim_out;
-
-    // Squeeze into a constant
-    if (new_shape.nbDims == 0)
-    {
-        nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-        layer->setReshapeDimensions(new_shape);
-        RETURN_FIRST_OUTPUT(layer);
+        TRT_CHECK(convert_axis(axis, rank));
     }
 
-    nvinfer1::Permutation perm;
+    tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
 
-    // Align dynamic dimensions in input with the first permutation and 0s in new_shape
-    // i: from 0 to new_shape.nbDims
-    // j: from 0 to number of axes
-    for (int i = 0, j = 0; (i + j) < old_shape.nbDims; )
-    {
-        if (!axes_set.count(i + j))
-        {
-            new_shape.d[i] = 0;
-            perm.order[i] = i + j;
-            i ++;
-        }
-        else
-        {
-            ASSERT((old_shape.d[i + j] == 1 || old_shape.d[i + j] == -1), ErrorCode::kINVALID_NODE);
-            perm.order[j + ndim_out] = i + j;
-            j ++;
-        }
-    }
+    ASSERT(tensor_ptr && "Failed to squeeze tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
-    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    layer->setFirstTranspose(perm);
-    layer->setReshapeDimensions(new_shape);
-    RETURN_FIRST_OUTPUT(layer);
+    return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Sub)
@@ -2103,43 +2069,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Transpose)
 
 DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims old_shape = tensor.getDimensions();
-    int ndim_in = old_shape.nbDims;
+    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
     OnnxAttrs attrs(node);
     auto axes = attrs.get<std::vector<int>>("axes");
-    std::set<int> axes_set(axes.begin(), axes.end());
-    int ndim_out = ndim_in + axes_set.size();
-    ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims new_shape; 
-    new_shape.nbDims = ndim_out;
-    nvinfer1::Permutation perm;
 
-    // Append 1 to new_shape for each axes and permute them into the right position
-    // Align dynamic dimensions in input and 0s in new_shape
-    // i: from 0 to old_shape.nbDims
-    // j: from 0 to number of axes
-    for (int i = 0, j = 0 ; (i + j) < ndim_in + (int)axes_set.size(); )
+    int newSize = tensor_ptr->getDimensions().nbDims + axes.size();
+
+    for (auto& axis : axes)
     {
-        if (axes_set.count(i+j))
-        {
-            perm.order[i + j] = ndim_in + j;
-            new_shape.d[ndim_in + j] = 1;
-            j ++;
-        }
-        else
-        {
-            perm.order[i + j] = i;
-            old_shape.d[i] < 0 ? new_shape.d[i] = 0 : new_shape.d[i] =old_shape.d[i];
-            i ++;
-        }
+        TRT_CHECK(convert_axis(axis, newSize));
     }
 
-    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    layer->setReshapeDimensions(new_shape);
-    layer->setSecondTranspose(perm);
-    RETURN_FIRST_OUTPUT(layer);
+    tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
+
+    ASSERT(tensor_ptr && "Failed to unsqueeze tensor!", ErrorCode::kUNSUPPORTED_NODE);
+
+    return {{tensor_ptr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Resize)

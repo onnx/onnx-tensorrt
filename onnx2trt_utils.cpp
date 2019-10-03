@@ -998,6 +998,66 @@ Status slice_array(TensorOrWeights weights, std::vector<int32_t>& weight_vector)
     return Status(ErrorCode::kSUCCESS);
 }
 
+nvinfer1::ITensor* squeezeStaticTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+    nvinfer1::Dims dims = tensor.getDimensions();
+    std::set<int> axesSet(axes.begin(), axes.end());
+    std::vector<int> shape{dims.d, dims.d + dims.nbDims};
+
+    for (const auto& axis : axesSet)
+    {
+        shape.erase(shape.begin() + axis);
+    }
+
+    nvinfer1::Dims newShape{dims.nbDims - static_cast<int>(axesSet.size())};
+    std::copy(shape.begin(), shape.end(), newShape.d);
+
+    auto* unsqueezeLayer = ctx->network()->addShuffle(tensor);
+    unsqueezeLayer->setReshapeDimensions(newShape);
+    return unsqueezeLayer->getOutput(0);
+}
+
+nvinfer1::ITensor* squeezeDynamicTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+    int rank = tensor.getDimensions().nbDims;
+    std::set<int> axisSet(axes.begin(), axes.end());
+
+    std::vector<int> gatherIndices{};
+    for (int i = 0; i < rank; ++i)
+    {
+        if (!axisSet.count(i))
+        {
+            gatherIndices.emplace_back(i);
+        }
+    }
+
+    nvinfer1::IShapeLayer* shape = ctx->network()->addShape(tensor);
+
+    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(tensor);
+
+    if (gatherIndices.size() > 0)
+    {
+        nvinfer1::Dims gatherIndicesShape{1, static_cast<int>(gatherIndices.size())};
+        nvinfer1::IGatherLayer* newShape = ctx->network()->addGather(*shape->getOutput(0), *addConstant(ctx, gatherIndices, ::ONNX_NAMESPACE::TensorProto::INT32, gatherIndicesShape)->getOutput(0), 0);
+        layer->setInput(1, *newShape->getOutput(0));
+    }
+    else
+    {
+        layer->setReshapeDimensions(nvinfer1::Dims{0});
+    }
+
+    return layer->getOutput(0);
+}
+
+nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+    if (isDynamic(tensor.getDimensions()))
+    {
+        return squeezeDynamicTensor(ctx, tensor, axes);
+    }
+    return squeezeStaticTensor(ctx, tensor, axes);
+}
+
 nvinfer1::ITensor* transpose_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, 
                                     bool permute_dim_types = true)
 {
@@ -1032,6 +1092,84 @@ NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::Node
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
     nvinfer1::IUnaryLayer* layer = ctx->network()->addUnary(input, op);
     return {{layer->getOutput(0)}};
+}
+
+nvinfer1::ITensor* unsqueezeStaticTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+    nvinfer1::Dims dims = tensor.getDimensions();
+    std::set<int> axesSet(axes.begin(), axes.end());
+    std::vector<int> shape{dims.d, dims.d + dims.nbDims};
+
+    for (const auto& axis : axesSet)
+    {
+        shape.insert(shape.begin() + axis, 1);
+    }
+
+    nvinfer1::Dims newShape{dims.nbDims + static_cast<int>(axesSet.size())};
+    std::copy(shape.begin(), shape.end(), newShape.d);
+
+    auto* unsqueezeLayer = ctx->network()->addShuffle(tensor);
+    unsqueezeLayer->setReshapeDimensions(newShape);
+    return unsqueezeLayer->getOutput(0);
+}
+
+nvinfer1::ITensor* unsqueezeDynamicTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+    nvinfer1::Dims dims = tensor.getDimensions();
+    int nbDims = dims.nbDims;
+    std::set<int> axesSet(axes.begin(), axes.end());
+    int newNbDims = nbDims + axesSet.size();
+
+    // Ensure we're not unsqueezing past the maximum allowed dimensions
+    if (newNbDims > nvinfer1::Dims::MAX_DIMS)
+    {
+        return nullptr;
+    }
+
+    auto singleDim = makeDims(1, 1);
+    auto* singleShape = &makeShapeTensor(ctx, singleDim);
+
+    nvinfer1::ITensor* tensorShape{nullptr};
+    if (tensor.getDimensions().nbDims > 0)
+    {
+        tensorShape = ctx->network()->addShape(tensor)->getOutput(0);
+    }
+
+    std::vector<nvinfer1::ITensor*> shapeTensors;
+
+    for (int axesCounter = 0, shapeCounter = 0; (axesCounter + shapeCounter < newNbDims);)
+    {
+        if (axesSet.count(axesCounter + shapeCounter))
+        {
+            shapeTensors.push_back(singleShape);
+            axesCounter++;
+        }
+        else
+        {
+            // This branch should never be taken when the input tensor is a scalar.
+            std::vector<int> index{shapeCounter};
+            auto* gatherLayer = ctx->network()->addGather(*tensorShape, *addConstant(ctx, index, ::ONNX_NAMESPACE::TensorProto::INT32, singleDim)->getOutput(0), 0);
+            shapeTensors.push_back(gatherLayer->getOutput(0));
+            shapeCounter++;
+        }
+    }
+
+    auto* newShapeLayer = ctx->network()->addConcatenation(shapeTensors.data(), shapeTensors.size());
+
+    auto* unsqueezeLayer = ctx->network()->addShuffle(tensor);
+    unsqueezeLayer->setInput(1, *newShapeLayer->getOutput(0));
+
+    return unsqueezeLayer->getOutput(0);
+}
+
+nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes)
+{
+
+    if (isDynamic(tensor.getDimensions()))
+    {
+        return unsqueezeDynamicTensor(ctx, tensor, axes);
+    }
+    return unsqueezeStaticTensor(ctx, tensor, axes);
 }
 
 void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW beg_padding,

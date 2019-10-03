@@ -221,6 +221,9 @@ NodeImportResult scaleHelper(IImporterContext* ctx,
 // Helper function to set ONNX node attributes
 void setAttr(nvinfer1::Dims * trtAttr, ::ONNX_NAMESPACE::AttributeProto const* onnxAttr, int nbSpatialDims, int defaultVal);
 
+// Helper function to squeeze a tensor on a given set of axes
+nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
+
 // Helper function to transpose a tensor given a permutation
 nvinfer1::ITensor* transpose_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, 
                                     bool permute_dim_types);
@@ -231,6 +234,9 @@ Status slice_array(TensorOrWeights weights, std::vector<int32_t>& weight_vector)
 // Helper function to import unary operations into TRT
 NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::UnaryOperation op);
+
+// Helper function to unsqueeze tensors on a given set of axes
+nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
 
 // Helper function to update padding values.
 void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW beg_padding,
