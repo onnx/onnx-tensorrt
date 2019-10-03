@@ -23,6 +23,7 @@
 #pragma once
 
 #include "NvOnnxParser.h"
+#include "NvInferPlugin.h"
 #include "ImporterContext.hpp"
 #include "utils.hpp"
 #include "onnx_utils.hpp"
