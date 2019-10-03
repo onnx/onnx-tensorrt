@@ -29,6 +29,7 @@
 #include <onnx/onnx_pb.h>
 #include <onnx/onnxifi.h>
 #include <NvInfer.h>
+#include <cstring>
 
 #include <iostream>
 using std::cerr;
@@ -58,6 +59,26 @@ std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm
 
 namespace onnx2trt
 {
+
+// Adds a constant scalar to the network in the form of a constant layer.
+template <typename ScalarType>
+nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
+{
+    ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{0, {}});
+    static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
+    return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
+}
+
+// Helper function to create a tensor given a vector of values and a shape.
+template <typename ScalarType>
+inline nvinfer1::IConstantLayer* addConstant(IImporterContext* ctx, const std::vector<ScalarType>& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
+{
+    assert(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided");
+    assert(sizeof(ScalarType) == get_dtype_size(type) && "ONNX dtype does not have the same size as the value type");
+    ShapedWeights weights = ctx->createTempWeights(type, shape);
+    std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
+    return ctx->network()->addConstant(weights.shape, weights);
+}
 
 enum ScaleOp
 {
@@ -89,8 +110,11 @@ Status applyLegacyBinaryOpBroadcasting(IImporterContext* ctx,
 NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op);
 
+// Helper function to broadcast one tensor to a given shape.
+void broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, const int nbDims);
+
 // Helper function to broadcast two tensors to the larger shape
-void broadcast_tensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2);
+void broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2);
 
 // Helper function for parsing brodacsting attributes
 Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs, nvinfer1::Dims const& dims);
@@ -136,11 +160,10 @@ int div_ceil(int n, int d);
 
 // Helper function to import elementwise nodes into TRT
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op,
-    bool legacy_binary_op_broadcasting = false);
+    std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper functino to flatten a tensor on a specified axis
-nvinfer1::ITensor* flatten_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
+nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
 
 // Helper function to check if any input dimensions are dynamic
 bool isDynamic (nvinfer1::Dims const& dims);

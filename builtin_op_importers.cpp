@@ -113,7 +113,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Add)
       return scaleHelper(
           ctx, node, inputs, ScaleOp::kSHIFT);
     }
-    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM, true);
+    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ArgMax)
@@ -270,7 +270,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
         dims = tensor_ptr->getDimensions();
     }
 
-    int nchan = dims.d[1];
+    // Number of channels can be dynamic - set it to the dimensions of scale_weights
+    int nchan = scale_weights.shape.d[0];
     nvinfer1::Dims weights_shape{1, {nchan}};
     ASSERT(scale_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
     ASSERT(bias_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
@@ -653,7 +654,7 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
 DEFINE_BUILTIN_OP_IMPORTER(Div)
 {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kDIV, true);
+    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kDIV);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Dropout)
@@ -690,23 +691,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Exp)
 DEFINE_BUILTIN_OP_IMPORTER(Flatten)
 {
     OnnxAttrs attrs(node);
-    int axis = attrs.get("axis", 1);
-    nvinfer1::Dims dims = inputs.at(0).shape();
     nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    int dim0 = 1;
-    int dim1 = 1;
-    for (int i = 0; i < axis; i++)
+    int nbDims = tensor_ptr->getDimensions().nbDims;
+    int axis = attrs.get("axis", 1);
+    TRT_CHECK(convert_axis(axis, nbDims));
+
+    if (nbDims > 2)
     {
-        dim0 *= dims.d[i];
+        tensor_ptr = flattenTensor(ctx, *tensor_ptr, axis);
+        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     }
-    for (int i = axis; i < dims.nbDims; i++)
-    {
-        dim1 *= dims.d[i];
-    }
-    nvinfer1::Dims new_shape{2, {dim0, dim1}};
-    tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     return {{tensor_ptr}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(Floor)
+{
+    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kFLOOR);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Gather)
@@ -782,20 +782,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     }
 
     return {{layerOutput}};
-}
-
-// Adds a constant scalar to the network in the form of a constant layer.
-template <typename ScalarType>
-nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
-{
-    ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{0, {}});
-    static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
-    return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
-}
-
-DEFINE_BUILTIN_OP_IMPORTER(Floor)
-{
-    return unaryHelper(ctx, node, inputs, nvinfer1::UnaryOperation::kFLOOR);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Gemm)
@@ -890,7 +876,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         nvinfer1::IConstantLayer* alphaConstant
             = addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
         nvinfer1::ITensor* alphaConstantTensor = alphaConstant->getOutput(0);
-        broadcast_tensors(ctx, alphaConstantTensor, matmulTensor);
+        broadcastTensors(ctx, alphaConstantTensor, matmulTensor);
         nvinfer1::IElementWiseLayer* scaledMatmul = ctx->network()->addElementWise(
             *alphaConstantTensor, *matmulTensor, nvinfer1::ElementWiseOperation::kPROD);
         matmulTensor = scaledMatmul->getOutput(0);
@@ -903,7 +889,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         nvinfer1::IConstantLayer* betaConstant
             = addConstantScalar(ctx, beta, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
         nvinfer1::ITensor* betaConstantTensor = betaConstant->getOutput(0);
-        broadcast_tensors(ctx, betaConstantTensor, biasTensor);
+        broadcastTensors(ctx, betaConstantTensor, biasTensor);
         nvinfer1::IElementWiseLayer* scaledBias
             = ctx->network()->addElementWise(*betaConstantTensor, *biasTensor, nvinfer1::ElementWiseOperation::kPROD);
         biasTensor = scaledBias->getOutput(0);
@@ -914,7 +900,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         nvinfer1::Dims squeezeDims = squeeze_leading_dims(biasTensor->getDimensions());
         biasTensor = reshape_tensor(ctx, *biasTensor, squeezeDims);
     }
-    broadcast_tensors(ctx, matmulTensor, biasTensor);
+    broadcastTensors(ctx, matmulTensor, biasTensor);
     nvinfer1::IElementWiseLayer* biasAdd
         = ctx->network()->addElementWise(*matmulTensor, *biasTensor, nvinfer1::ElementWiseOperation::kSUM);
     return {{biasAdd->getOutput(0)}};
@@ -1305,7 +1291,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     nvinfer1::ITensor* inputA = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB = &convertToTensor(inputs.at(1), ctx);
 
-    broadcast_tensors(ctx, inputA, inputB);
+    broadcastTensors(ctx, inputA, inputB);
 
     constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input) {
         return (input.getDimensions().nbDims == 1) ? nvinfer1::MatrixOperation::kVECTOR
@@ -1427,7 +1413,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Mul)
         return scaleHelper(
             ctx, node, inputs, ScaleOp::kSCALE);
     }
-    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD, true);
+    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Neg)
@@ -1484,49 +1470,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Pow)
     return scaleHelper(
         ctx, node, inputs, ScaleOp::kPOWER);
     }
-    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW, true);
+    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(PRelu)
 {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
-    const auto& shape1 = inputs.at(0).shape();
-    nvinfer1::ITensor* slopes{};
-    if (inputs.at(1).is_tensor())
-    {
-        if (inputs.at(1).shape().nbDims < shape1.nbDims)
-        {
-            nvinfer1::IShuffleLayer* reshapeLayer = ctx->network()->addShuffle(inputs.at(1).tensor());
-            ASSERT(reshapeLayer, ErrorCode::kUNSUPPORTED_NODE);
-            reshapeLayer->setReshapeDimensions(expand_dims(inputs.at(1).shape(), shape1.nbDims));
-            slopes = reshapeLayer->getOutput(0);
-        }
-        else
-        {
-            slopes = &convertToTensor(inputs.at(1), ctx);
-        }
-        const auto& shape2 = slopes->getDimensions();
-        ASSERT(shape1.nbDims == shape2.nbDims, ErrorCode::kUNSUPPORTED_NODE);
-        for (int i = 0; i < shape1.nbDims; ++i)
-        {
-            ASSERT(shape1.d[i] == shape2.d[i] || shape2.d[i] == 1, ErrorCode::kUNSUPPORTED_NODE);
-        }
-    }
-    else
-    {
-        auto weights = inputs.at(1).weights();
-        if (inputs.at(1).shape().nbDims < shape1.nbDims)
-        {
-            weights.shape = expand_dims(weights.shape, shape1.nbDims);
-        }
-        auto constantLayer = ctx->network()->addConstant(weights.shape, weights);
-        ASSERT(constantLayer, ErrorCode::kUNSUPPORTED_NODE);
-        slopes = constantLayer->getOutput(0);
-    }
-    ASSERT(input.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* slopes = &convertToTensor(inputs.at(1),ctx);
+    ASSERT(input->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(slopes->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addParametricReLU(input, *slopes));
+    broadcastTensors(ctx, input, slopes);
+    RETURN_FIRST_OUTPUT(ctx->network()->addParametricReLU(*input, *slopes));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Reciprocal)
@@ -2063,7 +2018,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
 DEFINE_BUILTIN_OP_IMPORTER(Sub)
 {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUB, true);
+    return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUB);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Sum)
