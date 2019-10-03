@@ -253,20 +253,10 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
     }
     else
     {
-        // Otherwise, we need to squeeze the axis dimension - we achieve this by reshaping.
-        // The new dimensions are just the old dimensions with all values after axis shifted over.
-        nvinfer1::Dims reshapeDims = indices->getDimensions();
-        std::cout << "reshapeDims: " << reshapeDims << std::endl;
-        --reshapeDims.nbDims;
-        // The axis dimension should be reduced to size 1 after performing the reduction.
-        ASSERT(reshapeDims.d[axis] == 1, ErrorCode::kINVALID_VALUE);
-        for (int i = axis; i < reshapeDims.nbDims; ++i)
-        {
-            reshapeDims.d[i] = reshapeDims.d[i + 1];
-        }
-        nvinfer1::IShuffleLayer* squeezeLayer = ctx->network()->addShuffle(*indices);
-        squeezeLayer->setReshapeDimensions(reshapeDims);
-        return {{squeezeLayer->getOutput(0)}};
+        // Otherwise, we need to squeeze the axis dimension
+        std::vector<int> axes{axis};
+        indices = squeezeTensor(ctx, *indices, axes);
+        return {{indices}};
     }
 }
 

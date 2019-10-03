@@ -155,8 +155,8 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::DimsNCHW new_shape(dims.d[0], dims.d[1], dims.d[2], 1);
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
@@ -232,8 +232,8 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool)
     if (need_to_expand_dims)
     {
         // Un-expand spatial dims back to 1D
-        nvinfer1::Dims new_shape{3, {dims.d[0], dims.d[1], dims.d[2]}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     }
     return {{tensor_ptr}};
@@ -264,8 +264,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
@@ -304,8 +304,8 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
         auto scaledTensor = addScale(ctx, *tensor_ptr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {});
         // Un-expand spatial dims back to 1D
         tensor_ptr = &convertToTensor(scaledTensor.value().at(0), ctx);
-        nvinfer1::Dims new_shape{3, {dims.d[0], dims.d[1], dims.d[2]}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         return {{tensor_ptr}};
     }
@@ -378,8 +378,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
@@ -448,8 +448,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     if (need_to_expand_dims)
     {
         // Un-expand spatial dims back to 1D
-        nvinfer1::Dims new_shape{3, {dims.d[0], dims.d[1], dims.d[2]}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     }
     return {{tensor_ptr}};
@@ -473,8 +473,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     bool need_to_expand_dims = (dims.nbDims == 3);
     if (need_to_expand_dims)
     {
-        nvinfer1::Dims new_shape{4, {dims.d[0], dims.d[1], dims.d[2], 1}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
@@ -587,8 +587,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
 
     if (need_to_expand_dims)
     {
-        nvinfer1::Dims new_shape{3, {dims.d[0], dims.d[1], dims.d[2]}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     }
     return {{tensor_ptr}};
@@ -1320,8 +1320,8 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool)
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        nvinfer1::DimsNCHW new_shape(dims.d[0], dims.d[1], dims.d[2], 1);
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
@@ -1369,8 +1369,8 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool)
     if (need_to_expand_dims)
     {
         // Un-expand spatial dims back to 1D
-        nvinfer1::Dims new_shape{3, {dims.d[0], dims.d[1], dims.d[2]}};
-        tensor_ptr = reshape_tensor(ctx, *tensor_ptr, new_shape);
+        std::vector<int>axes {3};
+        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
     }
 
