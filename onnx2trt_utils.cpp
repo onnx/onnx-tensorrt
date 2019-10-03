@@ -601,6 +601,11 @@ nvinfer1::ITensor* flatten_tensor(IImporterContext* ctx, nvinfer1::ITensor& tens
     return reshape_tensor(ctx, tensor, new_shape);
 }
 
+bool isDynamic(nvinfer1::Dims const& dims)
+{
+    return std::any_of(dims.d, dims.d + dims.nbDims, [](int dim) {return dim == -1;});
+}
+
 nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
     const std::string& pluginVersion, const std::string& nodeName, const std::vector<nvinfer1::PluginField>& pluginFields)
 {

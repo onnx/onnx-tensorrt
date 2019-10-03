@@ -142,6 +142,9 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
 // Helper functino to flatten a tensor on a specified axis
 nvinfer1::ITensor* flatten_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
 
+// Helper function to check if any input dimensions are dynamic
+bool isDynamic (nvinfer1::Dims const& dims);
+
 // Helper function to import a plugin from TensorRT's plugin registry given the name and version.
 nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
     const std::string& pluginVersion, const std::string& nodeName, const std::vector<nvinfer1::PluginField>& pluginFields);
