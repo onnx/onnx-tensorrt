@@ -2,9 +2,9 @@
 
 TensorRT 6.0 supports operators up to Opset 10. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
-TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT32, INT8, INT64*
+TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, and INT8
 
-\*TensorRT will attempt to cast down INT64 to INT32 where possible. If not possible, TensorRT will throw an error.
+\*There is limited support for INT32 and INT64 types. TensorRT will attempt to cast down INT64 to INT32 where possible. If not possible, TensorRT will throw an error. See the [TensorRT layer support matrix](https://docs.nvidia.com/deeplearning/sdk/tensorrt-support-matrix/index.html#layers-precision-matrix) for more information on data type support.
 
 ## Operator Support Matrix
 
