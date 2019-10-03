@@ -514,9 +514,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     nvinfer1::PaddingMode paddingMode;
     bool exclude_padding = false;
     bool explicit_output_shape = false;
-    int nchan = dims.d[1];
 
-    ASSERT(kernel_weights.shape.d[0] == nchan, ErrorCode::kINVALID_NODE);
     int ngroup = attrs.get("group", 1);
     int noutput = kernel_weights.shape.d[1] * ngroup; // Note: Weights order is CKRS
 
