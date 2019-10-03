@@ -427,7 +427,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
             ErrorCode::kUNSUPPORTED_NODE);
     }
 
-    int nchan = dims.d[1];
     int noutput = kernel_weights.shape.d[0];
     nvinfer1::IConvolutionLayer* layer
         = ctx->network()->addConvolutionNd(*tensor_ptr, noutput, kernel_size, kernel_weights, bias_weights);
@@ -440,7 +439,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     layer->setDilationNd(dilations);
     OnnxAttrs attrs(node);
     int ngroup = attrs.get("group", 1);
-    ASSERT(kernel_weights.shape.d[1] * ngroup == nchan, ErrorCode::kINVALID_NODE);
     layer->setNbGroups(ngroup);
     tensor_ptr = layer->getOutput(0);
     dims = tensor_ptr->getDimensions();
@@ -2011,8 +2009,8 @@ DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu)
 
 DEFINE_BUILTIN_OP_IMPORTER(TopK)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    ASSERT(tensorPtr->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
     int axis = attrs.get("axis", -1);
     int k;
@@ -2029,12 +2027,37 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
         k = attrs.get<int>("k");
     }
 
-    int nbDims = tensor.getDimensions().nbDims;
+    int nbDims = tensorPtr->getDimensions().nbDims;
     TRT_CHECK(convert_axis(axis, nbDims));
     uint32_t axisMask = 1 << axis;
-    nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(tensor, nvinfer1::TopKOperation::kMAX, k, axisMask);
+
+    // TRT expects at least two dimensions when performing topK
+    bool needToExpandDims = (nbDims == 1);
+    if (needToExpandDims)
+    {
+        // Expand spatial dims from 1D to 2D
+        std::vector<int> axes{1};
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(*tensorPtr, nvinfer1::TopKOperation::kMAX, k, axisMask);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    return {{layer->getOutput(0), layer->getOutput(1)}};
+
+    auto* values = layer->getOutput(0);
+    auto* indices = layer->getOutput(1);
+
+    if (needToExpandDims)
+    {
+        // Un-expand spatial dims back to 1D
+        std::vector<int> axes{1};
+        values = squeezeTensor(ctx, *values, axes);
+        ASSERT(values, ErrorCode::kUNSUPPORTED_NODE);
+        indices = squeezeTensor(ctx, *indices, axes);
+        ASSERT(indices, ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    return {{values, indices}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Transpose)
