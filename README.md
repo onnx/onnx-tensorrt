@@ -101,7 +101,7 @@ Build the onnx_tensorrt Docker image using deb-based TensorRT by running:
 
     git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
     cd onnx-tensorrt
-    cp /path/to/nv-tensorrt-repo-ubuntu1x04-cudax.x-trt6.x.x.x-ga-yyyymmdd_1-1_amd64.deb .
+    cp /path/to/nv-tensorrt-repo-ubuntu1x04-cudax.x-trt6.x.x.x-ga-yyyymmdd_1-1_amd64.deb docker
     docker build -f docker/onnx-tensorrt-deb.Dockerfile --tag=onnx-tensorrt:6.0.6 .
 
 ### Tests
