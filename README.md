@@ -92,7 +92,7 @@ Build the onnx_tensorrt Docker image using tar-based TensorRT by running:
 
     git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
     cd onnx-tensorrt
-    cp /path/to/TensorRT-6.0.*.tar.gz /docker
+    cp /path/to/TensorRT-6.0.*.tar.gz docker
     docker build -f docker/onnx-tensorrt-tar.Dockerfile --tag=onnx-tensorrt:6.0.6 .
 
 #### Deb-Based TensorRT
