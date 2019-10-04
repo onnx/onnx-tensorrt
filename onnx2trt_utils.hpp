@@ -64,7 +64,7 @@ namespace onnx2trt
 template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
 {
-    ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{0, {}});
+    ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{1,{1}});
     static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
     return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
 }

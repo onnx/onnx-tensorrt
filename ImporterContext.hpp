@@ -23,6 +23,7 @@
 #pragma once
 
 #include "onnx2trt.hpp"
+#include "onnx2trt_utils.hpp"
 
 #include <list>
 #include <unordered_map>
@@ -52,7 +53,15 @@ public:
                                           nvinfer1::Dims shape) override
   {
     ShapedWeights weights(type, nullptr, shape);
-    _temp_bufs.push_back(std::vector<uint8_t>(weights.size_bytes()));
+    // Need special logic for handling scalars.
+    if (shape.nbDims == 0)
+    {
+        _temp_bufs.push_back(std::vector<uint8_t>(get_dtype_size(type)));
+    }
+    else
+    {
+        _temp_bufs.push_back(std::vector<uint8_t>(weights.size_bytes()));
+    }
     weights.values = _temp_bufs.back().data();
     return weights;
   }
