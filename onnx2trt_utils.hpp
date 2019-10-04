@@ -243,4 +243,7 @@ nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, nvinfer1::ITensor& ten
 void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW beg_padding,
   const nvinfer1::DimsHW end_padding, const nvinfer1::Dims padded_shape, const float pad_value);
 
+// Helper function to convert weights to a vector.
+Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector);
+
 } // namespace onnx2trt

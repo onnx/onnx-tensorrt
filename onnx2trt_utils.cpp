@@ -263,32 +263,27 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
 void broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, const int nbDims)
 {
 
-    if (t1->getDimensions().nbDims >= nbDims)
+    nvinfer1::Dims inputDims = t1->getDimensions();
+    int nbInputDims = inputDims.nbDims;
+    if (nbInputDims >= nbDims)
     {
         return;
     }
 
-    // Perform broadcast by concatenating the number of leading dimensions to the shape of the smaller tensor
-    int numLeadingDims =  nbDims - t1->getDimensions().nbDims;
-    nvinfer1::Dims leadingDims = makeDims(numLeadingDims, 1);
-    auto* leadingShape = &makeShapeTensor(ctx, leadingDims);
+    int numLeadingDims =  nbDims - nbInputDims;
 
-    if (t1->getDimensions().nbDims > 0)
+    // Perform broadcasting by unsqueezing input tensor on axes [0...numLeadingDims - 1]
+    if (nbInputDims > 0)
     {
-        auto* shape = ctx->network()->addShape(*t1)->getOutput(0);
-        std::vector<nvinfer1::ITensor*> tensors{leadingShape, shape};
-
-        auto* concatLayer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
-        auto* reshapeLayer = ctx->network()->addShuffle(*t1);
-
-        reshapeLayer->setInput(1, *concatLayer->getOutput(0));
-        t1 = reshapeLayer->getOutput(0);
+        std::vector<int> axes(numLeadingDims);
+        std::iota(axes.begin(), axes.end(), 0);
+        t1 = unsqueezeTensor(ctx, *t1, axes);
     }
-    // Handle scalar inputs by reshaping to leadingDims
+    // Handle scalar inputs by reshaping to shape of rank numLeadingDims.
     else
     {
         auto* reshapeLayer = ctx->network()->addShuffle(*t1);
-        reshapeLayer->setReshapeDimensions(leadingDims);
+        reshapeLayer->setReshapeDimensions(makeDims(numLeadingDims, 1));
         t1 = reshapeLayer->getOutput(0);
     }
 }
@@ -1246,6 +1241,25 @@ void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW 
       }
     }
   }
+}
+
+Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector)
+{
+    ASSERT(weights.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT((weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32) || (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64),
+        ErrorCode::kINVALID_NODE);
+    weightVector->resize(weights.weights().count());
+    if (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
+    {
+        auto array_start = static_cast<int64_t*>(weights.weights().values);
+        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+    }
+    else
+    {
+        auto array_start = static_cast<int32_t*>(weights.weights().values);
+        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+    }
+    return Status(ErrorCode::kSUCCESS);
 }
 
 } // namespace onnx2trt

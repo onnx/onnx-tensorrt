@@ -1600,10 +1600,24 @@ DEFINE_BUILTIN_OP_IMPORTER(Relu)
 DEFINE_BUILTIN_OP_IMPORTER(Reshape)
 {
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::ITensor& newShape = convertToTensor(inputs.at(1), ctx);
+    auto secondInput = inputs.at(1);
 
     nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(input);
-    layer->setInput(1, newShape);
+    if (secondInput.is_tensor())
+    {
+        nvinfer1::ITensor& newShape = convertToTensor(secondInput, ctx);
+        layer->setInput(1, newShape);
+    }
+    else
+    {
+        ASSERT(secondInput.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        std::vector<int64_t> weights;
+        weightsToVector(secondInput, &weights);
+        nvinfer1::Dims d{static_cast<int>(weights.size()), {}, {}};
+        std::copy(weights.begin(), weights.end(), d.d);
+        layer->setReshapeDimensions(d);
+    }
+
 
     RETURN_FIRST_OUTPUT(layer);
 }
