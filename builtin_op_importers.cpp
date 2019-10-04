@@ -546,6 +546,9 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     // If output shape is given, calculate the input or output padding values
     if (explicit_output_shape)
     {
+        nvinfer1::Dims spatialDims = makeDims(nbSpatialDims, 1);
+        std::copy(&dims.d[2], &dims.d[2]+nbSpatialDims, &spatialDims.d[0]);
+        ASSERT(!isDynamic(spatialDims) && "Cannot calculate expected output padding for dynamic shapes!", ErrorCode::kUNSUPPORTED_NODE);
         auto_gen_input_output_padding(dims, output_shape, kernel_size, strides, dilations, nbSpatialDims, beg_padding,
             end_padding, output_padding, paddingMode);
         // TRT only support 2D padding
