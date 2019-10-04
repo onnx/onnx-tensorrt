@@ -615,7 +615,7 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
     return {{combined}};
 }
 
-nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis)
+nvinfer1::ITensor* flattenTensorDynamic(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis)
 {
     nvinfer1::Dims dims = tensor.getDimensions();
     auto* shape = ctx->network()->addShape(tensor)->getOutput(0);
@@ -623,34 +623,39 @@ nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
     // Gather "start indicies" in a loop and multiply them together to get the "start shape"
     // Do the same for the "axis indices" and then concat them together.
 
-    std::vector<int> startIndex {0};
-    nvinfer1::Dims gatherIndicesShape{1, static_cast<int>(startIndex.size())};
+    nvinfer1::ITensor* startTensor;
+    nvinfer1::ITensor* axisTensor;
 
-    auto* startLayer = ctx->network()->addGather(*shape, *addConstant(ctx, startIndex, ::ONNX_NAMESPACE::TensorProto::INT32, gatherIndicesShape)->getOutput(0), 0);
-    auto* startTensor = startLayer->getOutput(0);
+    nvinfer1::Dims singleDim = makeDims(1, 1);
 
-    // Handle flatten on axis 0 case by incrementing axis.
+    // If axis is 0, startTensor is a single 1.
     if (axis == 0)
     {
-        axis++;
+        startTensor = &makeShapeTensor(ctx, singleDim);
+    }
+    else
+    {      
+        std::vector<int> startIndex {0};
+        auto* startLayer = ctx->network()->addGather(*shape, *addConstant(ctx, startIndex, ::ONNX_NAMESPACE::TensorProto::INT32, singleDim)->getOutput(0), 0);
+        startTensor = startLayer->getOutput(0);
+
+        for (int i = 1; i < axis; i++)
+        {
+          startIndex = {i};
+          auto* beforeLayer = ctx->network()->addGather(*shape, *addConstant(ctx, startIndex, ::ONNX_NAMESPACE::TensorProto::INT32, singleDim)->getOutput(0), 0);
+          auto* before = beforeLayer->getOutput(0);
+          startTensor = ctx->network()->addElementWise(*startTensor, *before, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
+        }
     }
 
     std::vector<int> axisIndex {axis};
-    auto* axisLayer = ctx->network()->addGather(*shape, *addConstant(ctx, axisIndex, ::ONNX_NAMESPACE::TensorProto::INT32, gatherIndicesShape)->getOutput(0), 0);
-    auto* axisTensor = axisLayer->getOutput(0);
-
-    for (int i = 1; i < axis; i++)
-    {
-        startIndex = {i};
-        auto* beforeLayer = ctx->network()->addGather(*shape, *addConstant(ctx, startIndex, ::ONNX_NAMESPACE::TensorProto::INT32, gatherIndicesShape)->getOutput(0), 0);
-        auto* before = beforeLayer->getOutput(0);
-        startTensor = ctx->network()->addElementWise(*startTensor, *before, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
-    }
+    auto* axisLayer = ctx->network()->addGather(*shape, *addConstant(ctx, axisIndex, ::ONNX_NAMESPACE::TensorProto::INT32, singleDim)->getOutput(0), 0);
+    axisTensor = axisLayer->getOutput(0);
 
     for (int i = axis + 1; i < dims.nbDims; i++)
     {
         axisIndex = {i};
-        auto* afterLayer = ctx->network()->addGather(*shape, *addConstant(ctx, axisIndex, ::ONNX_NAMESPACE::TensorProto::INT32, gatherIndicesShape)->getOutput(0), 0);
+        auto* afterLayer = ctx->network()->addGather(*shape, *addConstant(ctx, axisIndex, ::ONNX_NAMESPACE::TensorProto::INT32, singleDim)->getOutput(0), 0);
         auto* after = afterLayer->getOutput(0);
         axisTensor = ctx->network()->addElementWise(*axisTensor, *after, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
     }
@@ -662,6 +667,34 @@ nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
     reshapeLayer->setInput(1, *concatLayer->getOutput(0));
 
     return reshapeLayer->getOutput(0);
+}
+
+nvinfer1::ITensor* flattenTensorStatic(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis)
+{
+    nvinfer1::Dims dims = tensor.getDimensions();
+    nvinfer1::Dims flattenDims = makeDims(2, 1);
+
+    if (axis != 0)
+    {
+        flattenDims.d[0] = std::accumulate(dims.d, dims.d + axis, 1, std::multiplies<int>());
+    }
+
+    flattenDims.d[1] = std::accumulate(dims.d + axis, dims.d + dims.nbDims, 1, std::multiplies<int>());
+
+    auto* flattenLayer = ctx->network()->addShuffle(tensor);
+    flattenLayer->setReshapeDimensions(flattenDims);
+    return flattenLayer->getOutput(0);
+}
+
+
+nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis)
+{
+    if (isDynamic(tensor.getDimensions()))
+    {
+        return flattenTensorDynamic(ctx, tensor, axis);
+    }
+
+    return flattenTensorStatic(ctx, tensor, axis);
 }
 
 bool isDynamic(nvinfer1::Dims const& dims)
