@@ -722,6 +722,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     // Input tensor to gather on must be at least two dimensions in TRT 6.0
     bool expandInput = nbDims == 1;
 
+    ASSERT(!(data->getType() == nvinfer1::DataType::kINT32 && nbDims == 1) && "Cannot perform gather on a shape tensor!",
+            ErrorCode::kUNSUPPORTED_NODE);
+
     if (expandIndices)
     {
         nvinfer1::Dims oneD {1, {1}};
