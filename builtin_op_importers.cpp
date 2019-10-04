@@ -1492,7 +1492,7 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
     nvinfer1::ReduceOperation operation)
 {
     nvinfer1::ITensor& tensor = convertToTensor(input, ctx);
-    // TensorRT 6.0 limitation
+    // TensorRT 6.0 does not accept INT32 inputs into the reduce layer.
     ASSERT(tensor.getType() != nvinfer1::DataType::kINT32 && "Reduce layer does not accept INT32 inputs.", ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node);
     bool keepdims = attrs.get("keepdims", 1);
@@ -1504,9 +1504,11 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
     }
     else
     {
-        axes.resize(ndim);
-        std::iota(axes.begin(), axes.end(), 0);
+        axes = {0};
     }
+
+    ASSERT(!(!keepdims && static_cast<int>(axes.size()) == ndim) && "Reduce layer cannot perform a full-reduce without keep dimensions set.",
+            ErrorCode::kUNSUPPORTED_NODE);
 
     uint32_t axisMask = 0;
     for (int axis : axes)
