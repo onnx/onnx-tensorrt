@@ -2019,11 +2019,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
     int ndim_in = old_shape.nbDims;
     OnnxAttrs attrs(node);
     auto axes = attrs.get<std::vector<int>>("axes");
-    std::set<int> axes_set(axes.begin(), axes.end());
-    int ndim_out = ndim_in + axes_set.size();
-    ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims new_shape;
-    new_shape.nbDims = ndim_out;
 
     // If the input was already a tensor, then we're dealing with a TRT shape,
     // so subtract 1 from the axes. Otherwise, this is an ONNX shape.
@@ -2035,6 +2030,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
             --axis;
         }
     }
+
+    std::set<int> axes_set(axes.begin(), axes.end());
+    int ndim_out = ndim_in + axes_set.size();
+    ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::Dims new_shape;
+    new_shape.nbDims = ndim_out;
 
     for (int i = 0, j = 0; j < new_shape.nbDims; ++j )
     {
