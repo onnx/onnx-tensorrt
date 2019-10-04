@@ -1504,7 +1504,8 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
     }
     else
     {
-        axes = {0};
+        axes.resize(ndim);
+        std::iota(axes.begin(), axes.end(), 0);
     }
 
     ASSERT(!(!keepdims && static_cast<int>(axes.size()) == ndim) && "Reduce layer cannot perform a full-reduce without keep dimensions set.",
