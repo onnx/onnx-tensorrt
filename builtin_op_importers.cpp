@@ -1817,32 +1817,30 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 DEFINE_BUILTIN_OP_IMPORTER(Softmax)
 {
     OnnxAttrs attrs(node);
-    int axis = attrs.get("axis", 1);
-    int nbDims = inputs.at(0).shape().nbDims;
-    TRT_CHECK(convert_axis(axis, nbDims));
     nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims shape = tensor_ptr->getDimensions();
+    auto* shape = ctx->network()->addShape(*tensor_ptr)->getOutput(0);
+    int axis = attrs.get("axis", 1);
+    nvinfer1::Dims dims = tensor_ptr->getDimensions();
+    int nbDims = dims.nbDims;
+    TRT_CHECK(convert_axis(axis, nbDims));
 
-    // Work around dynamic input shapes like [-1, -1, X] which cannot be reshape to 2D
-    if (shape.nbDims == axis + 1)
-    {
-        auto* layer = ctx->network()->addSoftMax(*tensor_ptr);
-        ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-        // Set softmax bitmask to the last dimension
-        layer->setAxes(1 << axis);
-        tensor_ptr = layer->getOutput(0);
-        return {{tensor_ptr}};
-    }
-    // Reshape the tensor to 2D and do softmax on the second dimension
-    ASSERT(tensor_ptr = convert_tensor_to_2d(ctx, *tensor_ptr, axis), ErrorCode::kUNSUPPORTED_NODE);
+    // Flatten to 2D
+    tensor_ptr = flattenTensor(ctx, *tensor_ptr, axis);
     auto* layer = ctx->network()->addSoftMax(*tensor_ptr);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    // Set softmax bitmask to the second dimension
     layer->setAxes(1 << 1);
     tensor_ptr = layer->getOutput(0);
-    // Reshape the tensor back to original shape
-    ASSERT(tensor_ptr = reshape_tensor(ctx, *tensor_ptr, shape), ErrorCode::kUNSUPPORTED_NODE);
-    return {{tensor_ptr}};
+
+    // Reshape back to original shape
+    auto* reshapeLayer = ctx->network()->addShuffle(*tensor_ptr);
+    if (isDynamic(dims))
+    {
+        reshapeLayer->setInput(1, *shape);
+    }
+    else
+    {
+        reshapeLayer->setReshapeDimensions(dims);
+    }
+    return {{reshapeLayer->getOutput(0)}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softsign)
