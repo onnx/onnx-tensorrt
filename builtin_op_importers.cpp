@@ -1619,23 +1619,15 @@ DEFINE_BUILTIN_OP_IMPORTER(ScaledTanh)
 DEFINE_BUILTIN_OP_IMPORTER(Selu)
 {
   OnnxAttrs attrs(node);
-  float alpha = attrs.get("alpha", 1.6732f);
-  float beta = attrs.get("gamma", 1.0507f);
+  float alpha = attrs.get("alpha", 1.67326319217681884765625f);
+  float beta = attrs.get("gamma", 1.05070102214813232421875f);
   return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kSELU, &alpha, &beta);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Shape)
 {
-    auto shape = inputs.at(0).shape();
-    // Avoid TRT err: Unused Input
-    ctx->network()->addIdentity(inputs.at(0).tensor());
-    nvinfer1::Dims weight_dims;
-    weight_dims.nbDims = 1;
-    weight_dims.d[0] = shape.nbDims;
-    // Note: Should technically be int64, but int32 allows for TRT compatibility
-    auto weights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, weight_dims);
-    std::copy(&shape.d[0], &shape.d[0] + shape.nbDims, static_cast<int32_t*>(const_cast<void*>(weights.values)));
-    return {{weights}};
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    RETURN_FIRST_OUTPUT(ctx->network()->addShape(input));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Sigmoid)

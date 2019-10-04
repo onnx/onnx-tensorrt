@@ -30,6 +30,7 @@
 #include <onnx/onnxifi.h>
 #include <NvInfer.h>
 #include <cstring>
+#include <numeric>
 
 #include <iostream>
 using std::cerr;
