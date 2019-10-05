@@ -1606,7 +1606,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
     auto secondInput = inputs.at(1);
 
     nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(input);
-    if (secondInput.is_tensor())
+    if (secondInput.is_tensor() || (inputs.at(0).is_weights() && inputs.at(1).is_weights()))
     {
         nvinfer1::ITensor& newShape = convertToTensor(secondInput, ctx);
         layer->setInput(1, newShape);
