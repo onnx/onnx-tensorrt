@@ -741,6 +741,23 @@ bool is_transpose_required(nvinfer1::Dims const& shape, nvinfer1::Permutation co
     return false;
 }
 
+nvinfer1::ITensor* getAxisLength(IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape)
+{
+    // fast path for static dims
+    auto dims = inpTensor->getDimensions();
+    int d = dims.d[axis];
+    if (d >= 0)
+    {
+        return addConstantScalar(ctx, d, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape)->getOutput(0);
+    }
+    else
+    {
+        auto& inpShape = *ctx->network()->addShape(*inpTensor)->getOutput(0);
+        auto& axisValue = *addConstantScalar(ctx, axis, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape)->getOutput(0);
+        return ctx->network()->addGather(inpShape, axisValue, 0)->getOutput(0);
+    }
+}
+
 int get_conv_output_size(int input_size, int filter_size,
                          int stride, int dilation_rate,
                          int total_padding) 

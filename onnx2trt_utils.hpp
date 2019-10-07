@@ -63,9 +63,9 @@ namespace onnx2trt
 
 // Adds a constant scalar to the network in the form of a constant layer.
 template <typename ScalarType>
-nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type)
+nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{1,{1}})
 {
-    ShapedWeights scalarWeights = ctx->createTempWeights(type, nvinfer1::Dims{1,{1}});
+    ShapedWeights scalarWeights = ctx->createTempWeights(type, shape);
     static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
     return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
 }
@@ -175,6 +175,9 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
 
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 inline bool is_transpose_required(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
+
+// Helper function to get the length of the specified axis
+nvinfer1::ITensor* getAxisLength(IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape=nvinfer1::Dims{0});
 
 // Helper function to calculate the output size of a convolution operation
 int get_conv_output_size(int input_size, int filter_size,

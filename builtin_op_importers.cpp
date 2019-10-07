@@ -1678,152 +1678,195 @@ DEFINE_BUILTIN_OP_IMPORTER(Size)
     return {{weights}};
 }
 
-// TRT-7031: add tests
+
+// Note that both of these helpers, i.e. staticInputSliceHelper and dynamicInputSliceHelper, assume that the Slice parameters are known at parse-time.
+NodeImportResult staticInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::unordered_map<int64_t, std::tuple<int64_t, int64_t, int64_t>>& sliceBounds)
+{
+    nvinfer1::Dims shape = tensor.getDimensions();
+    const int rank = shape.nbDims;
+    nvinfer1::Dims starts{rank};
+    nvinfer1::Dims sizes{rank};
+    nvinfer1::Dims strides{rank};
+
+    for (int axis = 0; axis < rank; ++axis)
+    {
+        static const auto handleNegativeIndex = [&ctx, &axis, &shape](int64_t index) -> int64_t
+        {
+            return (index < 0) ? (shape.d[axis] + index) : index;
+        };
+
+        if (sliceBounds.count(axis))
+        {
+            int64_t start, end, stride;
+            std::tie(start, end, stride) = sliceBounds.at(axis);
+
+            starts.d[axis] = handleNegativeIndex(start);
+            strides.d[axis] = handleNegativeIndex(stride);
+            sizes.d[axis] = (std::min(handleNegativeIndex(end), static_cast<int64_t>(shape.d[axis])) - starts.d[axis]) / strides.d[axis];
+        }
+        else
+        {
+            starts.d[axis] = 0;
+            sizes.d[axis] = shape.d[axis];
+            strides.d[axis] = 1;
+        }
+    }
+
+    nvinfer1::ISliceLayer* slice = ctx->network()->addSlice(tensor, starts, sizes, strides);
+    RETURN_FIRST_OUTPUT(slice);
+}
+
+NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::unordered_map<int64_t, std::tuple<int64_t, int64_t, int64_t>>& sliceBounds)
+{
+    const int rank = tensor.getDimensions().nbDims;
+    std::vector<nvinfer1::ITensor*> startIndices{};
+    std::vector<nvinfer1::ITensor*> sizeIndices{};
+    std::vector<nvinfer1::ITensor*> strideIndices{};
+    nvinfer1::Dims indexShape{1, 1};
+
+    for (int i = 0; i < rank; ++i)
+    {
+        static const auto handleNegativeIndex = [&ctx, &indexShape, &tensor, &i](int64_t index) -> nvinfer1::ITensor*
+        {
+            if (index > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+            {
+                std::cout << "WARNING: Slice index is out of bounds of INT32, clamping to INT32_MAX" << std::endl;
+                index = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+            }
+
+            nvinfer1::ITensor* indexTensor{addConstantScalar(ctx, index, ::ONNX_NAMESPACE::TensorProto::INT32, indexShape)->getOutput(0)};
+            nvinfer1::ITensor* dimLength{getAxisLength(ctx, &tensor, i, indexShape)};
+            if (index < 0)
+            {
+                indexTensor = ctx->network()->addElementWise(*dimLength, *indexTensor, nvinfer1::ElementWiseOperation::kSUM)->getOutput(0);
+            }
+            return indexTensor;
+        };
+
+        nvinfer1::ITensor* endIndex;
+        if (sliceBounds.count(i))
+        {
+            int64_t start, end, stride;
+            std::tie(start, end, stride) = sliceBounds.at(i);
+
+            startIndices.emplace_back(handleNegativeIndex(start));
+            endIndex = handleNegativeIndex(end);
+            strideIndices.emplace_back(handleNegativeIndex(1)); // This should never be negative anyway.
+        }
+        else
+        {
+            // Default values take the entire length of the axis.
+            startIndices.emplace_back(handleNegativeIndex(0));
+            endIndex = getAxisLength(ctx, &tensor, i, indexShape);
+            strideIndices.emplace_back(handleNegativeIndex(1));
+        }
+        // size[i] = min(end[i], getAxisLength(ctx, &tensor, i, indexShape)) - start[i]) / stride[i]
+        sizeIndices.emplace_back(
+            ctx->network()->addElementWise(
+                *ctx->network()->addElementWise(
+                    *ctx->network()->addElementWise(
+                        *endIndex,
+                        *getAxisLength(ctx, &tensor, i, indexShape),
+                        nvinfer1::ElementWiseOperation::kMIN
+                    )->getOutput(0),
+                    *startIndices.back(),
+                    nvinfer1::ElementWiseOperation::kSUB
+                )->getOutput(0),
+                *strideIndices.back(),
+                nvinfer1::ElementWiseOperation::kDIV
+            )->getOutput(0)
+        );
+    }
+
+    nvinfer1::ITensor* startsTensor = ctx->network()->addConcatenation(startIndices.data(), startIndices.size())->getOutput(0);
+    nvinfer1::ITensor* sizeTensor = ctx->network()->addConcatenation(sizeIndices.data(), sizeIndices.size())->getOutput(0);
+    nvinfer1::ITensor* stridesTensor = ctx->network()->addConcatenation(strideIndices.data(), strideIndices.size())->getOutput(0);
+
+    nvinfer1::ISliceLayer* slice = ctx->network()->addSlice(tensor, nvinfer1::Dims{rank}, nvinfer1::Dims{rank}, nvinfer1::Dims{rank});
+    slice->setInput(1, *startsTensor);
+    slice->setInput(2, *sizeTensor);
+    slice->setInput(3, *stridesTensor);
+    RETURN_FIRST_OUTPUT(slice);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Slice)
 {
     // If opset version >= 10 slice paramerters are weights instead of attributes
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    std::vector<int32_t> starts;
-    std::vector<int32_t> ends;
-    std::vector<int32_t> axes;
-    std::vector<int32_t> steps;
+    nvinfer1::Dims dims = tensor.getDimensions();
+    std::vector<int64_t> starts;
+    std::vector<int64_t> ends;
+    std::vector<int64_t> axes;
+    std::vector<int64_t> steps;
     if (ctx->getOpsetVersion() >= 10)
     {
-        ASSERT(node.input().size() >= 3 && node.input().size() <= 5, ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        int nbInputs = node.input().size();
+        ASSERT(nbInputs >= 3 && nbInputs <= 5, ErrorCode::kUNSUPPORTED_NODE);
 
-        slice_array(inputs.at(1), starts);
-        slice_array(inputs.at(2), ends);
-        if (node.input().size() == 4)
-        {
-            auto const& input_name = node.input(3);
-            ASSERT(inputs.at(3).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        weightsToVector(inputs.at(1), &starts);
+        weightsToVector(inputs.at(2), &ends);
 
-            ASSERT(input_name == "axes" ||  input_name == "steps", ErrorCode::kUNSUPPORTED_NODE);
-            if (input_name == "axes")
-            {
-                slice_array(inputs.at(3), axes);
-            }
-            else if (input_name == "steps")
-            {
-                slice_array(inputs.at(3), steps);
-            }
-        }
-        else if (node.input().size() == 5)
+        if (inputs.size() > 3 && inputs.at(3))
         {
-            ASSERT(inputs.at(3).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-            ASSERT(inputs.at(4).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-            slice_array(inputs.at(3), axes);
-            slice_array(inputs.at(4), steps);
+            weightsToVector(inputs.at(3), &axes);
         }
-        if (axes.size() == 0)
+        else
         {
-            axes = std::vector<int32_t>(starts.size(), 0);
-            for (size_t i = 0; i < axes.size(); i++)
-            {
-                axes[i] = i;
-            }
+            axes.resize(starts.size());
+            std::iota(axes.begin(), axes.end(), 0);
         }
-        if (steps.size() == 0)
+
+        if (inputs.size() > 4 && inputs.at(4))
         {
-            steps = std::vector<int32_t>(starts.size(), 1);
+            weightsToVector(inputs.at(4), &steps);
+        }
+        else
+        {
+            steps = std::vector<int64_t>(starts.size(), 1);
         }
     }
     else
     {
         OnnxAttrs attrs(node);
-        std::vector<int64_t> start_attribute_vector = attrs.get<std::vector<int64_t>>("starts");
-        std::vector<int32_t> start_attr(start_attribute_vector.begin(), start_attribute_vector.end());
-        starts = start_attr;
-        std::vector<int64_t> end_attribute_vector = attrs.get<std::vector<int64_t>>("ends");
-        std::vector<int32_t> end_attr(end_attribute_vector.begin(), end_attribute_vector.end());
-        ends = end_attr;
-        std::vector<int64_t> axis_attribute_vector = attrs.get<std::vector<int64_t>>("axes");
-        std::vector<int32_t> axis_attr(axis_attribute_vector.begin(), axis_attribute_vector.end());
-        axes = axis_attr;
-        steps = std::vector<int32_t>(starts.size(), 1);
+        starts = attrs.get<std::vector<int64_t>>("starts");
+        ends = attrs.get<std::vector<int64_t>>("ends");
+
+        std::vector<int64_t> defaultAxes(starts.size());
+        std::iota(defaultAxes.begin(), defaultAxes.end(), 0);
+        axes = attrs.get<std::vector<int64_t>>("axes", defaultAxes);
+
+        steps = std::vector<int64_t>(starts.size(), 1);
     }
+    ASSERT(!starts.empty(), ErrorCode::kINVALID_NODE);
+    ASSERT(!ends.empty(), ErrorCode::kINVALID_NODE);
 
-    const nvinfer1::Dims dims = tensor.getDimensions();
-    const int nbDims = dims.nbDims;
-    auto makeDims = [nbDims](int initVal) -> nvinfer1::Dims {
-        nvinfer1::Dims result{nbDims, {}, {}};
-        std::fill_n(&result.d[0], nbDims, initVal);
-        return result;
-    };
-    nvinfer1::Dims sliceStart = makeDims(0);
-    nvinfer1::Dims sliceEnd = dims;
-    nvinfer1::Dims sliceSize = dims;
-    nvinfer1::Dims sliceStride = makeDims(1); // ONNX has support for strides before opset 10
+    std::unordered_map<int64_t, std::tuple<int64_t, int64_t, int64_t>> sliceBounds{}; // Maps axis to [start, end, step]
 
-    for (size_t i = 0; i < axes.size(); i++)
+    for (size_t i = 0; i < axes.size(); ++i)
     {
-        int axis = axes[i];
-
-        // Negative axis conversion
-        TRT_CHECK(convert_axis(axis, nbDims));
-
-        // Special pass through for no-ops (slice across the whole dimension, [:])
-        if (starts[i] == 0 && ends[i] >= dims.d[axis] && steps[i] == 1)
+        // Do a sanity check here that the combination of starts, ends, and steps does not cause a size 0 for non-dynamic dimensions.
+        auto axis = axes.at(i);
+        static const auto handleNegativeIndex = [&axis, &dims](int64_t index) -> int64_t
         {
-            continue;
+            return (index < 0) ? (dims.d[axis] + index) : index;
+        };
+
+        if (dims.d[axis] != -1)
+        {
+            int startsVal = static_cast<int>(handleNegativeIndex(starts.at(i)));
+            int endsVal = static_cast<int>(handleNegativeIndex(ends.at(i)));
+            ASSERT((std::min(dims.d[axis], endsVal) - startsVal) / steps.at(i) != 0
+                && "TensorRT does not support size 0 slices!", ErrorCode::kUNSUPPORTED_NODE);
         }
 
-        // Check if slice is valid
-        ASSERT(steps[i] != 0, ErrorCode::kINVALID_VALUE);
-        sliceStride.d[axis] = steps[i];
-
-        int upperlimit = dims.d[axis];
-        int lowerlimit = 0;
-        if (steps[i] < 0)
-        {
-            upperlimit = dims.d[axis] - 1;
-            lowerlimit = -1;
-        }
-
-        // Calculate start index
-        // Support for negative indexing
-        if (starts[i] < 0)
-        {
-            sliceStart.d[axis] = std::max(dims.d[axis] + static_cast<int>(starts[i]), lowerlimit);
-        }
-        else
-        {
-            sliceStart.d[axis] = std::min(static_cast<int>(starts[i]), upperlimit);
-        }
-
-        // Calculate end index
-        // Support for negative indexing
-        if (ends[i] < 0)
-        {
-            // Differs from start because starts is inclusive and ends is exclusive
-            sliceEnd.d[axis] = std::max(dims.d[axis] + static_cast<int>(ends[i]), lowerlimit);
-        }
-        else
-        {
-            sliceEnd.d[axis] = std::min(static_cast<int>(ends[i]), upperlimit);
-        }
-
-        sliceSize.d[axis] = std::max(
-            static_cast<int>(std::ceil(static_cast<float>(sliceEnd.d[axis] - sliceStart.d[axis]) / steps[i])), 0);
+        sliceBounds[axes.at(i)] = std::make_tuple(starts.at(i), ends.at(i), steps.at(i));
     }
 
-    // If entire slice op was a no-op, simply return the input tensor
-    if (sliceSize == makeDims(0))
+    if (isDynamic(tensor.getDimensions()))
     {
-        return {{&tensor}};
+        return dynamicInputSliceHelper(ctx, tensor, sliceBounds);
     }
-    // TensorRT cannot handle size 0 slices
-    else
-    {
-        for (int i = 0; i < nbDims; i++)
-        {
-            ASSERT(sliceSize.d[i] != 0, ErrorCode::kINVALID_VALUE);
-        }
-    }
-
-    RETURN_FIRST_OUTPUT(ctx->network()->addSlice(tensor, sliceStart, sliceSize, sliceStride));
+    return staticInputSliceHelper(ctx, tensor, sliceBounds);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Softmax)
