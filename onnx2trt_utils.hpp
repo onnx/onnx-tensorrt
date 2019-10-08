@@ -61,6 +61,9 @@ std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm
 namespace onnx2trt
 {
 
+// Helper function to calculate the volume of a Dims object
+int64_t volume(const nvinfer1::Dims& dims);
+
 // Adds a constant scalar to the network in the form of a constant layer.
 template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{1,{1}})

@@ -1260,6 +1260,12 @@ void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW 
   }
 }
 
+int64_t volume(const nvinfer1::Dims& dims)
+{
+    std::for_each(dims.d, dims.d + dims.nbDims, [](int d){ assert(d >= 0 && "volume makes no sense for dynamic shapes");});
+    return std::accumulate(dims.d, dims.d + dims.nbDims, 1, std::multiplies<int64_t>{});
+}
+
 Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector)
 {
     ASSERT(weights.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
