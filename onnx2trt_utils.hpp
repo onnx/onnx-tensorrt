@@ -77,8 +77,6 @@ nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType sc
 template <typename ScalarType>
 inline nvinfer1::IConstantLayer* addConstant(IImporterContext* ctx, const std::vector<ScalarType>& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
 {
-    assert(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided");
-    assert(sizeof(ScalarType) == get_dtype_size(type) && "ONNX dtype does not have the same size as the value type");
     ShapedWeights weights = ctx->createTempWeights(type, shape);
     std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
     return ctx->network()->addConstant(weights.shape, weights);
