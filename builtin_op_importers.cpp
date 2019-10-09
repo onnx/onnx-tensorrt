@@ -722,19 +722,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     // Input tensor to gather on must be at least two dimensions in TRT 6.0
     bool expandInput = nbDims == 1;
 
-    ASSERT(!(data->getType() == nvinfer1::DataType::kINT32 && nbDims == 1) && "Cannot perform gather on a shape tensor!",
-            ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT(!(data->getType() == nvinfer1::DataType::kINT32 && nbDims == 1 && inputs.at(0).is_tensor())
+            && "Cannot perform gather on a shape tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
     if (expandIndices)
     {
-        nvinfer1::Dims oneD {1, {1}};
-        indices = reshape_tensor(ctx, *indices, oneD);
+        std::vector<int> unsqueezeAxis {0};
+        indices = unsqueezeTensor(ctx, *indices, unsqueezeAxis);
     }
 
     if (expandInput)
     {
-        nvinfer1::Dims twoD {2, {1, dataDims.d[0]}};
-        data = reshape_tensor(ctx, *data, twoD);
+        std::vector<int> unsqueezeAxis {0};
+        data = unsqueezeTensor(ctx, *data, unsqueezeAxis);
         // update nbDims and axis since we expanded the input to 2D.
         nbDims = data->getDimensions().nbDims;
         axis = axis + 1;
@@ -749,21 +749,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     // Extra dimension would have been inserted on the axis we are gathering on. Remove it here.
     if (expandIndices)
     {
-        nvinfer1::Dims oldDims = layerOutput->getDimensions();
-        nvinfer1::Dims newDims {nbDims-1, {1}};
-        for (int i = 0; i < newDims.nbDims; i++)
-        {
-            if (i >= axis)
-            {
-                newDims.d[i] = oldDims.d[i+1];
-            }
-            else
-            {
-                newDims.d[i] = oldDims.d[i];
-            }
-        }
-
-        layerOutput = reshape_tensor(ctx, *layerOutput, newDims);
+        std::vector<int> squeezeAxis{axis};
+        layerOutput = squeezeTensor(ctx, *layerOutput, squeezeAxis);
     }
 
     // Remove leading dimension if it was added to make output a scalar or squeeze back to 1D.
@@ -771,16 +758,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     {
         const auto currentDims = layerOutput->getDimensions().nbDims;
         ASSERT(currentDims == 1 || currentDims == 2, ErrorCode::kUNSUPPORTED_NODE);
-        if (currentDims == 1)
-        {
-            nvinfer1::Dims zeroD {0};
-            layerOutput = reshape_tensor(ctx, *layerOutput, zeroD);
-        }
-        else
-        {
-            nvinfer1::Dims oneD {1, layerOutput->getDimensions().d[1]};
-            layerOutput = reshape_tensor(ctx, *layerOutput, oneD);
-        }
+        std::vector<int> squeezeAxis{0};
+        layerOutput = squeezeTensor(ctx, *layerOutput, squeezeAxis);
     }
 
     return {{layerOutput}};
