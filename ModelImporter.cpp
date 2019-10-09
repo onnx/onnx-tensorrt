@@ -57,8 +57,7 @@ Status importInput(ImporterContext* importer_ctx,
            input.name().c_str(), trt_dtype, trt_dims),
          ErrorCode::kUNSUPPORTED_NODE, input.name());
 
-  ASSERT_INPUT(!((*tensor)->getType() == nvinfer1::DataType::kINT32 && (*tensor)->getDimensions().nbDims == 1) &&
-                "Shape tensor cannot be used as a network input!", ErrorCode::kUNSUPPORTED_NODE, input.name());
+  importer_ctx->addInput(input);
 
   return Status::success();
 }
@@ -498,6 +497,22 @@ bool ModelImporter::parseWithWeightDescriptors(
     status.setNode(_current_node);
     _errors.push_back(status);
     return false;
+  }
+
+  // Do sanity check for shape tensor inputs, make an error here.
+  auto* network = _importer_ctx.network();
+  int numInputs = network->getNbInputs();
+
+  for (int i = 0; i < numInputs; i++)
+  {
+      auto* inputTensor = network->getInput(i);
+      if (inputTensor->isShapeTensor())
+      {
+          auto status = MAKE_INPUT_ERROR("Shape tensor input", ErrorCode::kUNSUPPORTED_NODE, inputTensor->getName());
+          status.setNode(-1);
+          _errors.push_back(status);
+          return false;
+      }
   }
   return true;
 }

@@ -34,6 +34,7 @@ class ImporterContext final : public IImporterContext {
   nvinfer1::INetworkDefinition* _network;
   nvinfer1::ILogger* _logger;
   std::list<std::vector<uint8_t>> _temp_bufs;
+  std::vector<::ONNX_NAMESPACE::ValueInfoProto> inputs;
   std::unordered_map<std::string, nvinfer1::ITensor*>  _user_inputs;
   std::unordered_map<std::string, nvinfer1::ITensor**> _user_outputs;
   std::unordered_map<std::string, int64_t> _opsets;
@@ -45,6 +46,16 @@ public:
   virtual nvinfer1::INetworkDefinition* network() override
   {
     return _network;
+  }
+
+  void addInput(::ONNX_NAMESPACE::ValueInfoProto input)
+  {
+      inputs.push_back(input);
+  }
+
+  std::vector<::ONNX_NAMESPACE::ValueInfoProto> getInputs()
+  {
+       return inputs;
   }
 
   nvinfer1::ILogger& logger() { return *_logger; }
