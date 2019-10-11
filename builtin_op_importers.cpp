@@ -239,45 +239,91 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool)
     return {{tensor_ptr}};
 }
 
+NodeImportResult batchnormFallback(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs)
+{
+    using eOp = nvinfer1::ElementWiseOperation;
+    using uOp = nvinfer1::UnaryOperation;
+
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+
+    const int nbUnsqueezeDims = input.getDimensions().nbDims - 2;
+    std::vector<int> axes{nbUnsqueezeDims};
+    std::iota(axes.begin(), axes.end(), 2);
+
+    nvinfer1::ITensor* scale = unsqueezeTensor(ctx, convertToTensor(inputs.at(1), ctx), axes);
+    nvinfer1::ITensor* bias = unsqueezeTensor(ctx, convertToTensor(inputs.at(2), ctx), axes);
+    nvinfer1::ITensor* mean = unsqueezeTensor(ctx, convertToTensor(inputs.at(3), ctx), axes);
+    nvinfer1::ITensor* variance = unsqueezeTensor(ctx, convertToTensor(inputs.at(4), ctx), axes);
+    OnnxAttrs attrs(node);
+    float eps = attrs.get<float>("epsilon", 1e-5f);
+
+    nvinfer1::Dims scalarShape{nbUnsqueezeDims};
+    std::fill(scalarShape.d, scalarShape.d + scalarShape.nbDims, 1);
+    nvinfer1::ITensor* epsilon = addConstantScalar(ctx, eps, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarShape)->getOutput(0);
+
+    // batchnorm = scale * (input - mean) / sqrt(variance + epsilon) + bias
+    nvinfer1::IElementWiseLayer* layer = ctx->network()->addElementWise(
+        *ctx->network()->addElementWise(
+            *scale,
+            *ctx->network()->addElementWise(
+                *ctx->network()->addElementWise(input, *mean, eOp::kSUB)->getOutput(0),
+                *ctx->network()->addUnary(
+                    *ctx->network()->addElementWise(*variance, *epsilon, eOp::kSUM)->getOutput(0),
+                    uOp::kSQRT
+                )->getOutput(0),
+                eOp::kDIV
+            )->getOutput(0),
+            eOp::kPROD
+        )->getOutput(0),
+        *bias,
+        eOp::kSUM
+    );
+
+    RETURN_FIRST_OUTPUT(layer);
+}
+
+
 DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
 {
     // Scale, bias, mean, and variance must be initializers
-    ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    ASSERT(inputs.at(3).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    ASSERT(inputs.at(4).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
     auto scale_weights = inputs.at(1).weights();
     auto bias_weights = inputs.at(2).weights();
     auto mean_weights = inputs.at(3).weights();
     auto variance_weights = inputs.at(4).weights();
+
+    const bool allInputsWeights = inputs.at(1).is_weights() && inputs.at(2).is_weights() && inputs.at(3).is_weights() && inputs.at(4).is_weights();
+    const bool allWeightsFloat = scale_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && bias_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && mean_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && variance_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    const bool canFoldWeights = allInputsWeights && allWeightsFloat;
+
+    if (!canFoldWeights)
+    {
+        return batchnormFallback(ctx, node, inputs);
+    }
+
+    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
+
     OnnxAttrs attrs(node);
     float eps = attrs.get<float>("epsilon", 1e-5f);
-    ASSERT(scale_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT
-            && bias_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT
-            && mean_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT
-            && variance_weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT,
-        ErrorCode::kUNSUPPORTED_NODE);
+
     nvinfer1::Dims dims = tensor_ptr->getDimensions();
 
     bool need_to_expand_dims = (dims.nbDims == 3);
     if (need_to_expand_dims)
     {
         // Expand spatial dims from 1D to 2D
-        std::vector<int>axes {3};
+        std::vector<int> axes{3};
         tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensor_ptr->getDimensions();
     }
 
-    // Number of channels can be dynamic - set it to the dimensions of scale_weights
+    // Number of channels is equal to the length of scale_weights.
     int nchan = scale_weights.shape.d[0];
     nvinfer1::Dims weights_shape{1, {nchan}};
     ASSERT(scale_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
     ASSERT(bias_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
     ASSERT(mean_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
     ASSERT(variance_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
-
     auto combined_scale_weights = ctx->createTempWeights(scale_weights.type, scale_weights.shape);
     auto combined_bias_weights = ctx->createTempWeights(bias_weights.type, bias_weights.shape);
     size_t nweight = nchan;
@@ -301,15 +347,14 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     }
     else
     {
-        auto scaledTensor = addScale(ctx, *tensor_ptr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {});
-        // Un-expand spatial dims back to 1D
-        tensor_ptr = &convertToTensor(scaledTensor.value().at(0), ctx);
-        std::vector<int>axes {3};
+        auto scaledResult = addScale(ctx, *tensor_ptr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {});
+        // Squeeze spatial dims back to 1D
+        tensor_ptr = &convertToTensor(scaledResult.value().at(0), ctx);
+        std::vector<int> axes{3};
         tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
         ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
         return {{tensor_ptr}};
     }
-
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Cast) {
