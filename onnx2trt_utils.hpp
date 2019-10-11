@@ -29,6 +29,8 @@
 #include <onnx/onnx_pb.h>
 #include <onnx/onnxifi.h>
 #include <NvInfer.h>
+#include <cstring>
+#include <numeric>
 
 #include <iostream>
 using std::cerr;
@@ -58,6 +60,27 @@ std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm
 
 namespace onnx2trt
 {
+
+// Helper function to calculate the volume of a Dims object
+int64_t volume(const nvinfer1::Dims& dims);
+
+// Adds a constant scalar to the network in the form of a constant layer.
+template <typename ScalarType>
+nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{1,{1}})
+{
+    ShapedWeights scalarWeights = ctx->createTempWeights(type, shape);
+    static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
+    return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
+}
+
+// Helper function to create a tensor given a vector of values and a shape.
+template <typename ScalarType>
+inline nvinfer1::IConstantLayer* addConstant(IImporterContext* ctx, const std::vector<ScalarType>& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
+{
+    ShapedWeights weights = ctx->createTempWeights(type, shape);
+    std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
+    return ctx->network()->addConstant(weights.shape, weights);
+}
 
 enum ScaleOp
 {
@@ -89,8 +112,11 @@ Status applyLegacyBinaryOpBroadcasting(IImporterContext* ctx,
 NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op);
 
+// Helper function to broadcast one tensor to a given shape.
+void broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, const int nbDims);
+
 // Helper function to broadcast two tensors to the larger shape
-void broadcast_tensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2);
+void broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2);
 
 // Helper function for parsing brodacsting attributes
 Status check_broadcast_attrs(IImporterContext* ctx, OnnxAttrs const& attrs, nvinfer1::Dims const& dims);
@@ -136,11 +162,13 @@ int div_ceil(int n, int d);
 
 // Helper function to import elementwise nodes into TRT
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op,
-    bool legacy_binary_op_broadcasting = false);
+    std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper functino to flatten a tensor on a specified axis
-nvinfer1::ITensor* flatten_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
+nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
+
+// Helper function to check if any input dimensions are dynamic
+bool isDynamic (nvinfer1::Dims const& dims);
 
 // Helper function to import a plugin from TensorRT's plugin registry given the name and version.
 nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
@@ -148,6 +176,9 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
 
 // Returns false if the transpose does not require any data movement (i.e., it's equivalent to a reshape)
 inline bool is_transpose_required(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
+
+// Helper function to get the length of the specified axis
+nvinfer1::ITensor* getAxisLength(IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape=nvinfer1::Dims{0});
 
 // Helper function to calculate the output size of a convolution operation
 int get_conv_output_size(int input_size, int filter_size,
@@ -180,6 +211,9 @@ nvinfer1::ScaleMode get_scale_mode(nvinfer1::Dims const& weights_shape, nvinfer1
 // Helper function to create a Dims object with the specified number of dims and value
 nvinfer1::Dims makeDims(int nbDims, int val);
 
+// Helper function to create a shape tensor from a Dims object for dynamic reshape
+nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims);
+
 // Helper function to reshape a tensor to a specified size
 nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 
@@ -192,6 +226,9 @@ NodeImportResult scaleHelper(IImporterContext* ctx,
 // Helper function to set ONNX node attributes
 void setAttr(nvinfer1::Dims * trtAttr, ::ONNX_NAMESPACE::AttributeProto const* onnxAttr, int nbSpatialDims, int defaultVal);
 
+// Helper function to squeeze a tensor on a given set of axes
+nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
+
 // Helper function to transpose a tensor given a permutation
 nvinfer1::ITensor* transpose_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, 
                                     bool permute_dim_types);
@@ -203,8 +240,14 @@ Status slice_array(TensorOrWeights weights, std::vector<int32_t>& weight_vector)
 NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::UnaryOperation op);
 
+// Helper function to unsqueeze tensors on a given set of axes
+nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
+
 // Helper function to update padding values.
 void update_padded_values(std::vector<float>&pad_values, const nvinfer1::DimsHW beg_padding,
   const nvinfer1::DimsHW end_padding, const nvinfer1::Dims padded_shape, const float pad_value);
+
+// Helper function to convert weights to a vector.
+Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector);
 
 } // namespace onnx2trt

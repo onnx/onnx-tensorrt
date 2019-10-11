@@ -23,6 +23,7 @@
 #pragma once
 
 #include "onnx2trt.hpp"
+#include "onnx2trt_utils.hpp"
 
 #include <list>
 #include <unordered_map>
@@ -33,6 +34,7 @@ class ImporterContext final : public IImporterContext {
   nvinfer1::INetworkDefinition* _network;
   nvinfer1::ILogger* _logger;
   std::list<std::vector<uint8_t>> _temp_bufs;
+  std::vector<::ONNX_NAMESPACE::ValueInfoProto> inputs;
   std::unordered_map<std::string, nvinfer1::ITensor*>  _user_inputs;
   std::unordered_map<std::string, nvinfer1::ITensor**> _user_outputs;
   std::unordered_map<std::string, int64_t> _opsets;
@@ -46,13 +48,31 @@ public:
     return _network;
   }
 
+  void addInput(::ONNX_NAMESPACE::ValueInfoProto input)
+  {
+      inputs.push_back(input);
+  }
+
+  std::vector<::ONNX_NAMESPACE::ValueInfoProto> getInputs()
+  {
+       return inputs;
+  }
+
   nvinfer1::ILogger& logger() { return *_logger; }
 
   virtual ShapedWeights createTempWeights(ShapedWeights::DataType type,
                                           nvinfer1::Dims shape) override
   {
     ShapedWeights weights(type, nullptr, shape);
-    _temp_bufs.push_back(std::vector<uint8_t>(weights.size_bytes()));
+    // Need special logic for handling scalars.
+    if (shape.nbDims == 0)
+    {
+        _temp_bufs.push_back(std::vector<uint8_t>(get_dtype_size(type)));
+    }
+    else
+    {
+        _temp_bufs.push_back(std::vector<uint8_t>(weights.size_bytes()));
+    }
     weights.values = _temp_bufs.back().data();
     return weights;
   }
