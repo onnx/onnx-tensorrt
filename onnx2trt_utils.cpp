@@ -937,6 +937,100 @@ nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims)
     return convertToTensor(valueWeights, ctx);
 }
 
+NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::PoolingType type)
+{
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::Dims dims = tensorPtr->getDimensions();
+    bool needToExpandDims = (dims.nbDims == 3);
+    if (needToExpandDims)
+    {
+        // Expand spatial dims from 1D to 2D
+        std::vector<int>axes {3};
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+        dims = tensorPtr->getDimensions();
+    }
+
+    OnnxAttrs attrs(node);
+    int nbSpatialDims = attrs.at("kernel_shape")->ints().size();   
+    ASSERT(nbSpatialDims == 2 || nbSpatialDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Support for opset10 ceil_mode
+    CeilingPoolDim ceilingPool;
+    // Ceiling and dialations added in opset 10
+    if (ctx->getOpsetVersion() >= 10)
+    {
+        const auto ceil_mode = attrs.get<int>("ceil_mode", 0);
+        const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
+        for (size_t i = 0; i < dilations.size(); i++)
+            ASSERT(dilations[i] == 1, ErrorCode::kUNSUPPORTED_NODE); // Do not support pooling dilations currently
+        nvinfer1::Dims spatialDims = makeDims(nbSpatialDims, 1);
+        std::copy(&dims.d[2], &dims.d[2]+nbSpatialDims, &spatialDims.d[0]);
+        if (ceil_mode != 0) // Need to set pooling formula to use ceiling instead of floor
+        {
+            ASSERT(!isDynamic(spatialDims) && "Cannot set output formula for an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
+            ctx->network()->setPoolingOutputDimensionsFormula(&ceilingPool);
+        }
+    }
+
+    nvinfer1::Dims kernel_size = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::PaddingMode paddingMode;
+
+    bool exclude_padding(true);
+
+    // Populate pooling parameters.
+    get_kernel_params(node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding);
+
+    nvinfer1::IPoolingLayer* poolingLayer = ctx->network()->addPoolingNd(*tensorPtr, type, kernel_size);
+    poolingLayer->setStrideNd(strides);
+    // This member is ignored in maxpooling
+    poolingLayer->setAverageCountExcludesPadding(exclude_padding);
+    poolingLayer->setPaddingMode(paddingMode);
+    poolingLayer->setPrePadding(beg_padding);
+    poolingLayer->setPostPadding(end_padding);
+
+    // Note: Average pooling requires special care with asymmetric padding
+    //       because the need to exclude padding pixels from the average
+    //       means we can't just use a pre-padding layer.
+    if (type == nvinfer1::PoolingType::kAVERAGE)
+    {
+        nvinfer1::DimsHW pre_crop(0, 0), post_crop(0, 0);
+        for (int d = 0; d < 2; ++d)
+        {
+            if (end_padding.d[d] == beg_padding.d[d])
+            {
+                // Symmetric padding, nothing special needed
+            }
+            else if (end_padding.d[d] == beg_padding.d[d] + 1)
+            {
+                // Pad symmetrically such that we get one more output element at
+                // the beginning, and then crop it off after the pooling operation.
+                beg_padding.d[d] += strides.d[d];
+                pre_crop.d[d] = 1;
+            }
+            else
+            {
+                bool supported_form_of_asymmetric_padding_for_AveragePool = false;
+                ASSERT(supported_form_of_asymmetric_padding_for_AveragePool, ErrorCode::kUNSUPPORTED_NODE);
+            }
+        }
+    }
+
+    tensorPtr = poolingLayer->getOutput(0);
+    dims = tensorPtr->getDimensions();
+    if (needToExpandDims)
+    {
+        // Un-expand spatial dims back to 1D
+        std::vector<int>axes{3};
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+    }
+    return {{tensorPtr}};
+}
+
 nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape)
 {
     if (shape == tensor.getDimensions())

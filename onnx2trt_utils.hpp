@@ -214,6 +214,9 @@ nvinfer1::Dims makeDims(int nbDims, int val);
 // Helper function to create a shape tensor from a Dims object for dynamic reshape
 nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims);
 
+// Helper function to map various ONNX pooling ops into TensorRT.
+NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::PoolingType type);
+
 // Helper function to reshape a tensor to a specified size
 nvinfer1::ITensor* reshape_tensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 

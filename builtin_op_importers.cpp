@@ -149,94 +149,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Atanh)
 
 DEFINE_BUILTIN_OP_IMPORTER(AveragePool)
 {
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
-    bool need_to_expand_dims = (dims.nbDims == 3);
-    if (need_to_expand_dims)
-    {
-        // Expand spatial dims from 1D to 2D
-        std::vector<int>axes {3};
-        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-        dims = tensor_ptr->getDimensions();
-    }
-
-    int nbSpatialDims = dims.nbDims - 2;
-    ASSERT(nbSpatialDims == 2 || nbSpatialDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-
-    // Support for opset10 ceil_mode
-    CeilingPoolDim ceilingPool;
-    // Ceiling and dialations added in opset 10
-    if (ctx->getOpsetVersion() >= 10)
-    {
-        OnnxAttrs attrs(node);
-        const auto ceil_mode = attrs.get<int>("ceil_mode", 0);
-        const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
-        for (size_t i = 0; i < dilations.size(); i++)
-            ASSERT(dilations[i] == 1, ErrorCode::kUNSUPPORTED_NODE); // Do not support pooling dilations currently
-        
-        nvinfer1::Dims spatialDims = makeDims(nbSpatialDims, 1);
-        std::copy(&dims.d[2], &dims.d[2]+nbSpatialDims, &spatialDims.d[0]);
-
-        if (ceil_mode != 0) // Need to set pooling formula to use ceiling instead of floor
-        {
-            ASSERT(!isDynamic(spatialDims) && "Cannot set output formula for an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
-            ctx->network()->setPoolingOutputDimensionsFormula(&ceilingPool);
-        }
-    }
-
-    ASSERT(nbSpatialDims == 2 || nbSpatialDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims kernel_size = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::PaddingMode paddingMode;
-
-    bool exclude_padding(true);
-    get_kernel_params(node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding);
-    nvinfer1::IPoolingLayer* pooling_layer
-        = ctx->network()->addPoolingNd(*tensor_ptr, nvinfer1::PoolingType::kAVERAGE, kernel_size);
-    nvinfer1::ILayer* layer = pooling_layer;
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    pooling_layer->setStrideNd(strides);
-    pooling_layer->setAverageCountExcludesPadding(exclude_padding);
-    pooling_layer->setPaddingMode(paddingMode);
-
-    pooling_layer->setPrePadding(beg_padding);
-    pooling_layer->setPostPadding(end_padding);
-    // Note: Average pooling requires special care with asymmetric padding
-    //       because the need to exclude padding pixels from the average
-    //       means we can't just use a pre-padding layer.
-    nvinfer1::DimsHW pre_crop(0, 0), post_crop(0, 0);
-    for (int d = 0; d < 2; ++d)
-    {
-        if (end_padding.d[d] == beg_padding.d[d])
-        {
-            // Symmetric padding, nothing special needed
-        }
-        else if (end_padding.d[d] == beg_padding.d[d] + 1)
-        {
-            // Pad symmetrically such that we get one more output element at
-            // the beginning, and then crop it off after the pooling operation.
-            beg_padding.d[d] += strides.d[d];
-            pre_crop.d[d] = 1;
-        }
-        else
-        {
-            bool supported_form_of_asymmetric_padding_for_AveragePool = false;
-            ASSERT(supported_form_of_asymmetric_padding_for_AveragePool, ErrorCode::kUNSUPPORTED_NODE);
-        }
-    }
-    tensor_ptr = layer->getOutput(0);
-    dims = tensor_ptr->getDimensions();
-    if (need_to_expand_dims)
-    {
-        // Un-expand spatial dims back to 1D
-        std::vector<int>axes {3};
-        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-    }
-    return {{tensor_ptr}};
+    return poolingHelper(ctx, node, inputs, nvinfer1::PoolingType::kAVERAGE);
 }
 
 NodeImportResult batchnormFallback(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs)
@@ -936,10 +849,13 @@ DEFINE_BUILTIN_OP_IMPORTER(GlobalAveragePool)
 {
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
     nvinfer1::Dims dims = tensor.getDimensions();
-    ASSERT(dims.nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::DimsHW kernelSize(dims.d[2], dims.d[3]);
-    ASSERT(!isDynamic(kernelSize) && "Cannot run global average pool on an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addPooling(tensor, nvinfer1::PoolingType::kAVERAGE, kernelSize));
+    int nbSpatialDims = dims.nbDims - 2;
+    ASSERT((nbSpatialDims == 2 || nbSpatialDims == 3) && "TensorRT only supports 2D and 3D pooling!", ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::Dims kernelSize = nbSpatialDims == 2 ?
+                                static_cast<nvinfer1::Dims>(nvinfer1::Dims2{dims.d[2], dims.d[3]}) :
+                                static_cast<nvinfer1::Dims>(nvinfer1::Dims3{dims.d[2], dims.d[3], dims.d[4]});
+    ASSERT(!isDynamic(kernelSize) && "Cannot run GlobalAveragePool on an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
+    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kAVERAGE, kernelSize));
 }
 
 // TODO: GlobalLpPool: pow(reduce_mean(pow(abs(x), p)), 1./p)
@@ -948,10 +864,13 @@ DEFINE_BUILTIN_OP_IMPORTER(GlobalMaxPool)
 {
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
     nvinfer1::Dims dims = tensor.getDimensions();
-    ASSERT(dims.nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::DimsHW kernelSize(dims.d[2], dims.d[3]);
-    ASSERT(!isDynamic(kernelSize) && "Cannot run global average pool on an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addPooling(tensor, nvinfer1::PoolingType::kMAX, kernelSize));
+    int nbSpatialDims = dims.nbDims - 2;
+    ASSERT((nbSpatialDims == 2 || nbSpatialDims == 3) && "TensorRT only supports 2D and 3D pooling!", ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::Dims kernelSize = nbSpatialDims == 2 ?
+                                static_cast<nvinfer1::Dims>(nvinfer1::Dims2{dims.d[2], dims.d[3]}) :
+                                static_cast<nvinfer1::Dims>(nvinfer1::Dims3{dims.d[2], dims.d[3], dims.d[4]});
+    ASSERT(!isDynamic(kernelSize) && "Cannot run GlobalMaxPool on an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
+    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kAVERAGE, kernelSize));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid)
@@ -1338,69 +1257,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Max)
 
 DEFINE_BUILTIN_OP_IMPORTER(MaxPool)
 {
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
-    ASSERT(dims.nbDims >= 2, ErrorCode::kINVALID_NODE);
-
-    bool need_to_expand_dims = (dims.nbDims == 3);
-    if (need_to_expand_dims)
-    {
-        // Expand spatial dims from 1D to 2D
-        std::vector<int>axes {3};
-        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-        dims = tensor_ptr->getDimensions();
-    }
-
-    int nbSpatialDims = dims.nbDims - 2;
-    ASSERT(nbSpatialDims == 2 || nbSpatialDims == 3, ErrorCode::kUNSUPPORTED_NODE);
-
-
-    // Support for opset10 ceil_mode
-    CeilingPoolDim ceilingPool;
-    // Ceiling and dialations added in opset 10
-    if (ctx->getOpsetVersion() >= 10)
-    {
-        OnnxAttrs attrs(node);
-        const auto ceil_mode = attrs.get<int>("ceil_mode", 0);
-        const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
-        for (size_t i = 0; i < dilations.size(); i++)
-            ASSERT(dilations[i] == 1, ErrorCode::kUNSUPPORTED_NODE); // Do not support pooling dilations currently
-        nvinfer1::Dims spatialDims = makeDims(nbSpatialDims, 1);
-        std::copy(&dims.d[2], &dims.d[2]+nbSpatialDims, &spatialDims.d[0]);
-        if (ceil_mode != 0) // Need to set pooling formula to use ceiling instead of floor
-        {
-            ASSERT(!isDynamic(spatialDims) && "Cannot set output formula for an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
-            ctx->network()->setPoolingOutputDimensionsFormula(&ceilingPool);
-        }
-    }
-
-    nvinfer1::Dims kernel_size = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::PaddingMode paddingMode;
-    bool exclude_padding;
-    get_kernel_params(node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding);
-    nvinfer1::IPoolingLayer* layer
-        = ctx->network()->addPoolingNd(*tensor_ptr, nvinfer1::PoolingType::kMAX, kernel_size);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    layer->setStrideNd(strides);
-    layer->setPaddingMode(paddingMode);
-    layer->setPrePadding(beg_padding);
-    layer->setPostPadding(end_padding);
-    tensor_ptr = layer->getOutput(0);
-    dims = tensor_ptr->getDimensions();
-
-    if (need_to_expand_dims)
-    {
-        // Un-expand spatial dims back to 1D
-        std::vector<int>axes {3};
-        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-    }
-
-    return {{tensor_ptr}};
+    return poolingHelper(ctx, node, inputs, nvinfer1::PoolingType::kMAX);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Mean)
