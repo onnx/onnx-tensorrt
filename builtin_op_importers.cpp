@@ -108,11 +108,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Acosh)
 
 DEFINE_BUILTIN_OP_IMPORTER(Add)
 {
-    if (check_for_scale(inputs))
-    {
-      return scaleHelper(
-          ctx, node, inputs, ScaleOp::kSHIFT);
-    }
     return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kSUM);
 }
 
@@ -1291,11 +1286,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Min)
 
 DEFINE_BUILTIN_OP_IMPORTER(Mul)
 {  
-    if (check_for_scale(inputs))
-    {
-        return scaleHelper(
-            ctx, node, inputs, ScaleOp::kSCALE);
-    }
     return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPROD);
 }
 
@@ -1347,12 +1337,6 @@ DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus)
 DEFINE_BUILTIN_OP_IMPORTER(Pow)
 {
     ASSERT(inputs.size() == 2, ErrorCode::kINVALID_NODE);
-    bool isAnyOperandInt32 = check_for_int32(inputs);
-    if (inputs.at(0).is_tensor() != inputs.at(1).is_tensor() && !isAnyOperandInt32)
-    {
-    return scaleHelper(
-        ctx, node, inputs, ScaleOp::kPOWER);
-    }
     return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kPOW);
 }
 
