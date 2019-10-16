@@ -154,18 +154,28 @@ NodeImportResult batchnormFallback(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
 
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
 
-    const int nbUnsqueezeDims = input.getDimensions().nbDims - 2;
-    std::vector<int> axes{nbUnsqueezeDims};
-    std::iota(axes.begin(), axes.end(), 2);
+    const int rank = input.getDimensions().nbDims;
+    nvinfer1::ITensor* scale = &convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor* bias = &convertToTensor(inputs.at(2), ctx);
+    nvinfer1::ITensor* mean = &convertToTensor(inputs.at(3), ctx);
+    nvinfer1::ITensor* variance = &convertToTensor(inputs.at(4), ctx);
 
-    nvinfer1::ITensor* scale = unsqueezeTensor(ctx, convertToTensor(inputs.at(1), ctx), axes);
-    nvinfer1::ITensor* bias = unsqueezeTensor(ctx, convertToTensor(inputs.at(2), ctx), axes);
-    nvinfer1::ITensor* mean = unsqueezeTensor(ctx, convertToTensor(inputs.at(3), ctx), axes);
-    nvinfer1::ITensor* variance = unsqueezeTensor(ctx, convertToTensor(inputs.at(4), ctx), axes);
+    const bool hasCDimension = rank > 1;
+    if (hasCDimension)
+    {
+        std::vector<int> axes(rank - 1);
+        axes[0] = 0;
+        std::iota(axes.begin() + 1, axes.end(), 2);
+
+        scale = unsqueezeTensor(ctx, *scale, axes);
+        bias = unsqueezeTensor(ctx, *bias, axes);
+        mean = unsqueezeTensor(ctx, *mean, axes);
+        variance = unsqueezeTensor(ctx, *variance, axes);
+    }
     OnnxAttrs attrs(node);
     float eps = attrs.get<float>("epsilon", 1e-5f);
 
-    nvinfer1::Dims scalarShape{nbUnsqueezeDims};
+    nvinfer1::Dims scalarShape{rank};
     std::fill(scalarShape.d, scalarShape.d + scalarShape.nbDims, 1);
     nvinfer1::ITensor* epsilon = addConstantScalar(ctx, eps, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarShape)->getOutput(0);
 
