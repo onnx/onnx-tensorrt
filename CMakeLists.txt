@@ -162,7 +162,7 @@ else()
     ${GENCODES} \
     ")
 
-  if((NOT CXX_VERSION_DEFINED) AND (NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+") AND (NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=gnu\\+\\+"))
+  if((NOT CXX_VERSION_DEFINED) AND (NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=c\\+\\+") AND (NOT "${CMAKE_CUDA_FLAGS}" MATCHES "-std=gnu\\+\\+"))
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++11")
   endif()
 
