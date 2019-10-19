@@ -927,7 +927,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Dropout) {
   {
     RETURN_IDENTITY(inputs.at(0));
   }
-  else 
+  else
   {
     // Return both Dropout outputs: (output + mask)
     std::vector<TensorOrWeights> outputs;
@@ -1246,7 +1246,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MaxPool) {
 
     // TODO: Since TensorRT only 0 pads, need to do an elementwise ADD with
     // -INFINITY on the padded dimensions to ensure max pooling functions as expected.
-    // This negatively impacts performance. Update when non-zero padding is supported in a 
+    // This negatively impacts performance. Update when non-zero padding is supported in a
     // future TRT version.
 
     nvinfer1::Dims padded_dims = tensor_ptr->getDimensions();
@@ -1562,7 +1562,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape) {
       new_shape = set_dims_CHW(remove_dim(new_shape, BATCH_DIM));
       // Check for -1 dimension in new shape
       TRT_CHECK(get_infer_dim(infer_dim,new_shape));
-      
+
       if (infer_dim < 0) {
         ASSERT(get_shape_size(new_shape) ==
                    get_shape_size(tensor.getDimensions()),
@@ -1720,17 +1720,17 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice) {
     // TRT only supports slicing HW dims when using padding layer,
     // so if user wants to slice some other axis, we check whether
     // slice contains full dimension
-    if (axes[i] != nbDims-1 && axes[i] != nbDims)
+    if (axis != nbDims-2 && axis != nbDims-1)
     {
       ASSERT((ends[i] - starts[i]) == dims.d[axis], ErrorCode::kUNSUPPORTED_NODE);
     }
     else
     {
-      if (axes[i] == nbDims-1)
+      if (axis == nbDims-2)
       {
         H_idx = i;
       }
-      else if (axes[i] == nbDims)
+      else if (axis == nbDims-1)
       {
         W_idx = i;
       }
@@ -2054,6 +2054,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
   int ndim_in = old_shape.nbDims;
   OnnxAttrs attrs(node);
   auto axes = attrs.get<std::vector<int>>("axes");
+
+  std::set<int> axes_set_tmp(axes.begin(), axes.end());
+  int ndim_out = ndim_in + axes_set_tmp.size();
+
   // If the input was already a tensor, then we're dealing with a TRT shape,
   // so subtract 1 from the axes. Otherwise, this is an ONNX shape.
   if (inputs.at(0).is_tensor())
@@ -2061,12 +2065,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze) {
       for (auto& axis : axes)
       {
           ASSERT(axis != BATCH_DIM, ErrorCode::kUNSUPPORTED_NODE);
-          --axis;
+	        convert_axis(axis, ndim_out);
+          // convert_axis already subtracts batch dimension
+          //--axis;
       }
   }
 
   std::set<int> axes_set(axes.begin(), axes.end());
-  int ndim_out = ndim_in + axes_set.size();
+  //int ndim_out = ndim_in + axes_set.size();
   ASSERT(ndim_out <= nvinfer1::Dims::MAX_DIMS, ErrorCode::kUNSUPPORTED_NODE);
   nvinfer1::Dims new_shape;
   new_shape.nbDims = ndim_out;
