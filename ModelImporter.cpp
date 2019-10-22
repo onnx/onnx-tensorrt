@@ -420,8 +420,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       {
         break;
       }
-      // Mark this subgraph as supported in case we do not touch it. 
-      sub_graph_collection[graph_index].second = true;
       for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
       {
         // Split the graph at the node we hit an assertion at when parsing.
@@ -441,19 +439,19 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection[graph_index].second = false;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
+          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
           else if (node_index == subgraph.size() - 1)
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
             sub_graph_collection[graph_index].first = split_before;
-            sub_graph_collection[graph_index].second = true;
           }
           // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
+          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
           else
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
             NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
             sub_graph_collection[graph_index].first = split_before;
-            sub_graph_collection[graph_index].second = true;
             sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
           }
           break;
@@ -462,8 +460,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     }
   }
 
-  // After everything if allSupported is true, there is only one subgraph so mark it as supported.
-  if (allSupported)
+  // Only mark the subgraph as supported if there is one supported subgraph.
   {
     sub_graph_collection.back().second = true;
   }
