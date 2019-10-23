@@ -461,6 +461,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   }
 
   // Only mark the subgraph as supported if there is one supported subgraph.
+  if (allSupported)
   {
     sub_graph_collection.back().second = true;
   }
