@@ -56,6 +56,9 @@ Status importInput(ImporterContext* importer_ctx,
   ASSERT_INPUT(*tensor = importer_ctx->network()->addInput(
            input.name().c_str(), trt_dtype, trt_dims),
          ErrorCode::kUNSUPPORTED_NODE, input.name());
+
+  importer_ctx->addInput(input);
+
   return Status::success();
 }
 
@@ -349,20 +352,9 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       else
       {
         // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-        // around MAKE_INPUT_ERROR. Check for dynamic input and set entire graph as unsupported if found.
+        // around MAKE_INPUT_ERROR.
         input_node = error->file();
-        auto found = input_node.find("_TRT_DYNAMIC_SHAPES");
-        if (found != std::string::npos)
-        {
-          cout << "Found dynamic input: " << input_node.substr(0, found) << endl;
-          cout << "Marking entire graph as unsupported." << endl;
-          return false;
-        }
-        else
-        {
-          cout << "Found unsupported input: " << input_node << endl;
-        }
-
+        cout << "Found unsupported input: " << input_node << endl;
       }
     }
   }
@@ -428,8 +420,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       {
         break;
       }
-      // Mark this subgraph as supported in case we do not touch it. 
-      sub_graph_collection[graph_index].second = true;
       for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
       {
         // Split the graph at the node we hit an assertion at when parsing.
@@ -441,25 +431,27 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
             sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
           }
           // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
+          // The split_after graph is marked as unsupported.
           else if (node_index == 0)
           {
             NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
             sub_graph_collection[graph_index].first = split_after;
+            sub_graph_collection[graph_index].second = false;
           }
           // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
+          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
           else if (node_index == subgraph.size() - 1)
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
             sub_graph_collection[graph_index].first = split_before;
-            sub_graph_collection[graph_index].second = true;
           }
           // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
+          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
           else
           {
             NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
             NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
             sub_graph_collection[graph_index].first = split_before;
-            sub_graph_collection[graph_index].second = true;
             sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
           }
           break;
@@ -468,7 +460,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
     }
   }
 
-  // After everything if allSupported is true, there is only one subgraph so mark it as supported.
+  // Only mark the subgraph as supported if there is one supported subgraph.
   if (allSupported)
   {
     sub_graph_collection.back().second = true;
@@ -504,6 +496,22 @@ bool ModelImporter::parseWithWeightDescriptors(
     _errors.push_back(status);
     return false;
   }
+
+  // Do sanity check for shape tensor inputs, make an error here.
+  auto* network = _importer_ctx.network();
+  int numInputs = network->getNbInputs();
+
+  for (int i = 0; i < numInputs; i++)
+  {
+      auto* inputTensor = network->getInput(i);
+      if (inputTensor->isShapeTensor())
+      {
+          auto status = MAKE_INPUT_ERROR("Shape tensor input", ErrorCode::kUNSUPPORTED_NODE, inputTensor->getName());
+          status.setNode(-1);
+          _errors.push_back(status);
+          return false;
+      }
+  }
   return true;
 }
 
@@ -521,6 +529,8 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
   _importer_ctx.clearOpsets();
   ASSERT(!_importer_ctx.network()->hasImplicitBatchDimension() &&
         "This version of the ONNX parser only supports networks with an explicit batch dimension", ErrorCode::kINVALID_VALUE);
+  // Initialize plugin registry
+  initLibNvInferPlugins(static_cast<void*>(&_importer_ctx.logger()), "ONNXTRT_NAMESPACE");
   for( int i = 0; i < model.opset_import().size(); ++i ) {
     std::string domain  = model.opset_import(i).domain();
     int64_t     version = model.opset_import(i).version();

@@ -165,9 +165,10 @@ int main(int argc, char* argv[]) {
     full_onnx_text_file.write(full_onnx_text.c_str(), full_onnx_text.size());
   }
 
+  const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
   common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
   auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
-  auto trt_network = common::infer_object(trt_builder->createNetwork());
+  auto trt_network = common::infer_object(trt_builder->createNetworkV2(explicitBatch));
   auto trt_parser  = common::infer_object(nvonnxparser::createParser(
                                       *trt_network, trt_logger));
 
