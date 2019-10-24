@@ -33,9 +33,10 @@ bool convertINT64(void* weightValues, const size_t nbWeights, std::vector<int32_
   int64_t * weights = static_cast<int64_t *>(weightValues);
   for (size_t i = 0; i < nbWeights; i++)
   {
-    if (weights[i] > INT32_MAX || weights[i] < INT32_MIN)
+    if (weights[i] > static_cast<int64_t>(INT32_MAX) || weights[i] < static_cast<int64_t>(INT32_MIN))
     {
-      return false;
+      converted_weights[i] = static_cast<int32_t>(std::max(std::min(weights[i], static_cast<int64_t>(INT32_MAX)), static_cast<int64_t>(INT32_MIN)));
+      std::cout << "WARNING: Weights at index " << i << ":" << weights[i] << " is out of range. Clamping to: " << converted_weights[i] << std::endl;
     }
     else
     {
