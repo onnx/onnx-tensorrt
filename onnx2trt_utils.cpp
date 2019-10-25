@@ -953,7 +953,8 @@ NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
 
     OnnxAttrs attrs(node);
     int nbSpatialDims = attrs.at("kernel_shape")->ints().size();   
-    ASSERT(nbSpatialDims == 2 || nbSpatialDims == 3, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT((nbSpatialDims == 1 && needToExpandDims) || nbSpatialDims == 2 || nbSpatialDims == 3,
+      ErrorCode::kUNSUPPORTED_NODE);
 
     // Support for opset10 ceil_mode
     CeilingPoolDim ceilingPool;
