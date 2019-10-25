@@ -104,10 +104,23 @@ Important typedefs required for parsing ONNX models are declared in this header:
 
 ### Docker image
 
-Build the onnx_tensorrt Docker image by running:
+#### Tar-Based TensorRT
 
+Build the onnx_tensorrt Docker image using tar-based TensorRT by running:
+
+    git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
+    cd onnx-tensorrt
     cp /path/to/TensorRT-6.0.*.tar.gz .
-    docker build -t onnx_tensorrt .
+    docker build -f docker/onnx-tensorrt-tar.Dockerfile --tag=onnx-tensorrt:6.0.6 .
+
+#### Deb-Based TensorRT
+
+Build the onnx_tensorrt Docker image using deb-based TensorRT by running:
+
+    git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
+    cd onnx-tensorrt
+    cp /path/to/nv-tensorrt-repo-ubuntu1x04-cudax.x-trt6.x.x.x-ga-yyyymmdd_1-1_amd64.deb .
+    docker build -f docker/onnx-tensorrt-deb.Dockerfile --tag=onnx-tensorrt:6.0.6 .
 
 ### Tests
 

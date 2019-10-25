@@ -173,7 +173,6 @@ endif()
 # Specify the cuda host compiler to use the same compiler as cmake.
 set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
 
-
 # CUDNN
 set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
 find_path(CUDNN_INCLUDE_DIR cudnn.h
