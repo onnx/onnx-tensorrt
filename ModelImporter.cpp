@@ -343,7 +343,7 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       nvonnxparser::IParserError const* error = getError(i);
       if (error->node() != -1) 
       {
-        cout << "Found unsupport node: " << error->node() << endl;
+        cout << "Found unsupported node: " << error->node() << endl;
         error_node = error->node();
         allSupported = false;
       }
@@ -512,6 +512,7 @@ bool ModelImporter::parseWithWeightDescriptors(
           return false;
       }
   }
+
   return true;
 }
 
@@ -546,6 +547,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
   }
 
   string_map<TensorOrWeights> tensors;
+  std::map<std::string, int> shapeTensors;
   TRT_CHECK(importInputs(&_importer_ctx, graph, &tensors, weight_count,
                          weight_descriptors));
   std::vector<size_t> topological_order;
@@ -560,6 +562,12 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     std::vector<TensorOrWeights> outputs;
     GET_VALUE(this->importNode(node, inputs, output_names), &outputs);
+
+    if (node.op_type() == "Shape")
+    {
+        shapeTensors.insert({node.name(), node_idx});
+    }
+
     for( size_t i=0; i<outputs.size(); ++i ) {
       std::string node_output_name = node.output(i);
       TensorOrWeights& output = outputs.at(i);
@@ -594,6 +602,12 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     nvinfer1::ITensor** user_output = _importer_ctx.getUserOutput(output.name().c_str());
     if( !user_output ) {
+      auto outputName = output_tensor_ptr->getName();
+      if (shapeTensors.count(outputName))
+      {
+          _current_node = shapeTensors.at(outputName);
+          ASSERT(false && "Shape tensor outputs are unsupported!" , ErrorCode::kUNSUPPORTED_GRAPH);
+      }
       _importer_ctx.network()->markOutput(*output_tensor_ptr);
       nvinfer1::DataType output_trt_dtype;
       ASSERT(convert_dtype(
