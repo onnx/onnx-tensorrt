@@ -69,7 +69,7 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{1,{1}})
 {
     ShapedWeights scalarWeights = ctx->createTempWeights(type, shape);
-    static_cast<ScalarType*>(scalarWeights.values)[0] = scalar;
+    static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
     return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
 }
 

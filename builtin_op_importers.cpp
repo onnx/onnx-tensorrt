@@ -1610,7 +1610,7 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
                 index = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
             }
 
-            nvinfer1::ITensor* indexTensor{addConstantScalar(ctx, index, ::ONNX_NAMESPACE::TensorProto::INT32, indexShape)->getOutput(0)};
+            nvinfer1::ITensor* indexTensor{addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32, indexShape)->getOutput(0)};
             nvinfer1::ITensor* dimLength{getAxisLength(ctx, &tensor, i, indexShape)};
             if (index < 0)
             {
