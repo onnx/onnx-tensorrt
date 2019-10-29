@@ -43,7 +43,12 @@ inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims)
   std::vector<int> onnx_dims_vector;
   std::vector<nvinfer1::DimensionType> onnx_type_vector;
   for( auto const& onnx_dim : onnx_dims ) {
-    int val = (onnx_dim.dim_param() != "" || onnx_dim.dim_value() == 0) ? -1 : onnx_dim.dim_value();
+    // TensorRT does not support dimension value of 0.
+    if (onnx_dim.dim_value() == 0)
+    {
+        return false;
+    }
+    int val = (onnx_dim.dim_param() != "" || onnx_dim.dim_value() < 0) ? -1 : onnx_dim.dim_value();
     onnx_dims_vector.push_back(val);
     onnx_type_vector.push_back(static_cast<nvinfer1::DimensionType>(0));
   }
