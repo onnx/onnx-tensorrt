@@ -584,7 +584,16 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
 
     for (auto input: inputs)
     {
-        auto* tensor_ptr = &convertToTensor(input, ctx);
+        nvinfer1::ITensor* tensor_ptr;
+        if (input.shape().nbDims == 0 && input.is_weights() && input.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32)
+        {
+            int32_t index = static_cast<int32_t*>(input.weights().values)[0];
+            tensor_ptr = addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
+        }
+        else
+        {
+            tensor_ptr = &convertToTensor(input, ctx);
+        }
         // Broadcast all input tensors to size of maxNbDims
         broadcastTensors(ctx, tensor_ptr, maxNbDims);
         ASSERT(tensor_ptr->getDimensions().nbDims == maxNbDims && "Failed to broadcast tensors elementwise!",

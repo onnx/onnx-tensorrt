@@ -674,14 +674,26 @@ DEFINE_BUILTIN_OP_IMPORTER(Floor)
 DEFINE_BUILTIN_OP_IMPORTER(Gather)
 {
     nvinfer1::ITensor* data = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::ITensor* indices = &convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor* indices;
+    bool shuffleWAR{false};
+    if (inputs.at(1).shape().nbDims == 0 && inputs.at(1).is_weights())
+    {
+        int32_t index = static_cast<int32_t*>(inputs.at(1).weights().values)[0];
+        indices = addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
+        shuffleWAR = true;
+    }
+    else
+    {
+        indices = &convertToTensor(inputs.at(1),ctx);
+    }
+
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
     nvinfer1::Dims dataDims = data->getDimensions();
     int nbDims = dataDims.nbDims;
 
     // Indicies must have at least one dimension in TRT 6.0.
-    bool expandIndices = indices->getDimensions().nbDims == 0;
+    bool expandIndices = inputs.at(1).shape().nbDims == 0;
     // Input tensor to gather on must be at least two dimensions in TRT 6.0
     bool expandInput = nbDims == 1;
 
@@ -689,7 +701,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     ASSERT(!(data->getType() == nvinfer1::DataType::kINT32 && nbDims == 1)
             && "Cannot perform gather on a shape tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
-    if (expandIndices)
+    if (expandIndices && !shuffleWAR)
     {
         std::vector<int> unsqueezeAxis {0};
         indices = unsqueezeTensor(ctx, *indices, unsqueezeAxis);
@@ -1610,7 +1622,7 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
                 index = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
             }
 
-            nvinfer1::ITensor* indexTensor{addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32, indexShape)->getOutput(0)};
+            nvinfer1::ITensor* indexTensor{addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0)};
             nvinfer1::ITensor* dimLength{getAxisLength(ctx, &tensor, i, indexShape)};
             if (index < 0)
             {
