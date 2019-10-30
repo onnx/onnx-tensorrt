@@ -44,7 +44,7 @@ inline bool convert_dims(OnnxDims const& onnx_dims, nvinfer1::Dims& trt_dims)
   std::vector<nvinfer1::DimensionType> onnx_type_vector;
   for( auto const& onnx_dim : onnx_dims ) {
     // TensorRT does not support dimension value of 0.
-    if (onnx_dim.dim_value() == 0)
+    if (onnx_dim.dim_value() == 0 && onnx_dim.dim_param() == "")
     {
         return false;
     }
