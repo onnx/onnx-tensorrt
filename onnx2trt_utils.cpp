@@ -587,7 +587,7 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
         nvinfer1::ITensor* tensor_ptr;
         if (input.shape().nbDims == 0 && input.is_weights())
         {
-          if (input.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32)
+          if (input.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32 || input.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
           {
             int32_t index = static_cast<int32_t*>(input.weights().values)[0];
             tensor_ptr = addConstantScalar<int32_t>(ctx, static_cast<int32_t>(index), ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
