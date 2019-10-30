@@ -1741,9 +1741,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 
         if (dims.d[axis] != -1)
         {
-            int startsVal = static_cast<int>(handleNegativeIndex(starts.at(i)));
-            int endsVal = static_cast<int>(handleNegativeIndex(ends.at(i)));
-            ASSERT((std::min(dims.d[axis], endsVal) - startsVal) / steps.at(i) != 0
+            int64_t startsVal = handleNegativeIndex(starts.at(i));
+            int64_t endsVal = handleNegativeIndex(ends.at(i));
+            ASSERT((std::min(static_cast<int64_t>(dims.d[axis]), endsVal) - startsVal) / steps.at(i) != 0
                 && "TensorRT does not support size 0 slices!", ErrorCode::kUNSUPPORTED_NODE);
         }
 
