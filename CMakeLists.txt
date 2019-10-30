@@ -89,6 +89,7 @@ set(API_TESTS_SOURCES
 
 set(HEADERS
   NvOnnxParser.h
+  NvOnnxParserTypedefs.h
 )
 
 if (NOT TARGET protobuf::libprotobuf)
