@@ -311,6 +311,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat)
     {
         tensors.push_back(&convertToTensor(input, ctx));
     }
+
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis");
     int nbDims = inputs.at(0).shape().nbDims;
@@ -1580,6 +1581,10 @@ NodeImportResult staticInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor
     {
         static const auto handleNegativeIndex = [&ctx, &axis, &shape](int64_t index) -> int64_t
         {
+            if (std::abs(index) > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+            {
+                return static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+            }
             return (index < 0) ? (shape.d[axis] + index) : index;
         };
 
@@ -1588,9 +1593,13 @@ NodeImportResult staticInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor
             int64_t start, end, stride;
             std::tie(start, end, stride) = sliceBounds.at(axis);
 
+            end = std::min(handleNegativeIndex(end), static_cast<int64_t>(shape.d[axis]));
+
             starts.d[axis] = handleNegativeIndex(start);
             strides.d[axis] = handleNegativeIndex(stride);
-            sizes.d[axis] = (std::min(handleNegativeIndex(end), static_cast<int64_t>(shape.d[axis])) - starts.d[axis]) / strides.d[axis];
+            int64_t sliceSize = (end - starts.d[axis]) / strides.d[axis];
+            // Add 1 to slice size since int division floors the result.
+            sizes.d[axis] = (end - starts.d[axis]) % strides.d[axis] == 0 ? sliceSize : sliceSize + 1;
         }
         else
         {
@@ -1616,7 +1625,7 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
     {
         static const auto handleNegativeIndex = [&ctx, &indexShape, &tensor, &i](int64_t index) -> nvinfer1::ITensor*
         {
-            if (index > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+            if (std::abs(index) > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
             {
                 std::cout << "WARNING: Slice index is out of bounds of INT32, clamping to INT32_MAX" << std::endl;
                 index = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
@@ -1639,7 +1648,7 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
 
             startIndices.emplace_back(handleNegativeIndex(start));
             endIndex = handleNegativeIndex(end);
-            strideIndices.emplace_back(handleNegativeIndex(1)); // This should never be negative anyway.
+            strideIndices.emplace_back(handleNegativeIndex(stride)); // This should never be negative anyway.
         }
         else
         {
@@ -1741,9 +1750,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 
         if (dims.d[axis] != -1)
         {
-            int startsVal = static_cast<int>(handleNegativeIndex(starts.at(i)));
-            int endsVal = static_cast<int>(handleNegativeIndex(ends.at(i)));
-            ASSERT((std::min(dims.d[axis], endsVal) - startsVal) / steps.at(i) != 0
+            int64_t startsVal = handleNegativeIndex(starts.at(i));
+            int64_t endsVal = handleNegativeIndex(ends.at(i));
+            ASSERT((std::min(static_cast<int64_t>(dims.d[axis]), endsVal) - startsVal) / steps.at(i) != 0
                 && "TensorRT does not support size 0 slices!", ErrorCode::kUNSUPPORTED_NODE);
         }
 
@@ -1885,7 +1894,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
         sliceStart.d[axis] = start_index[i];
         sliceSize.d[axis] = output_lengths[i];
         auto const layer = ctx->network()->addSlice(*tensor_ptr, sliceStart, sliceSize, sliceStride);
-        // std::vector<int> size_vecto(dims.d, dims.d+dims.nbDims);
         if (std::any_of(sliceSize.d, sliceSize.d + sliceSize.nbDims, [](int i){return i == -1;})){
             layer->setInput(1, dimension_to_tensor(ctx, sliceStart));
             layer->setInput(2, dimension_to_tensor(ctx, sliceSize));
