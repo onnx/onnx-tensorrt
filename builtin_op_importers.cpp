@@ -1579,7 +1579,7 @@ NodeImportResult staticInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor
 
     for (int axis = 0; axis < rank; ++axis)
     {
-        static const auto handleNegativeIndex = [&ctx, &axis, &shape](int64_t index) -> int64_t
+        const auto handleNegativeIndex = [&ctx, &axis, &shape](int64_t index) -> int64_t
         {
             if (std::abs(index) > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
             {
@@ -1619,11 +1619,11 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
     std::vector<nvinfer1::ITensor*> startIndices{};
     std::vector<nvinfer1::ITensor*> sizeIndices{};
     std::vector<nvinfer1::ITensor*> strideIndices{};
-    nvinfer1::Dims indexShape{1, 1};
+    nvinfer1::Dims indexShape{1, {1}};
 
     for (int i = 0; i < rank; ++i)
     {
-        static const auto handleNegativeIndex = [&ctx, &indexShape, &tensor, &i](int64_t index) -> nvinfer1::ITensor*
+        const auto handleNegativeIndex = [&ctx, &indexShape, &tensor, &i](int64_t index) -> nvinfer1::ITensor*
         {
             if (std::abs(index) > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
             {
@@ -1743,7 +1743,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
     {
         // Do a sanity check here that the combination of starts, ends, and steps does not cause a size 0 for non-dynamic dimensions.
         auto axis = axes.at(i);
-        static const auto handleNegativeIndex = [&axis, &dims](int64_t index) -> int64_t
+        const auto handleNegativeIndex = [&axis, &dims](int64_t index) -> int64_t
         {
             return (index < 0) ? (dims.d[axis] + index) : index;
         };
