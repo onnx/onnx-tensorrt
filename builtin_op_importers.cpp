@@ -1594,12 +1594,12 @@ NodeImportResult staticInputSliceHelper(IImporterContext* ctx, nvinfer1::ITensor
             std::tie(start, end, stride) = sliceBounds.at(axis);
 
             end = std::min(handleNegativeIndex(end), static_cast<int64_t>(shape.d[axis]));
-
             starts.d[axis] = handleNegativeIndex(start);
             strides.d[axis] = handleNegativeIndex(stride);
-            int64_t sliceSize = (end - starts.d[axis]) / strides.d[axis];
-            // Add 1 to slice size since int division floors the result.
-            sizes.d[axis] = (end - starts.d[axis]) % strides.d[axis] == 0 ? sliceSize : sliceSize + 1;
+            // size = ceil((end - start) / stride). All values have been converted, so these casts to float should be OK.
+            int64_t sliceSize = static_cast<int64_t>(std::ceil((end - starts.d[axis]) / static_cast<float>(strides.d[axis])));
+            ASSERT(sliceSize > 0 && "TensorRT does not support 0 sized slices!", ErrorCode::kUNSUPPORTED_NODE);
+            sizes.d[axis] = sliceSize;
         }
         else
         {
@@ -1657,22 +1657,17 @@ NodeImportResult dynamicInputSliceHelper(IImporterContext* ctx, nvinfer1::ITenso
             endIndex = getAxisLength(ctx, &tensor, i, indexShape);
             strideIndices.emplace_back(handleNegativeIndex(1));
         }
-        // size[i] = min(end[i], getAxisLength(ctx, &tensor, i, indexShape)) - start[i]) / stride[i]
-        sizeIndices.emplace_back(
-            ctx->network()->addElementWise(
-                *ctx->network()->addElementWise(
-                    *ctx->network()->addElementWise(
-                        *endIndex,
-                        *getAxisLength(ctx, &tensor, i, indexShape),
-                        nvinfer1::ElementWiseOperation::kMIN
-                    )->getOutput(0),
-                    *startIndices.back(),
-                    nvinfer1::ElementWiseOperation::kSUB
-                )->getOutput(0),
-                *strideIndices.back(),
-                nvinfer1::ElementWiseOperation::kDIV
-            )->getOutput(0)
-        );
+        auto* zeroTensor = addConstantScalar<int32_t>(ctx, 0, ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
+        // Adapt the size caluclation into TensorRT supported layers.
+        // size[i] = -(floor_div(-(min(end[i], getAxisLength(ctx, &tensor, i, indexShape)) - start[i]), stride[i]))
+        auto* end = ctx->network()->addElementWise(*endIndex, *getAxisLength(ctx,&tensor,i, indexShape), nvinfer1::ElementWiseOperation::kMIN)->getOutput(0);
+        auto* diff = ctx->network()->addElementWise(*end, *startIndices.back(), nvinfer1::ElementWiseOperation::kSUB)->getOutput(0);
+        // Negate the diff
+        diff = ctx->network()->addElementWise(*zeroTensor, *diff, nvinfer1::ElementWiseOperation::kSUB)->getOutput(0);
+        auto* size = ctx->network()->addElementWise(*diff, *strideIndices.back(), nvinfer1::ElementWiseOperation::kFLOOR_DIV)->getOutput(0);
+        // Negate the size
+        size = ctx->network()->addElementWise(*zeroTensor, *size, nvinfer1::ElementWiseOperation::kSUB)->getOutput(0);
+        sizeIndices.emplace_back(size);
     }
 
     nvinfer1::ITensor* startsTensor = ctx->network()->addConcatenation(startIndices.data(), startIndices.size())->getOutput(0);
@@ -1690,7 +1685,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 {
     // If opset version >= 10 slice paramerters are weights instead of attributes
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor.getDimensions();
     std::vector<int64_t> starts;
     std::vector<int64_t> ends;
     std::vector<int64_t> axes;
@@ -1741,21 +1735,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 
     for (size_t i = 0; i < axes.size(); ++i)
     {
-        // Do a sanity check here that the combination of starts, ends, and steps does not cause a size 0 for non-dynamic dimensions.
-        auto axis = axes.at(i);
-        const auto handleNegativeIndex = [&axis, &dims](int64_t index) -> int64_t
-        {
-            return (index < 0) ? (dims.d[axis] + index) : index;
-        };
-
-        if (dims.d[axis] != -1)
-        {
-            int64_t startsVal = handleNegativeIndex(starts.at(i));
-            int64_t endsVal = handleNegativeIndex(ends.at(i));
-            ASSERT((std::min(static_cast<int64_t>(dims.d[axis]), endsVal) - startsVal) / steps.at(i) != 0
-                && "TensorRT does not support size 0 slices!", ErrorCode::kUNSUPPORTED_NODE);
-        }
-
         sliceBounds[axes.at(i)] = std::make_tuple(starts.at(i), ends.at(i), steps.at(i));
     }
 
