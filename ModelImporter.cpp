@@ -332,8 +332,8 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   // Parse the graph and see if we hit any parsing errors
   allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
 
-  size_t error_node = std::numeric_limits<size_t>::max();
-  std::string input_node = "";
+  int error_node = -1;
+  std::string input_node{};
   
   if (!allSupported)
   {
@@ -343,7 +343,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       nvonnxparser::IParserError const* error = getError(i);
       if (error->node() != -1) 
       {
-        cout << "Found unsupported node: " << error->node() << endl;
         error_node = error->node();
         allSupported = false;
       }
@@ -354,7 +353,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
         // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
         // around MAKE_INPUT_ERROR.
         input_node = error->file();
-        cout << "Found unsupported input: " << input_node << endl;
       }
     }
   }
@@ -369,18 +367,19 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
   {
     ::ONNX_NAMESPACE::NodeProto const& node =  model.graph().node(node_idx);
     // Check for connecting nodes to faulty input nodes and mark them as unsupported
-    bool contains_input = (input_node == "") ? false : check_for_input(node, input_node);
-    if (this->supportsOperator(node.op_type().c_str()) && !contains_input) 
+    bool contains_input = (input_node.empty()) ? false : check_for_input(node, input_node);
+    bool contains_index = node_idx == error_node;
+    if (this->supportsOperator(node.op_type().c_str()) && !contains_input && !contains_index)
     {
       if (newSubGraph) 
       {
         // If it is the beginning of a new subGraph, we start a new vector
         sub_graph_collection.emplace_back();
-        // Mark all new graphs as "unknown"
+        // Mark all new graphs as "unsupported"
         sub_graph_collection.back().second = false;
         newSubGraph = false;
       }
-      // We add the new node to the last graph
+      // Add supported nodes to the subgraph at the back.
       sub_graph_collection.back().first.emplace_back(node_idx);
     } 
     else 
@@ -388,75 +387,6 @@ bool ModelImporter::supportsModel(void const *serialized_onnx_model,
       // This is not a supported node, reset the newSubGraph
       newSubGraph = true;
       allSupported = false;
-    }
-  }
-
-  if (!allSupported)
-  {
-    // We hit some errors when parsing. Iterate through them to find the failing node.
-    int nerror = getNbErrors();
-    for (int i = 0; i < nerror; ++i) 
-    {
-      nvonnxparser::IParserError const* error = getError(i);
-      if (error->node() != -1) 
-      {
-        error_node = error->node();
-        allSupported = false;
-      }
-      // The node that we failed on is one of the input nodes (-1). Since TRT cannot parse the
-      // inputs return false.
-      else
-      {
-        return allSupported;
-      }
-    }
-    // Update the subgraph collection.
-    for (size_t graph_index = 0; graph_index < sub_graph_collection.size(); graph_index++)
-    {
-      NodesContainer_t subgraph = sub_graph_collection[graph_index].first;
-
-      // If we've already iterated past the error_node, all future graphs are unknown, so break
-      if (subgraph[0] > error_node)
-      {
-        break;
-      }
-      for (size_t node_index = 0; node_index < subgraph.size(); node_index++)
-      {
-        // Split the graph at the node we hit an assertion at when parsing.
-        if (subgraph[node_index] == error_node)
-        {
-          // Case where subgraph has only one node and it's unsupported, simply delete it.
-          if (node_index == 0 && subgraph.size() == 1)
-          {
-            sub_graph_collection.erase(sub_graph_collection.begin() + graph_index);
-          }
-          // Case where subgraph has more than one node and the first node is unsupported. No "split_before" graph.
-          // The split_after graph is marked as unsupported.
-          else if (node_index == 0)
-          {
-            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
-            sub_graph_collection[graph_index].first = split_after;
-            sub_graph_collection[graph_index].second = false;
-          }
-          // Case where subgraph has more than one node and the last node is unsupported. No "split_after" graph.
-          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
-          else if (node_index == subgraph.size() - 1)
-          {
-            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
-            sub_graph_collection[graph_index].first = split_before;
-          }
-          // Case where unsupported node is somewhere in the middle. Split the subgraph at that point into two.
-          // Note due to potential shape tensor inputs, cannot mark the first subgraph as supported here.
-          else
-          {
-            NodesContainer_t split_before (subgraph.begin(), subgraph.begin() + node_index);
-            NodesContainer_t split_after (subgraph.begin() + node_index + 1, subgraph.end());
-            sub_graph_collection[graph_index].first = split_before;
-            sub_graph_collection.insert(sub_graph_collection.begin() + graph_index + 1, std::make_pair(split_after, false));
-          }
-          break;
-        }
-      }
     }
   }
 
@@ -565,7 +495,10 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
 
     if (node.op_type() == "Shape")
     {
+        // Insert the node itself to catch ShapeLayer outputs.
         shapeTensors.insert({node.name(), node_idx});
+        // Shape layers should only have one output
+        shapeTensors.insert({node.output(0), node_idx});
     }
 
     for( size_t i=0; i<outputs.size(); ++i ) {
@@ -602,6 +535,7 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     }
     nvinfer1::ITensor** user_output = _importer_ctx.getUserOutput(output.name().c_str());
     if( !user_output ) {
+      // Sanity check that the output is not the output of a shape layer
       auto outputName = output_tensor_ptr->getName();
       if (shapeTensors.count(outputName))
       {
@@ -630,6 +564,25 @@ ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const &model,
     ASSERT(user_output.is_tensor(), ErrorCode::kINVALID_VALUE);
     *user_output_ptr = &user_output.tensor();
   }
+
+  // Do a sanity check that all ShapeLayer outputs are being used as shape tensors.
+  auto* network = _importer_ctx.network();
+
+  for (int i = 0; i < network->getNbLayers(); i++)
+  {
+      auto* layer = network->getLayer(i);
+      for (int j = 0; j < layer->getNbInputs(); j++)
+      {
+         auto* tensor = layer->getInput(j);
+         auto tensorName = tensor->getName();
+         if (shapeTensors.count(tensorName) && !tensor->isShapeTensor())
+         {
+            _current_node = shapeTensors.at(tensorName);
+            ASSERT(false && "Shape layer outputs must be used as a shape tensor!" , ErrorCode::kUNSUPPORTED_GRAPH);
+         }
+      }
+  }
+
   return Status::success();
 }
 
