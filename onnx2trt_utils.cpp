@@ -709,6 +709,12 @@ nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
     return flattenTensorStatic(ctx, tensor, axis);
 }
 
+nvinfer1::ITensor* gatherDimension(IImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape)
+{
+    auto& axisValue = *addConstantScalar(ctx, dim, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape)->getOutput(0);
+    return ctx->network()->addGather(*shapeTensor, axisValue, 0)->getOutput(0);
+}
+
 bool isDynamic(nvinfer1::Dims const& dims)
 {
     return std::any_of(dims.d, dims.d + dims.nbDims, [](int dim) {return dim == -1;});
@@ -952,6 +958,26 @@ nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims)
     }
     auto valueWeights = TensorOrWeights{tempWeights};
     return convertToTensor(valueWeights, ctx);
+}
+
+nvinfer1::ITensor* overwriteDim(IImporterContext* ctx, nvinfer1::ITensor* shape, nvinfer1::ITensor* dim, int axis)
+{
+    const int shapeLength = shape->getDimensions().d[0];
+
+    std::vector<nvinfer1::ITensor*> dims{};
+
+    for (int i = 0; i < shapeLength; ++i)
+    {
+        if (i == axis)
+        {
+            dims.emplace_back(dim);
+        }
+        else
+        {
+            dims.emplace_back(gatherDimension(ctx, shape, i, nvinfer1::Dims{1, 1}));
+        }
+    }
+    return ctx->network()->addConcatenation(dims.data(), dims.size())->getOutput(0);
 }
 
 NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::PoolingType type)
