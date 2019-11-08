@@ -167,6 +167,10 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
 // Helper functino to flatten a tensor on a specified axis
 nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis);
 
+// Gathers the specified dimension from a shape tensor. e.g. gatherDimension(shape=(7, 6, 5), dim=2) would return 5.
+// shape specifies the shape of the returned Tensor. Must have a volume of 1.
+nvinfer1::ITensor* gatherDimension(IImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape);
+
 // Helper function to check if any input dimensions are dynamic
 bool isDynamic (nvinfer1::Dims const& dims);
 
@@ -213,6 +217,10 @@ nvinfer1::Dims makeDims(int nbDims, int val);
 
 // Helper function to create a shape tensor from a Dims object for dynamic reshape
 nvinfer1::ITensor& makeShapeTensor(IImporterContext* ctx, nvinfer1::Dims dims);
+
+
+// Helper function to overwrite the value of a single axis in a shape tensor
+nvinfer1::ITensor* overwriteDim(IImporterContext* ctx, nvinfer1::ITensor* shape, nvinfer1::ITensor* dim, int axis);
 
 // Helper function to map various ONNX pooling ops into TensorRT.
 NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::PoolingType type);

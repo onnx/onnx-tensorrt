@@ -1839,48 +1839,59 @@ DEFINE_BUILTIN_OP_IMPORTER(SpatialBN)
 
 DEFINE_BUILTIN_OP_IMPORTER(Split)
 {
-    ASSERT(inputs.size() == 1, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
-    int nbDims = dims.nbDims;
+    const int numOutputs = node.output().size();
+
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    const int rank = tensorPtr->getDimensions().nbDims;
+    nvinfer1::ITensor* shape = ctx->network()->addShape(*tensorPtr)->getOutput(0);
+
     OnnxAttrs attrs(node);
     int axis = attrs.get<int>("axis", 0);
-    TRT_CHECK(convert_axis(axis, nbDims));
-    std::vector<int> output_lengths;
-    int noutput = node.output().size();
-    std::vector<int> start_index (noutput, 0);
+    TRT_CHECK(convert_axis(axis, rank));
+
+    std::vector<int> outputLengths;
     if (attrs.count("split"))
     {
-        output_lengths = attrs.get<std::vector<int>>("split");
-        ASSERT(static_cast<int>(output_lengths.size()) == noutput, ErrorCode::kINVALID_NODE);
-    }
-    else
-    {
-        ASSERT(dims.d[axis] == -1 || dims.d[axis] % noutput == 0, ErrorCode::kINVALID_NODE);
-        output_lengths.assign(noutput, dims.d[axis] / noutput);
-    }
-    for (size_t i = 1; i < output_lengths.size(); i++)
-    {
-        start_index[i] = start_index[i - 1] + output_lengths[i - 1];
+        outputLengths = attrs.get<std::vector<int>>("split");
+        ASSERT(static_cast<int>(outputLengths.size()) == numOutputs, ErrorCode::kINVALID_NODE);
     }
 
-    nvinfer1::Dims sliceStart = makeDims(nbDims, 0);
-    nvinfer1::Dims sliceSize = dims;
-    nvinfer1::Dims sliceStride = makeDims(nbDims, 1);
-    std::vector<TensorOrWeights> outputs;
-    for (int i = 0; i < noutput; ++i)
+    nvinfer1::ITensor* startSliceAxis{addConstantScalar<int32_t>(ctx, 0, ::ONNX_NAMESPACE::TensorProto::INT32, nvinfer1::Dims{1, 1})->getOutput(0)};
+    // sizeSliceAxis = axisLength / numOutputs
+    nvinfer1::ITensor* sizeSliceAxis{ctx->network()->addElementWise(
+        *gatherDimension(ctx, shape, axis, nvinfer1::Dims{1, 1}),
+        *addConstantScalar(ctx, numOutputs, ::ONNX_NAMESPACE::TensorProto::INT32, nvinfer1::Dims{1, 1})->getOutput(0),
+        nvinfer1::ElementWiseOperation::kDIV
+    )->getOutput(0)};
+
+    nvinfer1::Dims zeroStartsDims{rank};
+    std::fill(zeroStartsDims.d, zeroStartsDims.d + zeroStartsDims.nbDims, 0);
+    nvinfer1::ITensor* zeroStarts = &makeShapeTensor(ctx, zeroStartsDims);
+
+    nvinfer1::Dims strides{rank};
+    std::fill(strides.d, strides.d + strides.nbDims, 1);
+
+    std::vector<TensorOrWeights> outputs{};
+    for (int i = 0; i < numOutputs; ++i)
     {
-        sliceStart.d[axis] = start_index[i];
-        sliceSize.d[axis] = output_lengths[i];
-        auto const layer = ctx->network()->addSlice(*tensor_ptr, sliceStart, sliceSize, sliceStride);
-        if (std::any_of(sliceSize.d, sliceSize.d + sliceSize.nbDims, [](int i){return i == -1;})){
-            layer->setInput(1, dimension_to_tensor(ctx, sliceStart));
-            layer->setInput(2, dimension_to_tensor(ctx, sliceSize));
-            layer->setInput(3, dimension_to_tensor(ctx, sliceStride));
+        if (!outputLengths.empty())
+        {
+            sizeSliceAxis = addConstantScalar(ctx, outputLengths.at(i), ::ONNX_NAMESPACE::TensorProto::INT32, nvinfer1::Dims{1, 1})->getOutput(0);
         }
-        outputs.push_back(layer->getOutput(0));
+
+        nvinfer1::ITensor* starts{overwriteDim(ctx, zeroStarts, startSliceAxis, axis)};
+        nvinfer1::ITensor* sizes{overwriteDim(ctx, shape, sizeSliceAxis, axis)};
+
+        nvinfer1::ISliceLayer* slice = ctx->network()->addSlice(*tensorPtr, nvinfer1::Dims{rank}, nvinfer1::Dims{rank}, strides);
+        slice->setInput(1, *starts);
+        slice->setInput(2, *sizes);
+        outputs.emplace_back(slice->getOutput(0));
+
+        startSliceAxis = ctx->network()->addElementWise(*startSliceAxis, *sizeSliceAxis, nvinfer1::ElementWiseOperation::kSUM)->getOutput(0);
     }
+
     return outputs;
+
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Sqrt)
