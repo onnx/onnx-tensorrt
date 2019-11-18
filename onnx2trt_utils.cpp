@@ -229,26 +229,45 @@ Status applyLegacyBinaryOpBroadcasting(IImporterContext* ctx,
 NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    ASSERT(tensorPtr->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Support 1D argMin/argMax
+    bool needToExpandDims = (tensorPtr->getDimensions().nbDims == 1);
+    if (needToExpandDims)
+    {
+        // Expand dims from 1D to 2D
+        std::vector<int> axes{1};
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+    }
     // Get attributes.
     OnnxAttrs attrs(node);
     int keepdims = attrs.get("keepdims", 1);
     int axis = attrs.get("axis", 0);
 
     // Insert a TopK layer with k set to 1.
-    int nbDims = tensor.getDimensions().nbDims;
+    int nbDims = tensorPtr->getDimensions().nbDims;
     TRT_CHECK(convert_axis(axis, nbDims));
 
     uint32_t axisMask = 1 << axis;
-    nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(tensor, op, 1, axisMask);
+    nvinfer1::ITopKLayer* layer = ctx->network()->addTopK(*tensorPtr, op, 1, axisMask);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
     // We don't care about the TopK values, just the indices.
     nvinfer1::ITensor* indices = layer->getOutput(1);
     indices->setType(nvinfer1::DataType::kINT32);
+
+    // Squeeze back to 1D if applicable
+    if (needToExpandDims)
+    {
+        std::vector<int> axes{1};
+        indices = squeezeTensor(ctx, *indices, axes);
+        ASSERT(indices, ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    // The default behavior of the TopK layer is to keepdims.
     if (keepdims)
     {
-        // The default behavior of the TopK layer is to keepdims.
         return {{indices}};
     }
     else
@@ -1177,9 +1196,11 @@ nvinfer1::ITensor* squeezeStaticTensor(IImporterContext* ctx, nvinfer1::ITensor&
     std::set<int> axesSet(axes.begin(), axes.end());
     std::vector<int> shape{dims.d, dims.d + dims.nbDims};
 
+    int axisCount = 0;
     for (const auto& axis : axesSet)
     {
-        shape.erase(shape.begin() + axis);
+        shape.erase(shape.begin() + axis - axisCount);
+        axisCount++;
     }
 
     nvinfer1::Dims newShape{dims.nbDims - static_cast<int>(axesSet.size())};

@@ -889,7 +889,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GlobalMaxPool)
                                 static_cast<nvinfer1::Dims>(nvinfer1::Dims2{dims.d[2], dims.d[3]}) :
                                 static_cast<nvinfer1::Dims>(nvinfer1::Dims3{dims.d[2], dims.d[3], dims.d[4]});
     ASSERT(!isDynamic(kernelSize) && "Cannot run GlobalMaxPool on an input with dynamic spatial dimensions!", ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kAVERAGE, kernelSize));
+    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kMAX, kernelSize));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(HardSigmoid)
