@@ -51,6 +51,17 @@ For building on master, we recommend following the instructions on the [master b
 
 To build on older branches refer to their respective READMEs.
 
+## `onnx2trt` install instruction for Jetson
+
+```
+git clone https://github.com/onnx/onnx-tensorrt
+cd onnx-tensorrt
+git submodule init
+git submodule update
+cmake . -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include -DTENSORRT_ROOT=/usr/src/tensorrt -DGPU_ARCHS="53"
+make
+sudo make install
+```
 
 ## Executable usage
 
