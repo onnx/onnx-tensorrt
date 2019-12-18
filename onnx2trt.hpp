@@ -24,15 +24,17 @@
 
 #include "NvOnnxParser.h"
 #include "ShapedWeights.hpp"
-#include "TensorOrWeights.hpp"
 #include "Status.hpp"
+#include "TensorOrWeights.hpp"
 
-#include <onnx/onnx_pb.h>
 #include <NvInfer.h>
-#include <vector>
 #include <functional>
+#include <onnx/onnx_pb.h>
+#include <unordered_map>
+#include <vector>
 
-namespace onnx2trt {
+namespace onnx2trt
+{
 
 class IImporterContext;
 
@@ -41,18 +43,32 @@ class IImporterContext;
 //         Can't use ::onnx::NodeProto
 //         Can't use std::function
 typedef ValueOrStatus<std::vector<TensorOrWeights>> NodeImportResult;
-typedef std::function<NodeImportResult(IImporterContext *ctx,
-                                       ::ONNX_NAMESPACE::NodeProto const &node,
-                                       std::vector<TensorOrWeights> &inputs)>
+typedef std::function<NodeImportResult(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs)>
     NodeImporter;
 
-struct IImporterContext {
-  virtual nvinfer1::INetworkDefinition* network() = 0;
-  virtual ShapedWeights createTempWeights(ShapedWeights::DataType type,
-                                          nvinfer1::Dims shape) = 0;
-  virtual int64_t getOpsetVersion(const char* domain="") const = 0;
+template <typename T>
+using StringMap = std::unordered_map<std::string, T>;
+
+class IImporterContext
+{
+public:
+    virtual nvinfer1::INetworkDefinition* network() = 0;
+    virtual StringMap<TensorOrWeights>& tensors() = 0;
+    virtual StringMap<nvinfer1::TensorLocation>& tensorLocations() = 0;
+    virtual StringMap<float>& tensorRangeMins() = 0;
+    virtual StringMap<float>& tensorRangeMaxes() = 0;
+    virtual StringMap<nvinfer1::DataType>& layerPrecisions() = 0;
+    virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) = 0;
+    virtual void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) = 0;
+    virtual ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape) = 0;
+    virtual int64_t getOpsetVersion(const char* domain = "") const = 0;
+    virtual nvinfer1::ILogger& logger() = 0;
+
 protected:
-  virtual ~IImporterContext() {}
+    virtual ~IImporterContext()
+    {
+    }
 };
 
 } // namespace onnx2trt

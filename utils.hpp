@@ -24,5 +24,5 @@
 
 #include <unordered_map>
 
-template<typename T>
+template <typename T>
 using string_map = std::unordered_map<std::string, T>;

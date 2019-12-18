@@ -25,7 +25,8 @@
 #include "onnx2trt.hpp"
 #include "utils.hpp"
 
-namespace onnx2trt {
+namespace onnx2trt
+{
 
 string_map<NodeImporter>& getBuiltinOpImporterMap();
 
