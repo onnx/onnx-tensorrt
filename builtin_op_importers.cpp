@@ -147,6 +147,99 @@ DEFINE_BUILTIN_OP_IMPORTER(AveragePool)
     return poolingHelper(ctx, node, inputs, nvinfer1::PoolingType::kAVERAGE);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(S3Pool)
+{
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::Dims dims = tensorPtr->getDimensions();
+    bool needToExpandDims = (dims.nbDims == 3);
+    if (needToExpandDims)
+    {
+        // Expand spatial dims from 1D to 2D
+        std::vector<int>axes {3};
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+        dims = tensorPtr->getDimensions();
+    }
+
+    OnnxAttrs attrs(node);
+    int nbSpatialDims = attrs.at("kernel_shape")->ints().size();
+    ASSERT((nbSpatialDims == 1 && needToExpandDims) || nbSpatialDims == 2 || nbSpatialDims == 3,
+      ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::Dims kernel_size = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::PaddingMode paddingMode;
+
+    bool exclude_padding(true);
+
+    // Populate pooling parameters.
+    get_kernel_params(node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding);
+    auto type = nvinfer1::PoolingType::kAVERAGE;
+
+    // Populate S3Pool plugin properties
+    const std::string pluginName = "S3Pool_TRT";
+    const std::string pluginVersion = "001";
+    std::vector<nvinfer1::PluginField> f;
+
+    f.emplace_back("n_kernel_shape", &kernel_size.nbDims, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("kernel_shape", kernel_size.d, nvinfer1::PluginFieldType::kINT32, kernel_size.nbDims);
+    f.emplace_back("n_beg_padding", &beg_padding.nbDims, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("beg_padding", beg_padding.d, nvinfer1::PluginFieldType::kINT32, beg_padding.nbDims);
+    f.emplace_back("n_end_padding", &end_padding.nbDims, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("end_padding", end_padding.d, nvinfer1::PluginFieldType::kINT32, end_padding.nbDims);
+    f.emplace_back("n_strides", &strides.nbDims, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("strides", strides.d, nvinfer1::PluginFieldType::kINT32, strides.nbDims);
+
+    // Create plugin from registry
+    nvinfer1::IPluginV2* plugin = importPluginFromRegistry(ctx, pluginName, pluginVersion, node.op_type(), f);
+
+    ASSERT(plugin != nullptr && "S3Pool plugin was not found in the plugin registry!", ErrorCode::kINTERNAL_ERROR);
+
+    auto pluginLayer = ctx->network()->addPluginV2(&tensorPtr, 1, *plugin);
+
+    // Note: Average pooling requires special care with asymmetric padding
+    //       because the need to exclude padding pixels from the average
+    //       means we can't just use a pre-padding layer.
+    if (type == nvinfer1::PoolingType::kAVERAGE)
+    {
+        nvinfer1::DimsHW pre_crop(0, 0), post_crop(0, 0);
+        for (int d = 0; d < 2; ++d)
+        {
+            if (end_padding.d[d] == beg_padding.d[d])
+            {
+                // Symmetric padding, nothing special needed
+            }
+            else if (end_padding.d[d] == beg_padding.d[d] + 1)
+            {
+                // Pad symmetrically such that we get one more output element at
+                // the beginning, and then crop it off after the pooling operation.
+                beg_padding.d[d] += strides.d[d];
+                pre_crop.d[d] = 1;
+            }
+            else
+            {
+                bool supported_form_of_asymmetric_padding_for_AveragePool = false;
+                ASSERT(supported_form_of_asymmetric_padding_for_AveragePool, ErrorCode::kUNSUPPORTED_NODE);
+            }
+        }
+    }
+
+    tensorPtr = pluginLayer->getOutput(0);
+    dims = tensorPtr->getDimensions();
+
+    if (needToExpandDims)
+    {
+        // Un-expand spatial dims back to 1D
+        std::vector<int>axes{3};
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    return {{tensorPtr}};
+}
+
 NodeImportResult batchnormFallback(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs)
 {
     using eOp = nvinfer1::ElementWiseOperation;
