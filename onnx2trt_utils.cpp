@@ -719,7 +719,7 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
 {
     const auto mPluginRegistry = getPluginRegistry();
 
-    const auto pluginCreator = mPluginRegistry->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), "ONNXTRT_NAMESPACE");
+    const auto pluginCreator = mPluginRegistry->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), "");
 
     if (!pluginCreator)
     {
