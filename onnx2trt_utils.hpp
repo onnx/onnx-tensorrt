@@ -166,6 +166,9 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
 // Helper function to broadcast three tensors to the largest one's shape
 Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2, nvinfer1::ITensor*& t3);
 
+// Helper function to check that linear resize can be used
+bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
+
 // Helper function for constantOfShape operator. Input shape must be a shape tensor
 nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape);
 

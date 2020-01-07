@@ -2452,7 +2452,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     ASSERT(scales.is_weights() && "Resize scales must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights scales_weights = scales.weights();
     ASSERT(scales_weights.shape.nbDims == 1, ErrorCode::kUNSUPPORTED_NODE);
+    int scaleSize = scales_weights.shape.d[0];
+    ASSERT(scaleSize == inputRank, ErrorCode::kINVALID_NODE);
     float const* scaleValues = static_cast<float const*>(scales_weights.values);
+    if (resizeMode == nvinfer1::ResizeMode::kLINEAR)
+    {
+        ASSERT(canUseLinearResize(scaleSize, scaleValues),
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
     layer->setResizeMode(resizeMode);
     layer->setScales(scaleValues, inputRank);
     RETURN_FIRST_OUTPUT(layer);
@@ -3279,8 +3286,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample)
     nvinfer1::ResizeMode resizeMode = nvinfer1::ResizeMode::kNEAREST;
     if (mode == "linear")
     {
-        // Linear resize support 1-D, 2-D and 3D resize.
-        ASSERT((nbDims >= 1) && (nbDims <= 3), ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(canUseLinearResize(scale_factors.size(), &scale_factors.front()),
+            ErrorCode::kUNSUPPORTED_NODE);
         resizeMode = nvinfer1::ResizeMode::kLINEAR;
     }
     // Add resize layer
