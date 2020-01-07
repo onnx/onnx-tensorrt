@@ -153,6 +153,22 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
     return Status::success();
 }
 
+bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors)
+{
+    // Linear resize supports up to 3D resize on the outermost dimensions.
+    if (scaleSize > 3)
+    {
+        for (size_t i = 0; i < scaleSize - 3; i++)
+        {
+            if (scaleFactors[i] != 1)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape)
 {
     int rank = shape->getDimensions().d[0];
