@@ -1074,34 +1074,37 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
 
 DEFINE_BUILTIN_OP_IMPORTER(GlobalAveragePool)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor.getDimensions();
-    int nbSpatialDims = dims.nbDims - 2;
-    ASSERT((nbSpatialDims == 2 || nbSpatialDims == 3) && "TensorRT only supports 2D and 3D pooling!",
-        ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims kernelSize = nbSpatialDims == 2
-        ? static_cast<nvinfer1::Dims>(nvinfer1::Dims2{dims.d[2], dims.d[3]})
-        : static_cast<nvinfer1::Dims>(nvinfer1::Dims3{dims.d[2], dims.d[3], dims.d[4]});
-    ASSERT(!isDynamic(kernelSize) && "Cannot run global average pool on an input with dynamic spatial dimensions!",
-        ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kAVERAGE, kernelSize));
+    return {{globalPoolingHelper(ctx, convertToTensor(inputs.at(0), ctx), nvinfer1::ReduceOperation::kAVG)}};
 }
 
-// TODO: GlobalLpPool: pow(reduce_mean(pow(abs(x), p)), 1./p)
+// GlobalLpPool: pow(reduce_sum(pow(x, p)), 1./p)
+DEFINE_BUILTIN_OP_IMPORTER(GlobalLpPool)
+{
+    auto& tensor = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::Dims dims = tensor.getDimensions();
+
+    OnnxAttrs attrs{node, ctx};
+    float p = static_cast<float>(attrs.get("p", 2));
+
+    // Add constants for p and 1/p
+    nvinfer1::Dims scalarDims{dims.nbDims};
+    std::fill(scalarDims.d, scalarDims.d + scalarDims.nbDims, 1);
+    auto& pTensor = *addConstantScalar(ctx, p, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarDims)->getOutput(0);
+    auto& pInvTensor = *addConstantScalar(ctx, 1.f / p, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarDims)->getOutput(0);
+
+    // firstPow = pow(x, p)
+    auto* firstPow = ctx->network()->addElementWise(tensor, pTensor, nvinfer1::ElementWiseOperation::kPOW)->getOutput(0);
+    // reduced = reduce_sum(firstPow)
+    auto* reduced = globalPoolingHelper(ctx, *firstPow, nvinfer1::ReduceOperation::kSUM);
+    // finalPow = pow(reduced, 1./p)
+    auto* finalPow = ctx->network()->addElementWise(*reduced, pInvTensor, nvinfer1::ElementWiseOperation::kPOW)->getOutput(0);
+    return {{finalPow}};
+}
+
 
 DEFINE_BUILTIN_OP_IMPORTER(GlobalMaxPool)
 {
-    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims dims = tensor.getDimensions();
-    int nbSpatialDims = dims.nbDims - 2;
-    ASSERT((nbSpatialDims == 2 || nbSpatialDims == 3) && "TensorRT only supports 2D and 3D pooling!",
-        ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::Dims kernelSize = nbSpatialDims == 2
-        ? static_cast<nvinfer1::Dims>(nvinfer1::Dims2{dims.d[2], dims.d[3]})
-        : static_cast<nvinfer1::Dims>(nvinfer1::Dims3{dims.d[2], dims.d[3], dims.d[4]});
-    ASSERT(!isDynamic(kernelSize) && "Cannot run global average pool on an input with dynamic spatial dimensions!",
-        ErrorCode::kUNSUPPORTED_NODE);
-    RETURN_FIRST_OUTPUT(ctx->network()->addPoolingNd(tensor, nvinfer1::PoolingType::kMAX, kernelSize));
+    return {{globalPoolingHelper(ctx, convertToTensor(inputs.at(0), ctx), nvinfer1::ReduceOperation::kMAX)}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Greater)
