@@ -724,6 +724,14 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
     }
 }
 
+nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op)
+{
+    nvinfer1::Dims dims = tensor.getDimensions();
+    // Generate a bitmask of all 1s except the last 2 bits (N and C axes)
+    uint32_t reduceAxes = ((1 << dims.nbDims) - 1) & ~0b11;
+    return ctx->network()->addReduce(tensor, op, reduceAxes, /*keepDimensions=*/true)->getOutput(0);
+}
+
 nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
     const std::string& pluginVersion, const std::string& nodeName,
     const std::vector<nvinfer1::PluginField>& pluginFields)
