@@ -262,6 +262,13 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
 bool convertOnnxWeights(
     const ::ONNX_NAMESPACE::TensorProto& onnxTensor, onnx2trt::ShapedWeights* weights, IImporterContext* ctx)
 {
+    // Pass through for optional (empty) initializers for unused attributes.
+    if (isOnnxTensorEmpty(onnxTensor))
+    {
+        auto empty = onnx2trt::ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto::FLOAT);
+        *weights = empty;
+        return true;
+    }
     nvinfer1::Dims shape;
     shape.nbDims = onnxTensor.dims().size();
     std::copy(onnxTensor.dims().begin(), onnxTensor.dims().end(), shape.d);
@@ -755,6 +762,14 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
 bool isDynamic(const nvinfer1::Dims& shape)
 {
     return std::any_of(shape.d, shape.d + shape.nbDims, [](int dim) { return dim < 0; });
+}
+
+bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor)
+{
+    return onnxTensor.raw_data().empty() && onnxTensor.double_data().empty()
+    && onnxTensor.float_data().empty() && onnxTensor.int32_data().empty()
+    && onnxTensor.int64_data().empty() && onnxTensor.string_data().empty()
+    && onnxTensor.uint64_data().empty();
 }
 
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm)

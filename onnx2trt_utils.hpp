@@ -258,6 +258,12 @@ nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::
     const std::string& pluginVersion, const std::string& nodeName,
     const std::vector<nvinfer1::PluginField>& pluginFields);
 
+// Helper function to determine if a shape contains dynamic dimensions
+bool isDynamic(const nvinfer1::Dims& shape);
+
+// Helper function to determine if a ONNX tensor is empty
+bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor);
+
 // Helper function to determine if a transpose is required
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
 
