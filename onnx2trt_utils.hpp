@@ -124,24 +124,6 @@ inline nvinfer1::IConstantLayer* addConstant(
     return ctx->network()->addConstant(weights.shape, weights);
 }
 
-// Helper class to change output dimension calculations for pooling operators
-class CeilingPoolDim : public nvinfer1::IOutputDimensionsFormula
-{
-public:
-    nvinfer1::DimsHW compute(nvinfer1::DimsHW inputDims, nvinfer1::DimsHW kernelSize, nvinfer1::DimsHW stride,
-        nvinfer1::DimsHW padding, nvinfer1::DimsHW dilation, const char* layerName) const
-    {
-        nvinfer1::DimsHW outputDims;
-        for (int dimension = 0; dimension < inputDims.nbDims; ++dimension)
-        {
-            outputDims.d[dimension] = static_cast<int>(ceil(
-                (inputDims.d[dimension] + padding.d[dimension] * 2.0 - kernelSize.d[dimension]) / stride.d[dimension]
-                + 1.0));
-        }
-        return outputDims;
-    }
-};
-
 enum ScaleOp
 {
     kSHIFT,
@@ -242,7 +224,7 @@ const char* getDtypeName(int32_t onnxDtype);
 void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& onnx_node, nvinfer1::Dims* kernel_size,
     nvinfer1::Dims* strides, nvinfer1::Dims* beg_padding, nvinfer1::Dims* end_padding,
     nvinfer1::PaddingMode& paddingMode, bool& count_exclude_padding, nvinfer1::Dims* dilations = nullptr,
-    nvinfer1::Dims* output_padding = nullptr);
+    nvinfer1::Dims* output_padding = nullptr, const bool poolingCeilMode = false);
 
 // Helper function to get the scaling mode for TRT's scale layer
 nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::Dims const& tensor_shape);
