@@ -641,7 +641,7 @@ int getDtypeSize(int32_t onnxDtype)
 void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& onnx_node, nvinfer1::Dims* kernel_size,
     nvinfer1::Dims* strides, nvinfer1::Dims* beg_padding, nvinfer1::Dims* end_padding,
     nvinfer1::PaddingMode& paddingMode, bool& count_exclude_padding, nvinfer1::Dims* dilations,
-    nvinfer1::Dims* output_padding)
+    nvinfer1::Dims* output_padding, const bool poolingCeilMode)
 {
     const int nbSpatialDims = kernel_size->nbDims;
     OnnxAttrs attrs(onnx_node, ctx);
@@ -672,7 +672,7 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
         *output_padding = attrs.get<nvinfer1::Dims>("output_padding");
     }
 
-    paddingMode = nvinfer1::PaddingMode::kEXPLICIT_ROUND_DOWN;
+    paddingMode = poolingCeilMode ? nvinfer1::PaddingMode::kEXPLICIT_ROUND_UP : nvinfer1::PaddingMode::kEXPLICIT_ROUND_DOWN;
     auto onnx_auto_pad = attrs.get("auto_pad", std::string("NOTSET"));
     if (onnx_auto_pad != "SAME_LOWER" && onnx_auto_pad != "SAME_UPPER")
     {
@@ -1106,26 +1106,6 @@ NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     ASSERT((nbSpatialDims == 1 && needToExpandDims) || nbSpatialDims == 2 || nbSpatialDims == 3,
         ErrorCode::kUNSUPPORTED_NODE);
 
-    // Support for opset10 ceil_mode
-    CeilingPoolDim ceilingPool;
-    // Ceiling and dialations added in opset 10
-    if (ctx->getOpsetVersion() >= 10)
-    {
-        OnnxAttrs attrs(node, ctx);
-        const auto ceil_mode = attrs.get<int>("ceil_mode", 0);
-        const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
-        for (size_t i = 0; i < dilations.size(); i++)
-            ASSERT(dilations[i] == 1, ErrorCode::kUNSUPPORTED_NODE); // Do not support pooling dilations currently
-        nvinfer1::Dims spatialDims = makeDims(nbSpatialDims, 1);
-        std::copy(&dims.d[2], &dims.d[2] + nbSpatialDims, &spatialDims.d[0]);
-        if (ceil_mode != 0) // Need to set pooling formula to use ceiling instead of floor
-        {
-            ASSERT(!isDynamic(spatialDims) && "Cannot set output formula for an input with dynamic spatial dimensions!",
-                ErrorCode::kUNSUPPORTED_NODE);
-            ctx->network()->setPoolingOutputDimensionsFormula(&ceilingPool);
-        }
-    }
-
     nvinfer1::Dims kernel_size = makeDims(nbSpatialDims, 1);
     nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
     nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
@@ -1134,7 +1114,19 @@ NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
 
     bool exclude_padding(true);
 
-    getKernelParams(ctx, node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding);
+    // Ceiling-mode output padding and dialations added in opset 10
+    bool ceilMode(false);
+    if (ctx->getOpsetVersion() >= 10)
+    {
+        OnnxAttrs attrs(node, ctx);
+        ceilMode = static_cast<bool>(attrs.get<int>("ceil_mode", 0));
+        const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
+        for (size_t i = 0; i < dilations.size(); i++)
+            ASSERT(dilations[i] == 1, ErrorCode::kUNSUPPORTED_NODE); // Do not support pooling dilations currently
+    }
+
+    getKernelParams(ctx, node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding,
+        nullptr, nullptr, ceilMode);
     if (needToExpandDims)
     {
         kernel_size = insertDimension(kernel_size, nbSpatialDims, 1);
