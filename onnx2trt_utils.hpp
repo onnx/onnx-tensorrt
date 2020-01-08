@@ -250,13 +250,16 @@ nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::
 // Helper function to map ONNX Global Pooling ops into TensorRT.
 nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
 
-// Helper function to determine if a shape contains dynamic dimensions
-bool isDynamic(const nvinfer1::Dims& shape);
-
 // Helper function to get a plugin from the PluginRegistry
 nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
     const std::string& pluginVersion, const std::string& nodeName,
     const std::vector<nvinfer1::PluginField>& pluginFields);
+
+// Helper function to determine if a shape contains dynamic dimensions
+bool isDynamic(const nvinfer1::Dims& shape);
+
+// Helper function to determine if a ONNX tensor is empty
+bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor);
 
 // Helper function to determine if a transpose is required
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
