@@ -172,7 +172,8 @@ Status parseGraph(
             auto& output = outputs.at(i);
             ssOutputs << "[" << outputName << " -> " << output.shape() << "], ";
             // Note: This condition is to allow ONNX outputs to be ignored
-            if (output && !outputName.empty())
+            // Always register output weights (even empty ones) as it may be mapped to an unused input
+            if ((output || output.is_weights()) && !outputName.empty())
             {
                 ctx->registerTensor(std::move(output), outputName);
             }
