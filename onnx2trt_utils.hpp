@@ -187,6 +187,9 @@ bool convertWeightDescriptor(
 // Helper function to provide a ceiling-rounding division between two integers
 int divCeil(int n, int d);
 
+// Helper function to check that the input data types for an elementwise operation are supported
+bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op);
+
 // Helper function to import an ONNX elementwise op into TRT
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);

@@ -484,10 +484,52 @@ int divCeil(int n, int d)
     return (n - 1) / d + 1;
 }
 
+bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op)
+{
+    switch (op)
+    {
+    // These operations only support boolean inputs
+    case nvinfer1::ElementWiseOperation::kAND:
+    case nvinfer1::ElementWiseOperation::kOR:
+    case nvinfer1::ElementWiseOperation::kXOR:
+        if (!std::all_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) {return input.isBool();}))
+        {
+            return false;
+        }
+        break;
+    // These operations do not support boolean types
+    case nvinfer1::ElementWiseOperation::kDIV:
+    case nvinfer1::ElementWiseOperation::kEQUAL:
+    case nvinfer1::ElementWiseOperation::kFLOOR_DIV:
+    case nvinfer1::ElementWiseOperation::kGREATER:
+    case nvinfer1::ElementWiseOperation::kLESS:
+    case nvinfer1::ElementWiseOperation::kMAX:
+    case nvinfer1::ElementWiseOperation::kMIN:
+    case nvinfer1::ElementWiseOperation::kPROD:
+    case nvinfer1::ElementWiseOperation::kSUB:
+    case nvinfer1::ElementWiseOperation::kSUM:
+        if (std::any_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) {return input.isBool();}))
+        {
+            return false;
+        }
+        break;
+    // Pow does not support bool or INT32 types
+    case nvinfer1::ElementWiseOperation::kPOW:
+        if (std::any_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) {return input.isBool() || input.isInt32();}))
+        {
+            return false;
+        }
+        break;
+    }
+
+    return true;
+}
+
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op)
 {
     ASSERT(!inputs.empty(), ErrorCode::kINVALID_NODE);
+    ASSERT(elementwiseCheck(inputs, binary_op), ErrorCode::kUNSUPPORTED_NODE);
     std::vector<nvinfer1::ITensor*> inputTensors;
     int maxNbDims = -1;
     for (auto input : inputs)
@@ -1401,6 +1443,10 @@ nvinfer1::ITensor* transposeTensor(
 NodeImportResult unaryHelper(IImporterContext* ctx, TensorOrWeights& input, nvinfer1::UnaryOperation op)
 {
     nvinfer1::ITensor* tensorPtr = &convertToTensor(input, ctx);
+    auto inputType = tensorPtr->getType();
+    // TRT does not support INT32 types for Unary operations. TRT only supports BOOL types for the NOT operation
+    bool validUnaryType = op == nvinfer1::UnaryOperation::kNOT ? inputType == nvinfer1::DataType::kBOOL : inputType != nvinfer1::DataType::kBOOL && inputType != nvinfer1::DataType::kINT32;
+    ASSERT(validUnaryType, ErrorCode::kUNSUPPORTED_NODE);
     int rank = tensorPtr->getDimensions().nbDims;
     // Support scalar inputs by unsqueezing to 1D
     if (rank == 0)

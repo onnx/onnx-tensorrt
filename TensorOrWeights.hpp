@@ -99,6 +99,10 @@ public:
     {
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT32 : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
     }
+    bool isBool() const
+    {
+        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kBOOL : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
+    }
 };
 
 } // namespace onnx2trt
