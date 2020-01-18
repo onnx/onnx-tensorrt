@@ -374,6 +374,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat)
     std::vector<nvinfer1::ITensor*> tensors;
     for (auto& input : inputs)
     {
+        // TRT does not support BOOL input types for this node
+        ASSERT(!input.isBool(), ErrorCode::kUNSUPPORTED_NODE);
         tensors.push_back(&convertToTensor(input, ctx));
     }
     OnnxAttrs attrs(node, ctx);
@@ -730,6 +732,8 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
     // Input tensor is in NCHW format
     ASSERT(inputs.at(0).shape().nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(tensorPtr->getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     auto dims = tensorPtr->getDimensions();
 
     // Extract attributes
@@ -879,6 +883,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand)
 {
     // "Broadcast the input tensor following the given shape and the broadcast rule."
     nvinfer1::ITensor* inputTensor = &convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT (inputTensor->getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     ShapeTensor inputDims = shapeOf(ctx, *inputTensor);
 
     // "A 1-D tensor indicates the shape you want to expand to, following the broadcast rule"
@@ -951,6 +957,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
     bool transB = attrs.get("transB", false);
     nvinfer1::ITensor& inputA = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB = &convertToTensor(inputs.at(1), ctx);
+    // TRT does not support INT32 input types for this node
+    ASSERT(inputA.getType() == inputB->getType() && inputA.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
 
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights() && inputs.at(2).is_weights() && alpha == 1.f
@@ -1998,7 +2006,8 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
 {
     nvinfer1::ITensor* inputA = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB = &convertToTensor(inputs.at(1), ctx);
-
+    // TRT does not support INT32 input types for this node
+    ASSERT(inputA->getType() == inputB->getType() && inputA->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
     broadcastTensors(ctx, inputA, inputB);
 
     constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input) {
@@ -2419,6 +2428,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
 DEFINE_BUILTIN_OP_IMPORTER(Resize)
 {
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support INT32 nor BOOL input types for this node
+    ASSERT(input.getType() != nvinfer1::DataType::kINT32 && input.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     int inputRank = input.getDimensions().nbDims;
     ASSERT(inputRank > 0, ErrorCode::kUNSUPPORTED_NODE);
     // Add resize layer
@@ -2837,6 +2848,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
     const int nbInputs = node.input().size();
     // "...it uses this information to slice the input data tensor."
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(data.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     const ShapeTensor dims = shapeOf(ctx, data);
 
     // "Slices uses starts, ends, axes and steps inputs to specify the start and
@@ -3001,6 +3014,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
     // "input : T
     // The tensor to split"
     nvinfer1::ITensor& inputTensor = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(inputTensor.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     const ShapeTensor inputDims = shapeOf(ctx, inputTensor);
 
     // "axis : int (default is 0)
@@ -3108,7 +3123,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Tan)
 
 DEFINE_BUILTIN_OP_IMPORTER(Tanh)
 {
-    RETURN_FIRST_OUTPUT(ctx->network()->addActivation(inputs.at(0).tensor(), nvinfer1::ActivationType::kTANH));
+    return activationHelper(ctx, node, inputs, nvinfer1::ActivationType::kTANH);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ThresholdedRelu)
@@ -3123,6 +3138,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Tile)
     // "input : T
     // Input tensor of any shape."
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(input.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     const ShapeTensor inputDims = shapeOf(ctx, input);
 
     // "repeats : T1
@@ -3249,6 +3266,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
 DEFINE_BUILTIN_OP_IMPORTER(Upsample)
 {
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(tensor.getType() != nvinfer1::DataType::kINT32 && tensor.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     const int nbDims = tensor.getDimensions().nbDims;
     ASSERT(nbDims > 0, ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node, ctx);
@@ -3305,7 +3324,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Where)
     nvinfer1::ITensor* condition = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* x = &convertToTensor(inputs.at(1), ctx);
     nvinfer1::ITensor* y = &convertToTensor(inputs.at(2), ctx);
-
+    // TRT does not support BOOL input types for this node
+    ASSERT(x->getType() == y->getType() && x->getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
+    
     broadcastTensors(ctx, x, y, condition);
 
     nvinfer1::Dims cDims = condition->getDimensions();
