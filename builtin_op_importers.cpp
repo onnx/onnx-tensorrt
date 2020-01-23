@@ -413,6 +413,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape)
         = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, 1});
     static_cast<float*>(zeroWeights.values)[0] = 0.f;
     auto valueWeights = TensorOrWeights{attrs.get("value", zeroWeights)};
+    ASSERT(valueWeights.weights().count() > 0 && "Failed to import ConstantOfShape's value tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::ITensor* value = &convertToTensor(valueWeights, ctx);
     return {{constantOfShape(ctx, value, shape)}};
@@ -939,6 +940,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Floor)
 DEFINE_BUILTIN_OP_IMPORTER(Gather)
 {
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(data.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
     OnnxAttrs attrs(node, ctx);
     int axis = attrs.get<int>("axis", 0);
