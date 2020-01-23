@@ -109,7 +109,11 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(const std::strin
 {
     ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = this->at(key)->t();
     onnx2trt::ShapedWeights weights;
-    convertOnnxWeights(onnx_weights_tensor, &weights, mCtx);
+    // Return empty weights if conversion failed
+    if (!convertOnnxWeights(onnx_weights_tensor, &weights, mCtx))
+    {
+        return onnx2trt::ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
+    }
     return weights;
 }
 
