@@ -2203,27 +2203,13 @@ NodeImportResult randomUniformHelper(IImporterContext* ctx, const ShapeTensor& i
     auto low = attrs.get<float>("low", 0.f);
 
     // Set "low" and "high" values of the fillLayer.
-    // Set seed and dynamic "low" and "high" values if applicable
+    fillLayer->setAlpha(low);
+    fillLayer->setBeta(high);
+
+    // TensorRT does not support "seed" field now. The support will be added in future versions.
     if (attrs.count("seed"))
     {
-        // TensorRT's seed input must be an integer
-        int seed = static_cast<int>(attrs.get<float>("seed", 0.f));
-        // TensorRT requires dynamic "low" and "high" values if a seed is provided.
-        auto* alphaConstant
-            = addConstantScalar(ctx, low, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
-        auto* betaConstant
-            = addConstantScalar(ctx, high, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
-        auto* seedConstant
-            = addConstantScalar(ctx, seed, ::ONNX_NAMESPACE::TensorProto_DataType_INT32);
-        nvinfer1::ITensor* seedConstantTensor = seedConstant->getOutput(0);
-        fillLayer->setInput(1, *alphaConstant->getOutput(0));
-        fillLayer->setInput(2, *betaConstant->getOutput(0));
-        fillLayer->setInput(3, *seedConstantTensor);
-    }
-    else
-    {
-        fillLayer->setAlpha(low);
-        fillLayer->setBeta(high);
+        LOG_WARNING("TensorRT currently ignores the \"seed\" field in RandomUniform op. Random seeds will be used.");
     }
 
     RETURN_FIRST_OUTPUT(fillLayer);
@@ -2268,7 +2254,7 @@ NodeImportResult staticFloatRangeImporter(IImporterContext* ctx, const std::vect
 
 DEFINE_BUILTIN_OP_IMPORTER(Range)
 {
-    if (inputs.at(0).weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT)
+    if (inputs.at(0).is_weights() && inputs.at(0).weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT)
     {
         // Floating-point case supported by TensorRT only if all inputs are static.
         if (inputs.at(0).is_weights() && inputs.at(1).is_weights() && inputs.at(2).is_weights())
