@@ -2955,45 +2955,48 @@ DEFINE_BUILTIN_OP_IMPORTER(Softsign)
 
 DEFINE_BUILTIN_OP_IMPORTER(SpaceToDepth)
 {
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::IShuffleLayer* layer = ctx->network()->addShuffle(*tensor_ptr);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+    // Input tensor is in NCHW format
+    ASSERT(inputs.at(0).shape().nbDims == 4, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    // TRT does not support BOOL input types for this node
+    ASSERT(tensorPtr->getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Extract attributes
     OnnxAttrs attrs(node, ctx);
-    int block_size = attrs.get<int>("blocksize");
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
-    int ndim_spatial = dims.nbDims - 1;
-    nvinfer1::Dims new_shape1;
-    new_shape1.nbDims = dims.nbDims + ndim_spatial;
-    new_shape1.d[0] = dims.d[0];
-    for (int i = 0; i < ndim_spatial; ++i)
-    {
-        ASSERT(dims.d[1 + i] % block_size == 0, ErrorCode::kINVALID_NODE);
-        new_shape1.d[1 + 2 * i + 0] = dims.d[1 + i] / block_size;
-        new_shape1.d[1 + 2 * i + 1] = block_size;
-    }
-    layer->setReshapeDimensions(new_shape1);
-    nvinfer1::Permutation perm;
-    perm.order[ndim_spatial] = 0;
-    for (int i = 0; i < ndim_spatial; ++i)
-    {
-        perm.order[ndim_spatial + 1 + i] = 1 + 2 * i + 0;
-        perm.order[i] = 1 + 2 * i + 1;
-    }
-    layer->setSecondTranspose(perm);
-    tensor_ptr = layer->getOutput(0);
-    dims = tensor_ptr->getDimensions();
-    nvinfer1::Dims new_shape2;
-    new_shape2.nbDims = dims.nbDims - ndim_spatial;
-    new_shape2.d[0] = dims.d[ndim_spatial];
-    for (int i = 0; i < ndim_spatial; ++i)
-    {
-        new_shape2.d[0] *= dims.d[i];
-        new_shape2.d[1 + i] = dims.d[ndim_spatial + 1 + i];
-    }
-    tensor_ptr = reshapeTensor(ctx, *tensor_ptr, new_shape2);
-    ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-    dims = tensor_ptr->getDimensions();
-    return {{tensor_ptr}};
+    auto blockSize = attrs.get<int>("blocksize");
+
+    const nvinfer1::Permutation perm{0, 3, 5, 1, 2, 4};
+
+    auto inputShape = shapeOf(ctx, *tensorPtr);
+
+    const auto N = gather(ctx, inputShape, shapeVector(0));
+    const auto C = gather(ctx, inputShape, shapeVector(1));
+    const auto H = gather(ctx, inputShape, shapeVector(2));
+    const auto W = gather(ctx, inputShape, shapeVector(3));
+    const auto blockSizeTensor = shapeVector(blockSize);
+
+    const auto C_2 = mul(ctx, C, mul(ctx, blockSizeTensor, blockSizeTensor));
+    const auto H_2 = floorDiv(ctx, H, blockSizeTensor);
+    const auto W_2 = floorDiv(ctx, W, blockSizeTensor);
+
+    // First reshape to {N, C, H / blockSize, blockSize, W / blockSize, blockSize}
+
+    const auto firstShapeDims = concat(ctx, N,
+        concat(ctx, C,
+            concat(ctx, H_2,
+                concat(ctx, blockSizeTensor,
+                    concat(ctx, W_2, blockSizeTensor)))));
+
+    auto* firstShuffle = addShuffle(ctx, *tensorPtr, firstShapeDims);
+    firstShuffle->setSecondTranspose(perm);
+    tensorPtr = firstShuffle->getOutput(0);
+
+    // Reshape to {N, C * blockSize * blockSize, H / blockSize, W / blockSize}
+    auto secondShapeDims = concat(ctx, N, concat(ctx, C_2, concat(ctx, H_2, W_2)));
+    auto* secondShuffle = addShuffle(ctx, *tensorPtr, secondShapeDims);
+    tensorPtr = secondShuffle->getOutput(0);
+
+    return {{tensorPtr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Split)
