@@ -1019,7 +1019,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         inputASqueezed = squeeze->getOutput(0);
     }
 
-    constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input, bool transpose) {
+    auto getMatrixOp = [](const nvinfer1::ITensor& input, bool transpose) {
         if (input.getDimensions().nbDims == 1)
         {
             return nvinfer1::MatrixOperation::kVECTOR;
@@ -2013,7 +2013,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     ASSERT(inputA->getType() == inputB->getType() && inputA->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
     broadcastTensors(ctx, inputA, inputB);
 
-    constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input) {
+    auto getMatrixOp = [](const nvinfer1::ITensor& input) {
         return (input.getDimensions().nbDims == 1) ? nvinfer1::MatrixOperation::kVECTOR
                                                    : nvinfer1::MatrixOperation::kNONE;
     };
