@@ -420,6 +420,22 @@ bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model
         _errors.push_back(status);
         return false;
     }
+
+    //slx: Do sanity check for shape tensor inputs, make an error here.
+    auto* network = _importer_ctx.network();
+    int numInputs = network->getNbInputs();
+
+    for (int i = 0; i < numInputs; i++)
+    {
+        auto* inputTensor = network->getInput(i);
+        if (inputTensor->isShapeTensor())
+        {
+            auto status = MAKE_INPUT_ERROR("Shape tensor input", ErrorCode::kUNSUPPORTED_NODE, inputTensor->getName());
+            status.setNode(-1);
+            _errors.push_back(status);
+            return false;
+        }
+    }
     return true;
 }
 
