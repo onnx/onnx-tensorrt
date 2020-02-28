@@ -227,9 +227,14 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
 
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx)
 {
-    LOG_WARNING(
-        "Your ONNX model has been generated with INT64 weights, while TensorRT does not natively support INT64. "
-        "Attempting to cast down to INT32.");
+    static bool logged = false;
+    if (!logged)
+    {
+        LOG_WARNING( 
+            "Your ONNX model has been generated with INT64 weights, while TensorRT does not natively support INT64. "
+            "Attempting to cast down to INT32.");
+        logged = true;
+    }
 
     const size_t nbWeights = volume(shape);
     int32_t* int32Weights{
