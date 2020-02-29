@@ -1019,7 +1019,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         inputASqueezed = squeeze->getOutput(0);
     }
 
-    constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input, bool transpose) {
+    auto getMatrixOp = [](const nvinfer1::ITensor& input, bool transpose) {
         if (input.getDimensions().nbDims == 1)
         {
             return nvinfer1::MatrixOperation::kVECTOR;
@@ -1709,9 +1709,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LRN)
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
     OnnxAttrs attrs(node, ctx);
     int size = attrs.get<int>("size");
-    float alpha = attrs.get<float>("alpha", 0.0001);
-    float beta = attrs.get<float>("beta", 0.75);
-    float bias = attrs.get<float>("bias", 1.0);
+    float alpha = attrs.get<float>("alpha", 0.0001f);
+    float beta = attrs.get<float>("beta", 0.75f);
+    float bias = attrs.get<float>("bias", 1.0f);
     RETURN_FIRST_OUTPUT(ctx->network()->addLRN(tensor, size, alpha, beta, bias));
 }
 
@@ -2013,7 +2013,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     ASSERT(inputA->getType() == inputB->getType() && inputA->getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
     broadcastTensors(ctx, inputA, inputB);
 
-    constexpr auto getMatrixOp = [](const nvinfer1::ITensor& input) {
+    auto getMatrixOp = [](const nvinfer1::ITensor& input) {
         return (input.getDimensions().nbDims == 1) ? nvinfer1::MatrixOperation::kVECTOR
                                                    : nvinfer1::MatrixOperation::kNONE;
     };
