@@ -264,6 +264,7 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
     return int32Weights;
 }
 
+
 template <typename DataType>
 DataType* convertINT32Data(const int32_t* weightValues, nvinfer1::Dims shape, int32_t onnxdtype, IImporterContext* ctx)
 {
@@ -276,6 +277,35 @@ DataType* convertINT32Data(const int32_t* weightValues, nvinfer1::Dims shape, in
         newWeights[i] = static_cast<DataType>(weightValues[i]);
     }
     return newWeights;
+}
+
+bool convertOnnxPadding(const std::vector<int64_t>& onnxPadding, nvinfer1::Dims2* begPadding, nvinfer1::Dims2* endPadding)
+{
+    const size_t size = onnxPadding.size();
+    const size_t half = size / 2;
+    for (size_t i = 0; i < half - 2; i++)
+    {
+        if (onnxPadding[i] != 0)
+        {
+            return false;
+        }
+    }
+
+    begPadding->d[0] = onnxPadding[half - 2];
+    begPadding->d[1] = onnxPadding[half - 1];
+
+    for (size_t i = half; i < size - 2; i++)
+    {
+        if (onnxPadding[i] != 0)
+        {
+            return false;
+        }
+    }
+
+    endPadding->d[0] = onnxPadding[size - 2];
+    endPadding->d[1] = onnxPadding[size - 1];
+
+    return true;
 }
 
 bool convertOnnxWeights(

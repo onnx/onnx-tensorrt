@@ -163,6 +163,10 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype);
 // Helper function to convert INT64 weight values into INT32
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
 
+// Helper function to convert ONNX padding into TRT padding
+bool convertOnnxPadding(
+    const std::vector<int64_t>& onnxPadding, nvinfer1::Dims2* begPadding, nvinfer1::Dims2* endPadding);
+
 // Helper function to convert an ONNX weight into a ShapedWeights object
 bool convertOnnxWeights(
     const ::ONNX_NAMESPACE::TensorProto& onnxTensor, onnx2trt::ShapedWeights* weights, IImporterContext* ctx);
