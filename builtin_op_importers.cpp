@@ -2087,22 +2087,39 @@ DEFINE_BUILTIN_OP_IMPORTER(Or)
 DEFINE_BUILTIN_OP_IMPORTER(Pad)
 {
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::Dims2 beg_padding, end_padding;
+    ASSERT(tensor.getDimensions().nbDims >= 4, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::Dims2 begPadding, endPadding;
     OnnxAttrs attrs(node, ctx);
     auto mode = attrs.get<std::string>("mode", "constant");
-    float value = attrs.get<float>("value", 0.f);
-    ASSERT(mode == "constant" && value == 0 && "This version of TensorRT only supports constant 0 padding!",
+    float value{0.f};
+    std::vector<int64_t> onnxPadding;
+
+    if (ctx->getOpsetVersion() < 11)
+    {
+        value = attrs.get<float>("value", 0.f);
+        auto padding = attrs.get<std::vector<int>>("pads");
+        onnxPadding = std::vector<int64_t>(padding.begin(), padding.end());
+    }
+    // In opset >= 11, padding indicies and values moved from attributes to inputs
+    else
+    {
+        ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        weightsToVector(inputs.at(1).weights(), &onnxPadding);
+        if (inputs.size() == 3)
+        {
+            ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+            auto padWeight = inputs.at(2).weights();
+            ASSERT(padWeight.count() == 1, ErrorCode::kINVALID_NODE);
+            value = static_cast<float*>(padWeight.values)[0];
+        }
+    }
+
+    ASSERT(mode == "constant" && value == 0.f && "This version of TensorRT only supports constant 0 padding!",
         ErrorCode::kUNSUPPORTED_NODE);
-    auto onnx_padding = attrs.get<std::vector<int>>("pads");
-    ASSERT(onnx_padding.size() == 8 && onnx_padding[0] == 0 && onnx_padding[1] == 0 && onnx_padding[4] == 0
-            && onnx_padding[5] == 0
-            && "This version of TensorRT only supports padding on the outer two dimensions on 4D tensors!",
+    ASSERT(convertOnnxPadding(onnxPadding, &begPadding, &endPadding)
+        && "This version of TensorRT only supports padding on the outer two dimensions!",
         ErrorCode::kUNSUPPORTED_NODE);
-    beg_padding.d[0] = onnx_padding[2];
-    beg_padding.d[1] = onnx_padding[3];
-    end_padding.d[0] = onnx_padding[6];
-    end_padding.d[1] = onnx_padding[7];
-    RETURN_FIRST_OUTPUT(ctx->network()->addPaddingNd(tensor, beg_padding, end_padding));
+    RETURN_FIRST_OUTPUT(ctx->network()->addPaddingNd(tensor, begPadding, endPadding));
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus)
