@@ -1677,8 +1677,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
         nodeOutputs.emplace_back(
             loop->addLoopOutput(*stateVars.at(i)->getOutput(0), nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0));
     }
-    // Finally, set up scan outputs.
-    for (int i = nbStateVars + NB_DISCARDED_OUTPUTS; i < nbInputs; ++i)
+    const int nbOutputs = body.output_size();
+    // Finally, set up scan outputs if there are any
+    for (int i = nbStateVars + NB_DISCARDED_OUTPUTS; i < nbOutputs; ++i)
     {
         const auto& bodyOutputName = body.output(i).name();
         auto& scanOutput = convertToTensor(ctx->tensors().at(bodyOutputName), ctx);
