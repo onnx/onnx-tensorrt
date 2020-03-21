@@ -2445,11 +2445,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 
     auto mode = attrs.get<std::string>("mode", "nearest");
     auto resizeMode = mode == "nearest" ? nvinfer1::ResizeMode::kNEAREST : nvinfer1::ResizeMode::kLINEAR;
+    auto transformationMode = attrs.get<std::string>("coordinate_transformation_mode", "half_pixel");
 
     if (ctx->getOpsetVersion() >= 11)
     {
-        auto transformationMode = attrs.get<std::string>("coordinate_transformation_mode", "half_pixel");
-        ASSERT((transformationMode == "asymmetric") && "This version of TensorRT only supports asymmetric resize!",
+        ASSERT(((transformationMode == "asymmetric") || (transformationMode == "align_corners")) && "This version of TensorRT only supports asymmetric resize!",
             ErrorCode::kUNSUPPORTED_NODE);
         ASSERT(mode != "cubic" && "This version of TensorRT does not support cubic interpolation!",
             ErrorCode::kUNSUPPORTED_NODE);
@@ -2464,6 +2464,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
             auto* resizeShape = &convertToTensor(inputs.at(3), ctx);
             layer->setInput(1, *resizeShape);
             layer->setResizeMode(resizeMode);
+            if (transformationMode=="align_corners")
+                layer->setAlignCorners(true);
             RETURN_FIRST_OUTPUT(layer);
         }
     }
@@ -2483,6 +2485,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     }
     layer->setResizeMode(resizeMode);
     layer->setScales(scaleValues, inputRank);
+    if (transformationMode=="align_corners")
+        layer->setAlignCorners(true);
     RETURN_FIRST_OUTPUT(layer);
 }
 
