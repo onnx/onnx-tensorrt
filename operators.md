@@ -101,7 +101,6 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | QLinearConv           | N          |
 | QLinearMatMul         | N          |
 | QuantizeLinear        | Y          | Scales and zero\-point value must be initializers                                                                                      |
-| RNN                   | N          |
 | RandomNormal          | N          |
 | RandomNormalLike      | N          |
 | RandomUniform         | Y          |
