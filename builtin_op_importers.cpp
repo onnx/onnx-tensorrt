@@ -2449,7 +2449,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 
     if (ctx->getOpsetVersion() >= 11)
     {
-        ASSERT(((transformationMode == "asymmetric") || (transformationMode == "align_corners")) && "This version of TensorRT only supports asymmetric resize!",
+        ASSERT(((transformationMode == "asymmetric") || (transformationMode == "align_corners")) && "This version of TensorRT only supports asymmetric and align_corners resize!",
             ErrorCode::kUNSUPPORTED_NODE);
         ASSERT(mode != "cubic" && "This version of TensorRT does not support cubic interpolation!",
             ErrorCode::kUNSUPPORTED_NODE);
