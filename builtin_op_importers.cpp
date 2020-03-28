@@ -2471,6 +2471,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     }
 
     // Resizes that use scale factors have the same import logic between opsets
+    ASSERT(((transformationMode != "align_corners", "Align_corners should use size information not scale factors!");
     auto scales = ctx->getOpsetVersion() >= 11 ? inputs.at(2) : inputs.at(1);
     ASSERT(scales.is_weights() && "Resize scales must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights scales_weights = scales.weights();
@@ -2485,8 +2486,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     }
     layer->setResizeMode(resizeMode);
     layer->setScales(scaleValues, inputRank);
-    if (transformationMode=="align_corners")
-        layer->setAlignCorners(true);
     RETURN_FIRST_OUTPUT(layer);
 }
 
