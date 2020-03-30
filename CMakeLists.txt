@@ -158,7 +158,7 @@ endif()
 # --------------------------------
 add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS})
-target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
+target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} onnx nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
 
 # --------------------------------
 # API Tests

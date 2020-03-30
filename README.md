@@ -58,6 +58,15 @@ ONNX models can also be converted to human-readable text:
 
     onnx2trt my_model.onnx -t my_model.onnx.txt
 
+ONNX models can also be optimized by ONNX's optimization libraries.
+To optimize an ONNX model and output a new one use `-m` to specify the output model name and `-O` to specify a semicolon-separated list of optimization passes to apply:
+
+    onnx2trt my_model.onnx -O "pass_1;pass_2;pass_3" -m my_model_optimized.onnx
+
+See more all available optimization passes by running:
+
+    onnx2trt -p
+
 See more usage information by running:
 
     onnx2trt -h
