@@ -67,14 +67,18 @@ public:
     {
         return _variant == NODE_WEIGHTS;
     }
+    bool isNullTensor()
+    {
+        return is_tensor() && _tensor == nullptr;
+    }
     nvinfer1::ITensor& tensor()
     {
-        assert(is_tensor());
+        assert(!isNullTensor());
         return *_tensor;
     }
     nvinfer1::ITensor const& tensor() const
     {
-        assert(is_tensor());
+        assert(!isNullTensor());
         return *_tensor;
     }
     ShapedWeights& weights()
