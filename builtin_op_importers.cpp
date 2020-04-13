@@ -2680,22 +2680,40 @@ DEFINE_BUILTIN_OP_IMPORTER(ScaledTanh)
 DEFINE_BUILTIN_OP_IMPORTER(Scan)
 {
     OnnxAttrs attrs(node, ctx);
-    const int nbInputs = node.input().size();
+    // In opset 8, the scan node is defined differently than in later opsets.
+    //     1. It has an optonal input `sequence_lens`
+    //     2. The scan input/output axis are always set to 1
+    const int opset8Offset = ctx->getOpsetVersion() == 8 ? 1 : 0;
+    if (opset8Offset == 1)
+    {
+        ASSERT(inputs.at(0).isNullTensor() && "TensorRT doesn't support sequence_lens input for this node!",
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+    const int nbInputs = node.input().size() - opset8Offset;
     const int nbScanInputs = attrs.get<int>("num_scan_inputs");
     // The number of state variables on the input and output is the same.
     const int nbStateVars = nbInputs - nbScanInputs;
     const int nbScanOutputs = node.output().size() - nbStateVars;
 
+    // Populate scan input axis
     std::vector<int> defaultScanInputArgs(nbScanInputs);
-    std::fill(defaultScanInputArgs.begin(), defaultScanInputArgs.end(), 0);
+    std::fill(defaultScanInputArgs.begin(), defaultScanInputArgs.end(), opset8Offset);
     std::vector<int> scanInputAxes(attrs.get("scan_input_axes", defaultScanInputArgs));
-    const std::vector<int> scanInputDirections(attrs.get("scan_input_directions", defaultScanInputArgs));
 
+    // Populate scan input directions
+    std::vector<int> defaultInputScanDirection(nbScanInputs);
+    std::fill(defaultInputScanDirection.begin(), defaultInputScanDirection.end(), 0);
+    const std::vector<int> scanInputDirections(attrs.get("scan_input_directions", defaultInputScanDirection));
+
+    // Populate scan output axis
     std::vector<int> defaultScanOutputArgs(nbScanOutputs);
-    std::fill(defaultScanOutputArgs.begin(), defaultScanOutputArgs.end(), 0);
+    std::fill(defaultScanOutputArgs.begin(), defaultScanOutputArgs.end(), opset8Offset);
     std::vector<int> scanOutputAxes(attrs.get("scan_output_axes", defaultScanOutputArgs));
-    const std::vector<int> scanOutputDirections(attrs.get("scan_output_directions", defaultScanOutputArgs));
 
+    // Populate scan ouput directions
+    std::vector<int> defaultOutputScanDirection(nbScanOutputs);
+    std::fill(defaultOutputScanDirection.begin(), defaultOutputScanDirection.end(), 0);
+    const std::vector<int> scanOutputDirections(attrs.get("scan_output_directions", defaultOutputScanDirection));
     const ::ONNX_NAMESPACE::GraphProto& body = attrs.get<const ::ONNX_NAMESPACE::GraphProto&>("body");
 
     // Support possible negative axis for input and output axes:
@@ -2719,13 +2737,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
     std::vector<nvinfer1::IRecurrenceLayer*> stateVars{};
     for (int i = 0; i < nbStateVars; ++i)
     {
-        stateVars.emplace_back(loop->addRecurrence(convertToTensor(inputs.at(i), ctx)));
+        stateVars.emplace_back(loop->addRecurrence(convertToTensor(inputs.at(i+opset8Offset), ctx)));
         ctx->registerTensor(TensorOrWeights{stateVars.back()->getOutput(0)}, body.input(i).name());
     }
     for (int i = 0; i < nbScanInputs; ++i)
     {
         const int index = nbStateVars + i; // Scan Inputs are after the state variables.
-        nvinfer1::IIteratorLayer* scanInput = loop->addIterator(convertToTensor(inputs.at(index), ctx));
+        nvinfer1::IIteratorLayer* scanInput = loop->addIterator(convertToTensor(inputs.at(index+opset8Offset), ctx));
         scanInput->setAxis(scanInputAxes.at(i));
         scanInput->setReverse(scanInputDirections.at(i) == 1);
         ctx->registerTensor(TensorOrWeights{scanInput->getOutput(0)}, body.input(index).name());
