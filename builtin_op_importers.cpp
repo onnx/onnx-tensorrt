@@ -607,6 +607,9 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     {
         ASSERT(kernelSize.d[nbSpatialDims - i] == kernelWeights.shape.d[kernelWeights.shape.nbDims - i],
             ErrorCode::kUNSUPPORTED_NODE);
+        // TRT does not support dilated deconvolutions
+        ASSERT(dilations.d[nbSpatialDims - i] == 1 && "TRT does not support dilated deconvolutions!",
+            ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Set padding. ONNX ConvTranspose supports many different padding modes. Order of priority for padding:
@@ -665,13 +668,12 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
 
     nvinfer1::Weights emptyBiasWeights = ShapedWeights::empty(kernelWeights.type);
 
-    // Create a deconvolution layer and set known attributes - strides,ngroups, and dilations
+    // Create a deconvolution layer and set known attributes - strides, and ngroups.
     // If there is still output padding, remove the bias weights. Bias will be added below.
     auto* layer = ctx->network()->addDeconvolutionNd(
         *tensorPtr, noutput, kernelSize, kernelWeights, hasOutputPadding ? emptyBiasWeights : biasWeights);
     layer->setStrideNd(strides);
     layer->setNbGroups(ngroup);
-    layer->setDilationNd(dilations);
 
     // Check that 3D deconvolution paddings is valid
     if (nbSpatialDims == 3)
