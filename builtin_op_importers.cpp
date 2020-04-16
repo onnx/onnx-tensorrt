@@ -533,137 +533,200 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
 // When input.nbDims = 3, we expand it to 4D
 DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
 {
-    // Deconvolution input must be at least 3D.
-    ASSERT(inputs.at(0).shape().nbDims >= 3, ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::Dims dims = tensorPtr->getDimensions();
+    // Deconvolution input must be at least 3D and at most 5D.
+    ASSERT(dims.nbDims >= 3 && dims.nbDims <= 5 && "TensorRT only supports 1D, 2D or 3D deconvolutions!",
+        ErrorCode::kUNSUPPORTED_NODE);
     // Deconvolution weights must be an initializer
     ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::ITensor* tensor_ptr = &convertToTensor(inputs.at(0), ctx);
 
     // Kernel weights have layout [C, M/group, k1, k2, (k3)]
-    auto kernel_weights = inputs.at(1).weights();
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
+    auto kernelWeights = inputs.at(1).weights();
 
-    bool need_to_expand_dims = (dims.nbDims == 3);
-    if (need_to_expand_dims)
+    bool needToExpandDims = (dims.nbDims == 3);
+    if (needToExpandDims)
     {
         std::vector<int> axes{3};
-        tensor_ptr = unsqueezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-        dims = tensor_ptr->getDimensions();
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
+        dims = tensorPtr->getDimensions();
     }
-    if (kernel_weights.shape.nbDims == 3)
+    if (kernelWeights.shape.nbDims == 3)
     {
-        kernel_weights.shape.nbDims = 4;
-        kernel_weights.shape.d[3] = 1;
+        kernelWeights.shape.nbDims = 4;
+        kernelWeights.shape.d[3] = 1;
     }
 
     const int nbSpatialDims = dims.nbDims - 2;
     // Check that the number of spatial dimensions and the kernel shape matches up.
-    ASSERT(nbSpatialDims == kernel_weights.shape.nbDims - 2, ErrorCode::kUNSUPPORTED_NODE);
-
-    // Check for bias_weights
-    nvinfer1::Weights bias_weights;
-    if (inputs.size() == 3)
-    {
-        ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-        auto shaped_bias_weights = inputs.at(2).weights();
-        // ONNX requires shaped_bias_weights to be 1D
-        ASSERT(shaped_bias_weights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
-        ASSERT(shaped_bias_weights.shape.d[0] == kernel_weights.shape.d[1], ErrorCode::kINVALID_NODE);
-        bias_weights = shaped_bias_weights;
-    }
-    else
-    {
-        bias_weights = ShapedWeights::empty(kernel_weights.type);
-    }
+    ASSERT(nbSpatialDims == kernelWeights.shape.nbDims - 2, ErrorCode::kUNSUPPORTED_NODE);
 
     // Get all attributes
     OnnxAttrs attrs(node, ctx);
-    nvinfer1::Dims output_shape;
-    nvinfer1::Dims output_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::Dims kernel_size;
+    nvinfer1::Dims outputShape;
+    nvinfer1::Dims outputPadding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims kernelSize;
     nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims begPadding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims endPadding = makeDims(nbSpatialDims, 0);
     nvinfer1::Dims dilations = makeDims(nbSpatialDims, 1);
     nvinfer1::PaddingMode paddingMode;
     bool exclude_padding = false;
-    bool explicit_output_shape = false;
 
     int ngroup = attrs.get("group", 1);
-    int noutput = kernel_weights.shape.d[1] * ngroup; // Note: Weights order is CKRS
+    int noutput = kernelWeights.shape.d[1] * ngroup; // Note: Weights order is CKRS
 
-    if (attrs.count("output_shape"))
+    // Check for bias_weights
+    nvinfer1::Weights biasWeights;
+    if (inputs.size() == 3)
     {
-        output_shape = attrs.get<nvinfer1::Dims>("output_shape");
-        explicit_output_shape = true;
-    }
-
-    kernel_size.nbDims = nbSpatialDims;
-    for (int i = 1; i <= nbSpatialDims; ++i)
-    {
-        kernel_size.d[nbSpatialDims - i] = kernel_weights.shape.d[kernel_weights.shape.nbDims - i];
-    }
-
-    getKernelParams(ctx, node, &kernel_size, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding,
-        &dilations, &output_padding);
-    // TRT only support 2D padding
-    ASSERT(output_padding.nbDims == 2 || (output_padding.nbDims == 3 && output_padding.d[0] == 0),
-        ErrorCode::kUNSUPPORTED_NODE);
-
-    for (int i = 1; i <= nbSpatialDims; ++i)
-    {
-        ASSERT(kernel_size.d[nbSpatialDims - i] == kernel_weights.shape.d[kernel_weights.shape.nbDims - i],
-            ErrorCode::kUNSUPPORTED_NODE);
-        // TRT does not support dilated deconvolutions
-        ASSERT(dilations.d[nbSpatialDims - i] == 1, ErrorCode::kUNSUPPORTED_GRAPH);
-    }
-    // If output shape is given, calculate the input or output padding values
-    if (explicit_output_shape)
-    {
-        generatePadding(dims, output_shape, kernel_size, strides, dilations, nbSpatialDims, beg_padding, end_padding,
-            output_padding, paddingMode);
-        // TRT only support 2D padding
-        ASSERT(output_padding.nbDims == 2 || (output_padding.nbDims == 3 && output_padding.d[0] == 0),
-            ErrorCode::kUNSUPPORTED_NODE);
-    }
-
-    nvinfer1::IDeconvolutionLayer* deconv_layer
-        = ctx->network()->addDeconvolutionNd(*tensor_ptr, noutput, kernel_size, kernel_weights, bias_weights);
-    ASSERT(deconv_layer, ErrorCode::kUNSUPPORTED_NODE);
-
-    deconv_layer->setStrideNd(strides);
-    deconv_layer->setPaddingMode(paddingMode);
-    deconv_layer->setPrePadding(beg_padding);
-    deconv_layer->setPostPadding(end_padding);
-    deconv_layer->setNbGroups(ngroup);
-    tensor_ptr = deconv_layer->getOutput(0);
-
-    nvinfer1::Dims output_padding_HW;
-    if (output_padding.nbDims == 2)
-    {
-        output_padding_HW = nvinfer1::Dims{2, {output_padding.d[0], output_padding.d[1]}, {}};
+        ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+        auto shapedBiasWeights = inputs.at(2).weights();
+        // ONNX requires shapedBiasWeights to be 1D
+        ASSERT(shapedBiasWeights.shape.nbDims == 1, ErrorCode::kINVALID_NODE);
+        ASSERT(shapedBiasWeights.shape.d[0] == noutput, ErrorCode::kINVALID_NODE);
+        biasWeights = shapedBiasWeights;
     }
     else
     {
-        output_padding_HW = nvinfer1::Dims{2, {output_padding.d[1], output_padding.d[2]}, {}};
+        biasWeights = ShapedWeights::empty(kernelWeights.type);
     }
 
-    if (output_padding_HW != nvinfer1::Dims{2, {0, 0}, {}})
+    // Kernel shape either comes from the attributes or extracted from the kernel weights shape
+    kernelSize.nbDims = nbSpatialDims;
+    for (int i = 1; i <= nbSpatialDims; ++i)
     {
-        tensor_ptr
-            = ctx->network()->addPaddingNd(*tensor_ptr, nvinfer1::Dims{2, {}, {}}, output_padding_HW)->getOutput(0);
+        kernelSize.d[nbSpatialDims - i] = kernelWeights.shape.d[kernelWeights.shape.nbDims - i];
     }
 
-    dims = tensor_ptr->getDimensions();
+    getKernelParams(ctx, node, &kernelSize, &strides, &begPadding, &endPadding, paddingMode, exclude_padding,
+        &dilations, &outputPadding);
 
-    if (need_to_expand_dims)
+    for (int i = 1; i <= nbSpatialDims; ++i)
+    {
+        ASSERT(kernelSize.d[nbSpatialDims - i] == kernelWeights.shape.d[kernelWeights.shape.nbDims - i],
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    // Set padding. ONNX ConvTranspose supports many different padding modes. Order of priority for padding:
+    // 1. Output shape is specified - calculate expected pre and post padding.
+    // 2. AUTO_PAD != NOTSET: ignore all other padding values and set padding mode with layer->setPaddingMode.
+    //    Pad the resulting output vector with values from output_padding
+    // 3. Use specified "pads" values from the node. Pad the resulting output vector with values from output_padding
+
+    auto autoPadMode = attrs.get("auto_pad", std::string("NOTSET"));
+    if (attrs.count("output_shape") && autoPadMode == std::string("NOTSET"))
+    {
+        outputShape = attrs.get<nvinfer1::Dims>("output_shape");
+
+        // This function takes references to begPadding, endPadding and outputPadding and will update them with correct values
+        generatePadding(dims, outputShape, kernelSize, strides, dilations, nbSpatialDims, begPadding, endPadding,
+            outputPadding, paddingMode);
+
+        // NOTE: it is possible for generatePadding to produce negative values for pre and post padding, which usually happens when
+        // output_shape is provided but output_padding is not. Any negative values generated for post-padding can be translated
+        // into outputPadding to pad the output tensor post deconvolution. Any negative values for pre-padding are unsupported.
+
+        for (int i = 0; i < nbSpatialDims; i++)
+        {
+            ASSERT(begPadding.d[i] >= 0 && "TensorRT does not support negative pre-padding in the ConvTranspose operator!",
+                ErrorCode::kUNSUPPORTED_NODE);
+            // Update outputPadding with any negative values in endPadding, and set the corresponding value to 0.
+            if (endPadding.d[i] < 0)
+            {
+                outputPadding.d[i] = endPadding.d[i] * -1;
+                endPadding.d[i] = 0;
+            }
+        }
+    }
+
+    // When there is output_padding, if postPadding is larger than outputPadding, just adjust postPadding
+    // Or reduce outputPadding as minimum as possible.
+    bool hasOutputPadding = false;
+    if (outputPadding != makeDims(nbSpatialDims, 0) && autoPadMode == std::string("NOTSET"))
+    {
+        for (int i = 0; i < nbSpatialDims; ++i)
+        {
+            if (endPadding.d[i] - outputPadding.d[i] >= 0)
+            {
+                endPadding.d[i] -= outputPadding.d[i];
+                outputPadding.d[i] = 0;
+            }
+            else
+            {
+                // Reduce outputPadding as possible.
+                outputPadding.d[i] -= endPadding.d[i];
+                endPadding.d[i] = 0;
+                hasOutputPadding = true;
+            }
+        }
+    }
+
+    nvinfer1::Weights emptyBiasWeights = ShapedWeights::empty(kernelWeights.type);
+
+    // Create a deconvolution layer and set known attributes - strides,ngroups, and dilations
+    // If there is still output padding, remove the bias weights. Bias will be added below.
+    auto* layer = ctx->network()->addDeconvolutionNd(
+        *tensorPtr, noutput, kernelSize, kernelWeights, hasOutputPadding ? emptyBiasWeights : biasWeights);
+    layer->setStrideNd(strides);
+    layer->setNbGroups(ngroup);
+    layer->setDilationNd(dilations);
+
+    // Check that 3D deconvolution paddings is valid
+    if (nbSpatialDims == 3)
+    {
+        ASSERT(begPadding == endPadding && "TensorRT does not support asymmetrical padding for 3D deconvolutions!",
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    layer->setPaddingMode(paddingMode);
+    layer->setPrePadding(begPadding);
+    layer->setPostPadding(endPadding);
+
+    LOG_VERBOSE("Running deconvolution with: " << "\n"
+                << "Padding mode: " << autoPadMode << "\n"
+                << "Pre-padding: " << begPadding << "\n"
+                << "Post-padding: " << endPadding);
+
+    tensorPtr = layer->getOutput(0);
+    dims = tensorPtr->getDimensions();
+
+    // There is still output padding. Add a padding layer to handle it.
+    if (hasOutputPadding)
+    {
+        // TRT only support 2D padding on the outermost dimensions
+        ASSERT(outputPadding.nbDims == 2 || (outputPadding.nbDims == 3 && outputPadding.d[0] == 0),
+            ErrorCode::kUNSUPPORTED_NODE);
+        // Convert 3D padding to 2d padding
+        if (nbSpatialDims == 3)
+        {
+            outputPadding = {2, {outputPadding.d[1], outputPadding.d[2]}};
+        }
+        LOG_VERBOSE("Padding output deconvolution tensor with: " << outputPadding);
+        tensorPtr = ctx->network()->addPaddingNd(*tensorPtr, makeDims(2, 0), outputPadding)->getOutput(0);
+
+        // This bias is not handled by deconv. Use an elementwise to handle it.
+        if (biasWeights.count != 0)
+        {
+            // Set C dimension to weights count and set other dimensions to 1 to enable broadcast
+            auto constantDims = makeDims(dims.nbDims, 1);
+            constantDims.d[dims.nbDims - nbSpatialDims - 1] = biasWeights.count;
+            auto biasConstant = ctx->network()->addConstant(constantDims, biasWeights);
+            tensorPtr
+                = ctx->network()
+                      ->addElementWise(*tensorPtr, *biasConstant->getOutput(0), nvinfer1::ElementWiseOperation::kSUM)
+                      ->getOutput(0);
+        }
+    }
+
+    if (needToExpandDims)
     {
         std::vector<int> axes{3};
-        tensor_ptr = squeezeTensor(ctx, *tensor_ptr, axes);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
+        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
     }
-    return {{tensor_ptr}};
+    return {{tensorPtr}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Cos)
@@ -1553,8 +1616,6 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     auto bias_weights = inputs.at(2).weights();
     OnnxAttrs attrs(node, ctx);
     float epsilon = attrs.get("epsilon", 1e-5f);
-    // TensorRT only supports epsilon values >= 1e-4.
-    epsilon = std::max(epsilon, 1e-4f);
 
     // Populate instanceNormalization plugin properties.
     const std::string pluginName = "InstanceNormalization_TRT";
