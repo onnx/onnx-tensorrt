@@ -2471,7 +2471,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     }
 
     // Resizes that use scale factors have the same import logic between opsets
-    ASSERT(((transformationMode != "align_corners", "Align_corners should use size information not scale factors!");
+    ASSERT(transformationMode != "align_corners" && "Align_corners should use size information not scale factors!", ErrorCode::kUNSUPPORTED_NODE);
     auto scales = ctx->getOpsetVersion() >= 11 ? inputs.at(2) : inputs.at(1);
     ASSERT(scales.is_weights() && "Resize scales must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights scales_weights = scales.weights();
