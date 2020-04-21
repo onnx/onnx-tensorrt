@@ -286,6 +286,9 @@ nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
 nvinfer1::ITensor* transposeTensor(
     IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, bool permute_dim_types = true);
 
+// Helper function to filter out shape tensor outputs for layers that do not support it
+bool supportsShapeTensor(nvinfer1::LayerType type, nvinfer1::ElementWiseOperation eleOp, nvinfer1::ReduceOperation redOp);
+
 // Helper function to import ONNX unary ops into TRT
 NodeImportResult unaryHelper(IImporterContext* ctx, TensorOrWeights& input, nvinfer1::UnaryOperation op);
 
