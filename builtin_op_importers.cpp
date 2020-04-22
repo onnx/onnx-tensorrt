@@ -2911,7 +2911,7 @@ ShapeTensor decodeOnnxIndices(IImporterContext* ctx, const ShapeTensor& indices,
 {
     // Oblique calculation implements the rules using only operations available in TensorRT.
     return sub(
-        ctx, min(ctx, indices, dims), mul(ctx, dims, max(ctx, shapeVector(-1), min(ctx, shapeVector(0), indices))));
+        ctx, min(ctx, max(ctx, indices, mul(ctx, shapeVector(-1), dims)), dims), mul(ctx, dims, max(ctx, shapeVector(-1), min(ctx, shapeVector(0), indices))));
 }
 
 ShapeTensor computeSizes(IImporterContext* ctx, const ShapeTensor& starts, const ShapeTensor& ends,
