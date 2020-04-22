@@ -367,7 +367,7 @@ bool ModelImporter::supportsModel(
         bool registered = supportsOperator(node.op_type().c_str());
         bool containsInput = (input_node.empty()) ? false : checkForInput(node);
         bool containsIndex = node_idx == error_node;
-        auto const tensor = node.output()[0];
+        auto const tensor = node.output(0);
         bool supportedShapeTensorOutput = ctx->unsupportedShapeTensors().count(tensor) == 0 ? true : false;
 
         if (registered && !containsInput && !containsIndex && supportedShapeTensorOutput)
