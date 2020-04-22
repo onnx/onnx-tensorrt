@@ -431,7 +431,21 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx
     {
         // Handle non-tensor indices input by adding a new constant layer to the network.
         ShapedWeights& weights = input.weights();
-        return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+        // Note the TRT doesn't natively handle boolean weights. First create an INT32 weights copy of the boolean weights, then cast it back to bool within TRT.
+        if (weights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
+        {
+            ShapedWeights convertedWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, weights.shape);
+            int* intValues = static_cast<int*>(weights.values);
+            std::memcpy(convertedWeights.values, intValues, weights.count() * sizeof(int));
+            auto* boolTensor = ctx->network()->addConstant(convertedWeights.shape, convertedWeights)->getOutput(0);
+            auto* castLayer = ctx->network()->addIdentity(*boolTensor);
+            castLayer->setOutputType(0,nvinfer1::DataType::kBOOL);
+            return *(castLayer->getOutput(0));
+        }
+        else
+        {
+            return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+        }
     }
 }
 
@@ -754,7 +768,7 @@ int getDtypeSize(int32_t onnxDtype)
     case ::ONNX_NAMESPACE::TensorProto::UINT32:
         return 4;
     // Booleans are stored in int32 tensors in ONNX
-    case ::ONNX_NAMESPACE::TensorProto::BOOL: return 4;
+    case ::ONNX_NAMESPACE::TensorProto::BOOL: return 1;
     case ::ONNX_NAMESPACE::TensorProto::INT32: return 4;
     case ::ONNX_NAMESPACE::TensorProto::UINT64: return 8;
     case ::ONNX_NAMESPACE::TensorProto::INT64: return 8;
