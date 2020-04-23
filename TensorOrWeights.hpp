@@ -67,7 +67,7 @@ public:
     {
         return _variant == NODE_WEIGHTS;
     }
-    bool isNullTensor()
+    bool isNullTensor() const
     {
         return is_tensor() && _tensor == nullptr;
     }
