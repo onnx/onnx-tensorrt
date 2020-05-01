@@ -49,6 +49,7 @@ class ImporterContext final : public IImporterContext
     StringMap<size_t>
         mLayerNameCounts; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
     std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold any shape tensors that are the output of layers that do not support shape tensors.
+    StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : _network(network)
@@ -82,6 +83,10 @@ public:
     virtual std::unordered_set<std::string>& unsupportedShapeTensors() override
     {
         return mUnsupportedShapeTensors;
+    }
+    virtual StringMap<std::string>& loopTensors() override
+    {
+        return mLoopTensors;
     }
 
     // This actually handles weights as well, but is named this way to be consistent with the tensors()

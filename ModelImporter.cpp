@@ -332,11 +332,11 @@ bool ModelImporter::supportsModel(
             }
         }
     }
-
-    auto checkForInput = [&input_node](::ONNX_NAMESPACE::NodeProto const& node) {
+    auto* ctx = &_importer_ctx;
+    auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
         for (auto input : node.input())
         {
-            if (input_node == input)
+            if (input_node == input || ctx->loopTensors()[input_node] == input)
             {
                 return true;
             }
@@ -352,8 +352,6 @@ bool ModelImporter::supportsModel(
         cout << "Failed to sort model topologically, exiting ..." << endl;
         return false;
     }
-
-    auto* ctx = &_importer_ctx;
 
     for (int node_idx : topological_order)
     {
