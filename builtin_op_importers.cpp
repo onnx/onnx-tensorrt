@@ -1703,6 +1703,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     {
         tripLimit = convertToScalar(ctx, &convertToTensor(inputs[0], ctx));
         ASSERT(tripLimit, ErrorCode::kINVALID_NODE);
+        ctx->loopTensors()[body.input(0).name()] = node.input(0);
         loop->addTripLimit(*tripLimit, nvinfer1::TripLimit::kCOUNT);
         ctx->registerTensor(tripLimit, body.input(0).name());
     }
@@ -1710,6 +1711,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     {
         nvinfer1::ITensor* cond = convertToScalar(ctx, &convertToTensor(inputs[1], ctx));
         ASSERT(cond, ErrorCode::kINVALID_NODE);
+        ctx->loopTensors()[body.input(1).name()] = node.input(1);
         loop->addTripLimit(*cond, nvinfer1::TripLimit::kWHILE);
         ctx->registerTensor(cond, body.input(1).name());
     }
@@ -1718,6 +1720,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     for (size_t i = 2; i < inputs.size(); ++i)
     {
         stateVars.emplace_back(loop->addRecurrence(convertToTensor(inputs[i], ctx)));
+        ctx->loopTensors()[body.input(i).name()] = node.input(i);
         ctx->registerTensor(TensorOrWeights{stateVars.back()->getOutput(0)}, body.input(i).name());
     }
 
