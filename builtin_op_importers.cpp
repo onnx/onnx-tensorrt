@@ -1587,6 +1587,31 @@ DEFINE_BUILTIN_OP_IMPORTER(Identity)
     RETURN_FIRST_OUTPUT(ctx->network()->addIdentity(convertToTensor(inputs.at(0), ctx)));
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(If)
+{
+  ASSERT(inputs[0].isBool(), ErrorCode::kINVALID_NODE);
+  ASSERT(inputs.size() == 1, ErrorCode::kINVALID_NODE);
+
+  // Currently this importer only supports condition with weight.
+  ASSERT(inputs[0].is_weights(), ErrorCode::kINVALID_NODE);
+
+  const bool condition = static_cast<bool*>(inputs[0].weights().values)[0];
+  const std::string branch_name = condition ? "then_branch" : "else_branch";
+
+  OnnxAttrs attrs(node, ctx);
+  const ::ONNX_NAMESPACE::GraphProto& graph_body = attrs.get<const ::ONNX_NAMESPACE::GraphProto&>(branch_name);
+
+  TRT_CHECK(onnx2trt::parseGraph(ctx, graph_body));
+
+  // Copy all the outputs.
+  std::vector<TensorOrWeights> nodeOutputs;
+  for(int i=0; i<graph_body.output_size(); i++){
+    nodeOutputs.emplace_back(ctx->tensors().at(graph_body.output(i).name()));
+  }
+
+  return nodeOutputs;
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(ImageScaler)
 {
     nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
