@@ -111,8 +111,8 @@ Build the onnx_tensorrt Docker image using tar-based TensorRT by running:
 
     git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
     cd onnx-tensorrt
-    cp /path/to/TensorRT-7.x.x.tar.gz .
-    docker build -f docker/onnx-tensorrt-tar.Dockerfile --tag=onnx-tensorrt:7.x.x .
+    cp /path/to/TensorRT-7.x.x.x.tar.gz .
+    docker build --build-arg TENSORRT_VERSION=7.x.x.x -f docker/onnx-tensorrt-tar.Dockerfile --tag=onnx-tensorrt:7.x.x.x .
 
 #### Deb-Based TensorRT
 
@@ -121,7 +121,7 @@ Build the onnx_tensorrt Docker image using deb-based TensorRT by running:
     git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
     cd onnx-tensorrt
     cp /path/to/nv-tensorrt-repo-ubuntu1x04-cudax.x-trt7.x.x.x-ga-yyyymmdd_1-1_amd64.deb .
-    docker build -f docker/onnx-tensorrt-deb.Dockerfile --tag=onnx-tensorrt:7.x.x.x .
+    docker build --build-arg TENSORRT_VERSION=7.x.x.x -f docker/onnx-tensorrt-deb.Dockerfile --tag=onnx-tensorrt:7.x.x.x .
 
 ### Tests
 

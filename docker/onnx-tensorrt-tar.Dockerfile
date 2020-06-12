@@ -1,4 +1,6 @@
-FROM nvcr.io/nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
+ARG CUDA_VERSION=10.2
+ARG UBUNTU_VERSION=18.04
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn7-devel-ubuntu${UBUNTU_VERSION}
 ARG TENSORRT_VERSION=6.0.1.5
 ARG PY3_VERSION=36
 
@@ -22,9 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-setuptools \
         libprotobuf-dev \
         protobuf-compiler \
-        cmake \
         swig \
     && rm -rf /var/lib/apt/lists/*
+
+# Install cmake
+RUN cd /tmp && \
+    wget https://github.com/Kitware/CMake/releases/download/v3.14.4/cmake-3.14.4-Linux-x86_64.sh && \
+    chmod +x cmake-3.14.4-Linux-x86_64.sh && \
+    ./cmake-3.14.4-Linux-x86_64.sh --prefix=/usr/local --exclude-subdir --skip-license && \
+    rm ./cmake-3.14.4-Linux-x86_64.sh
 
 
 WORKDIR /opt/onnx-tensorrt
@@ -49,8 +57,8 @@ RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     rm -rf TensorRT-${TENSORRT_VERSION}*
 
 # Build and install onnx
-RUN pip2 install onnx==1.5 pytest==4.6.5
-RUN pip3 install onnx==1.5 pytest==5.1.2
+RUN pip2 install onnx==1.5 pytest==4.6.5 markupsafe
+RUN pip3 install onnx==1.5 pytest==5.1.2 markupsafe
 
 # Build the library
 ENV ONNX2TRT_VERSION 0.1.0
