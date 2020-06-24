@@ -1023,10 +1023,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
     float beta = attrs.get("beta", 1.f);
     bool transA = attrs.get("transA", false);
     bool transB = attrs.get("transB", false);
+
+    // TRT does not support INT32 input types for this node
+    ASSERT(!inputs.at(0).isInt32() && !inputs.at(1).isInt32() && "TensorRT does not support INT32 inputs for GEMM!", ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor& inputA = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* inputB = &convertToTensor(inputs.at(1), ctx);
-    // TRT does not support INT32 input types for this node
-    ASSERT(inputA.getType() == inputB->getType() && inputA.getType() != nvinfer1::DataType::kINT32, ErrorCode::kUNSUPPORTED_NODE);
 
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights() && inputs.at(2).is_weights() && alpha == 1.f
