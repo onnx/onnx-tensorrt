@@ -356,18 +356,19 @@ bool convertOnnxWeights(
         {
             switch (onnxDtype)
             {
+                // Import INT32 and FP16 weights as is.
                 case ::ONNX_NAMESPACE::TensorProto::INT32:
-                    dataPtr = (void*) (onnxTensor.int32_data().data());
-                    break;
-                // According to the ONNX proto spec, fp16 values are bit-wise converted to uint16_t when serialied into the protobuf.
                 case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
-                    dataPtr = convertINT32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
+                    dataPtr = (void*) (onnxTensor.int32_data().data());
                     break;
                 case ::ONNX_NAMESPACE::TensorProto::INT8:
                     dataPtr = convertINT32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
                     break;
                 case ::ONNX_NAMESPACE::TensorProto::BOOL:
                     dataPtr = convertINT32Data<uint8_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
+                    break;
+                default:
+                    LOG_ERROR("Found unsupported datatype (" << onnxDtype << ") when importing initializer: " << onnxTensor.name());
                     break;
             }
             nbytes = onnxTensor.int32_data().size() * getDtypeSize(onnxDtype);
