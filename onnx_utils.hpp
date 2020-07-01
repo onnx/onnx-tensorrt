@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -28,26 +28,18 @@
 #include <onnx/onnx_pb.h>
 #include <sstream>
 
-using std::cerr;
-using std::endl;
-
 #pragma once
 
 namespace
 {
 
 template <typename OnnxDims>
-inline bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims)
+bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims)
 {
     std::vector<int> onnxDims_vector;
     for (const auto& onnxDim : onnxDims)
     {
-        // This version of TensorRT does not support empty tensors
-        if (onnxDim.dim_value() == 0 && onnxDim.dim_param() == "")
-        {
-            return false;
-        }
-        int dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() > 0 ? onnxDim.dim_value() : -1) : -1;
+        const int dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() >= 0 ? onnxDim.dim_value() : -1) : -1;
         onnxDims_vector.emplace_back(dim);
     }
     trtDims.nbDims = onnxDims_vector.size();
@@ -57,7 +49,7 @@ inline bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims)
 }
 
 // Removes raw data from the text representation of an ONNX model
-inline void remove_raw_data_strings(std::string& s)
+void remove_raw_data_strings(std::string& s)
 {
     std::string::size_type beg = 0;
     const std::string key = "raw_data: \"";
@@ -79,7 +71,7 @@ inline void remove_raw_data_strings(std::string& s)
 }
 
 // Removes float_data, int32_data etc. from the text representation of an ONNX model
-inline std::string remove_repeated_data_strings(std::string& s)
+std::string remove_repeated_data_strings(std::string& s)
 {
     std::istringstream iss(s);
     std::ostringstream oss;
@@ -137,7 +129,7 @@ inline bool ParseFromFile_WAR(google::protobuf::Message* msg, const char* filena
     std::ifstream stream(filename, std::ios::in | std::ios::binary);
     if (!stream)
     {
-        cerr << "Could not open file " << std::string(filename) << endl;
+        std::cerr << "Could not open file " << std::string(filename) << std::endl;
         return false;
     }
     google::protobuf::io::IstreamInputStream rawInput(&stream);
@@ -153,7 +145,7 @@ inline bool ParseFromTextFile(google::protobuf::Message* msg, const char* filena
     std::ifstream stream(filename, std::ios::in);
     if (!stream)
     {
-        cerr << "Could not open file " << std::string(filename) << endl;
+        std::cerr << "Could not open file " << std::string(filename) << std::endl;
         return false;
     }
 

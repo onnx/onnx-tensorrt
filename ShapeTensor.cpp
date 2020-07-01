@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,64 +30,149 @@
 namespace onnx2trt
 {
 
-ShapeTensor::ShapeTensor(int rank_, int32_t size_)
-    : rank(rank_)
-    , size(size_)
+ShapeTensor::ShapeTensor(int rank_, std::vector<int64_t>&& values_)
+    : mDepth(0)
+    , mAllValuesKnown(true)
+    , mRank(rank_)
+    , mSize(values_.size())
+    , mValues(std::move(values_))
 {
     assert((rank_ == 0 || rank_ == 1) && "shape tensor must have rank 0 or 1");
-    assert(size_ >= 0);
-    assert(rank_ > 0 || size_ == 1);
-}
-
-ShapeTensor::ShapeTensor(int rank_, std::vector<int64_t>&& values_)
-    : ShapeTensor(rank_, values_.size())
-{
-    values = std::move(values_);
+    assert(rank_ > 0 || mValues.size() == 1);
 }
 
 ShapeTensor::ShapeTensor(TensorOrWeights& t)
+    : mDepth(0)
 {
-    const nvinfer1::Dims d = t.shape();
-    assert((d.nbDims == 0 || d.nbDims == 1) && "shape tensor must have rank 0 or 1");
-    assert((d.nbDims == 0 || d.d[0] >= 0) && "shape tensor must have build-time shape");
-    rank = d.nbDims;
-    size = rank == 0 ? 1 : d.d[0];
     if (t.is_tensor())
     {
-        mTensor = &t.tensor();
+        *this = ShapeTensor(t.tensor());
     }
     else
     {
-        weightsToVector(t.weights(), &values);
+        const nvinfer1::Dims d = t.shape();
+        assert(0 <= d.nbDims);
+        assert(d.nbDims <= 1 && "shape tensor must be 0D or 1D");
+        mRank = d.nbDims;
+        mSize = d.nbDims == 0 ? 1 : d.d[0];
+        weightsToVector(t.weights(), &mValues);
+        mAllValuesKnown = true;
     }
 }
 
-void ShapeTensor::assign(const nvinfer1::ILayer* layer)
+static bool hasAllNonNegativeValues(const std::vector<int64_t>& values)
 {
-    assert(layer);
-    assert(!mTensor && "already assigned");
-    mTensor = layer->getOutput(0);
-    assert(mTensor);
-#ifndef NDEBUG
-    const nvinfer1::Dims d = mTensor->getDimensions();
-    assert(rank == d.nbDims);
-    assert(size == (rank == 0 ? 1 : d.d[0]));
-#endif
+    return std::all_of(values.begin(), values.end(), [](int x) { return x >= 0; });
+}
+
+ShapeTensor::ShapeTensor(nvinfer1::ITensor& t, int depth)
+    : mDepth(depth)
+    , mRank(1)
+    , mTensor(&t)
+{
+    const nvinfer1::Dims dims = t.getDimensions();
+
+    switch (mDepth)
+    {
+    case 0:
+        assert(t.getType() == nvinfer1::DataType::kINT32);
+        mRank = dims.nbDims;
+        if (mRank == 0)
+        {
+            mSize = 1;
+        }
+        else if (mRank == 1)
+        {
+            mSize = dims.d[0];
+        }
+        else
+        {
+            assert(mRank == -1);
+        }
+        break;
+
+    case 1:
+        if (dims.nbDims >= 0)
+        {
+            mSize = dims.nbDims;
+            mValues.resize(dims.nbDims);
+            std::copy_n(dims.d, dims.nbDims, mValues.begin());
+            mAllValuesKnown = hasAllNonNegativeValues(mValues);
+        }
+        break;
+
+    case 2:
+        mSize = 1;
+        if (dims.nbDims >= 0)
+        {
+            mValues = {dims.nbDims};
+            mAllValuesKnown = hasAllNonNegativeValues(mValues);
+        }
+        break;
+
+    case 3:
+        // Applying IShapeLayer three times always yields a 1D vector containing 1.
+        mDepth = 0;
+        mSize = 1;
+        mValues = {1};
+        mAllValuesKnown = true;
+        mTensor = nullptr;
+        break;
+
+    default:
+        // Though depths greater than 3 could be handled the same as 3, they are
+        // likely a sign of a problem.  Depths less than 0 make no sense.
+        assert(0);
+        break;
+    }
+}
+
+ShapeTensor shapeVector(int64_t value)
+{
+    return ShapeTensor(1, std::vector<int64_t>({value}));
+}
+
+ShapeTensor shapeScalar(int64_t value)
+{
+    return ShapeTensor(0, std::vector<int64_t>({value}));
+}
+
+bool ShapeTensor::valueKnown(int k) const
+{
+    assert(0 <= k);
+    assert(k < mSize);
+    return allValuesKnown() || (mValues.size() == static_cast<size_t>(mSize) && mValues[k] >= 0);
 }
 
 bool ShapeTensor::isAll(int64_t x) const
 {
-    return valuesKnown() && std::all_of(values.begin(), values.end(), [x](int64_t y) { return x == y; });
+    assert(mDepth >= 0 && "undefined tensor");
+    return allValuesKnown() && std::all_of(begin(), end(), [x](int64_t y) { return x == y; });
 }
 
 nvinfer1::ITensor& ShapeTensor::tensor(IImporterContext* ctx) const
 {
-    if (!mTensor)
+    assert(mDepth >= 0 && "undefined tensor");
+    assert(mDepth <= 2);
+    if (!mTensor || mDepth != 0)
     {
-        assert(valuesKnown());
-        const nvinfer1::Dims dims{rank, {size}, {}};
-        const nvinfer1::Weights w{nvinfer1::DataType::kINT32, convertINT64(values.data(), dims, ctx), size};
-        mTensor = ctx->network()->addConstant(dims, w)->getOutput(0);
+        // Need to create an ITensor representing *this.
+        if (allValuesKnown())
+        {
+            // Create constant
+            const nvinfer1::Dims dims{rank(), {size()}, {}};
+            const nvinfer1::Weights w{nvinfer1::DataType::kINT32, convertINT64(mValues.data(), dims, ctx), size()};
+            mTensor = ctx->network()->addConstant(dims, w)->getOutput(0);
+            mDepth = 0;
+        }
+        else
+        {
+            assert(mTensor);
+            for (; mDepth > 0; --mDepth)
+            {
+                mTensor = ctx->network()->addShape(*mTensor)->getOutput(0);
+            }
+        }
     }
     return *mTensor;
 }
@@ -99,14 +184,25 @@ ShapeTensor iotaShapeVector(int32_t n)
     return ShapeTensor(1, std::move(values));
 }
 
-ShapeTensor similar(const ShapeTensor& exemplar, int64_t value)
+ShapeTensor similar(IImporterContext* ctx, const ShapeTensor& exemplar, int64_t value)
 {
-    return ShapeTensor(exemplar.rank, std::vector<int64_t>(exemplar.size, value));
+    return fillShapeVector(ctx, value, shapeOf(exemplar));
 }
 
-ShapeTensor fillShapeVector(int32_t size, int64_t value)
+ShapeTensor fillShapeVector(IImporterContext* ctx, int64_t value, const ShapeTensor& count)
 {
-    return ShapeTensor(1, std::vector<int64_t>(size, value));
+    assert(count.rank() == 1 && "implementation assumes 1D size");
+    assert(count.size() == 1 && "implementation assumes 1D size of known size");
+    if (count.allValuesKnown())
+    {
+        return ShapeTensor(1, std::vector<int64_t>(count[0], value));
+    }
+    else
+    {
+        nvinfer1::ISliceLayer* slice
+            = addSlice(ctx, shapeVector(value).tensor(ctx), shapeVector(0), count, shapeVector(0));
+        return ShapeTensor(*slice->getOutput(0));
+    }
 }
 
 using nvinfer1::ElementWiseOperation;
@@ -118,31 +214,30 @@ using nvinfer1::ElementWiseOperation;
 static ShapeTensor op(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, ElementWiseOperation operation,
     bool commutative, int64_t rightIdentity, const std::function<int64_t(int64_t, int64_t)>&& f)
 {
-    assert(x.rank == y.rank);
-    assert(x.size == 1 || y.size == 1 || x.size == y.size);
-    if (y.isAll(rightIdentity) && y.size <= x.size)
+    assert(!x.rankKnown() || !y.rankKnown() || x.rank() == y.rank());
+    if (x.sizeKnown() && y.sizeKnown())
     {
-        return x;
-    }
-    if (commutative && x.isAll(rightIdentity) && x.size <= y.size)
-    {
-        return y;
-    }
-    ShapeTensor z(x.rank, std::max(x.size, y.size));
-    if (x.valuesKnown() && y.valuesKnown())
-    {
-        z.values.resize(z.size);
-        for (int i = 0; i < z.size; ++i)
+        assert(x.size() == 1 || y.size() == 1 || x.size() == y.size());
+        if (y.isAll(rightIdentity) && y.size() <= x.size())
         {
-            // The % simulates broadcast rules.
-            z.values[i] = f(x.values[i % x.size], y.values[i % y.size]);
+            return x;
+        }
+        if (commutative && x.isAll(rightIdentity) && x.size() <= y.size())
+        {
+            return y;
         }
     }
-    else
+    if (x.allValuesKnown() && y.allValuesKnown())
     {
-        z.assign(ctx->network()->addElementWise(x.tensor(ctx), y.tensor(ctx), operation));
+        std::vector<int64_t> values(std::max(x.size(), y.size()));
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            // The % simulates broadcast rules.
+            values[i] = f(x[i % x.size()], y[i % y.size()]);
+        }
+        return ShapeTensor(x.rank(), std::move(values));
     }
-    return z;
+    return ShapeTensor(*ctx->network()->addElementWise(x.tensor(ctx), y.tensor(ctx), operation)->getOutput(0), 0);
 }
 
 ShapeTensor add(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
@@ -171,7 +266,6 @@ ShapeTensor max(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& 
     return op(ctx, x, y, ElementWiseOperation::kMAX, true, std::numeric_limits<int64_t>::min(),
         [](int64_t x, int64_t y) { return std::max(x, y); });
 }
-
 ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kFLOOR_DIV, false, 1, [](int64_t x, int64_t y) {
@@ -179,6 +273,14 @@ ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTen
         const int64_t d = x / y;
         return d * y == x ? d : d - ((x < 0) ^ (y < 0));
     });
+}
+
+ShapeTensor broadcast(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+{
+    // max(x,y) works unless x or y is 0.
+    // min(x,y,1) yields 0 if x or y is 0, and 1 otherwise.
+    // So compute max(x,y)*min(x,y,1).
+    return mul(ctx, max(ctx, x, y), min(ctx, x, min(ctx, y, similar(ctx, y, 1))));
 }
 
 ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank)
@@ -194,75 +296,55 @@ ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int 
 
 ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
-    assert(x.rank == 1);
-    assert(y.rank == 1);
-    // Optimizing the case x.size == 0 or y.size == 0 not only reduces clutter,
-    // but is required because TensorRT does not allow empty tensors.
-    if (x.size == 0)
+    assert(!x.rankKnown() || x.rank() == 1);
+    assert(!y.rankKnown() || y.rank() == 1);
+    if (x.sizeKnown() && x.size() == 0)
     {
         return y;
     }
-    if (y.size == 0)
+    if (y.sizeKnown() && y.size() == 0)
     {
         return x;
     }
-    ShapeTensor z(1, x.size + y.size);
-    if (x.valuesKnown() && y.valuesKnown())
+    if (x.allValuesKnown() && y.allValuesKnown())
     {
-        z.values.resize(z.size);
-        auto p = std::copy(x.values.begin(), x.values.end(), z.values.begin());
-        std::copy(y.values.begin(), y.values.end(), p);
+        std::vector<int64_t> values(x.size() + y.size());
+        auto p = std::copy(x.begin(), x.end(), values.begin());
+        std::copy(y.begin(), y.end(), p);
+        return ShapeTensor(1, std::move(values));
     }
-    else
-    {
-        nvinfer1::ITensor* const args[2] = {&x.tensor(ctx), &y.tensor(ctx)};
-        z.assign(ctx->network()->addConcatenation(args, 2));
-    }
-    return z;
+
+    nvinfer1::ITensor* const args[2] = {&x.tensor(ctx), &y.tensor(ctx)};
+    return ShapeTensor(*ctx->network()->addConcatenation(args, 2)->getOutput(0));
 }
 
 ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices)
 {
-    assert(data.rank == 1);
-    ShapeTensor z(indices.rank, indices.size);
-    // Optimizing the case indices.size == 0 is required, because TensorRT does not allow empty tensors.
-    if ((data.valuesKnown() && indices.valuesKnown()) || indices.size == 0)
+    assert(data.rank() == 1);
+    if (indices.allValuesKnown()
+        && std::all_of(indices.begin(), indices.end(), [&data](int i) { return data.valueKnown(i); }))
     {
-        z.values.resize(z.size);
-        std::transform(indices.values.begin(), indices.values.end(), z.values.begin(), [&](int64_t i) {
+        std::vector<int64_t> z(indices.size());
+        std::transform(indices.begin(), indices.end(), z.begin(), [&data](int64_t i) {
             assert(0 <= i);
-            assert(static_cast<size_t>(i) < data.values.size());
-            return data.values[i];
+            assert(i < data.size());
+            return data[i];
         });
+        return ShapeTensor(indices.rank(), std::move(z));
     }
-    else
-    {
-        z.assign(ctx->network()->addGather(data.tensor(ctx), indices.tensor(ctx), 0));
-    }
-    return z;
+    return ShapeTensor(*ctx->network()->addGather(data.tensor(ctx), indices.tensor(ctx), 0)->getOutput(0));
 }
 
-ShapeTensor shapeOf(IImporterContext* ctx, nvinfer1::ITensor& tensor)
+ShapeTensor shapeOf(nvinfer1::ITensor& tensor)
 {
-    const nvinfer1::Dims d = tensor.getDimensions();
-    ShapeTensor z(1, d.nbDims);
-    if (isDynamic(d))
-    {
-        z.assign(ctx->network()->addShape(tensor));
-    }
-    else
-    {
-        z.values.resize(d.nbDims);
-        std::copy_n(d.d, d.nbDims, z.values.begin());
-    }
-    return z;
+    return ShapeTensor(tensor, 1);
 }
 
-ShapeTensor shapeOf(IImporterContext* ctx, TensorOrWeights& t)
+ShapeTensor shapeOf(TensorOrWeights& t)
 {
     if (t.is_tensor())
     {
-        return shapeOf(ctx, t.tensor());
+        return shapeOf(t.tensor());
     }
     else
     {
@@ -271,48 +353,87 @@ ShapeTensor shapeOf(IImporterContext* ctx, TensorOrWeights& t)
     }
 }
 
-ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)
+ShapeTensor shapeOf(const ShapeTensor& t)
 {
-    assert(tensor.rank == 0);
-    assert(tensor.size == 1);
-    ShapeTensor result(1, 1);
-    if (tensor.valuesKnown())
+    assert(t.mDepth >= 0);
+    if (t.mTensor)
     {
-        result.values = tensor.values;
+        return ShapeTensor(*t.mTensor, t.mDepth + 1);
     }
     else
     {
-        result.assign(addShuffle(ctx, tensor.tensor(ctx), shapeVector(1)));
+        assert(t.rankKnown());
+        assert(t.sizeKnown());
+        // ShapeTensor is either a scalar or vector.
+        // shape of a scalar is an empty tensor.
+        // shape of a vector is a one-element tensor containing the length of the vector.
+        return t.rank() == 0 ? ShapeTensor(0, {}) : ShapeTensor(1, {t.size()});
     }
-    return result;
 }
 
-//! If x has known values, return Dims with those values.
+ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)
+{
+    assert(tensor.rank() == 0);
+    assert(tensor.size() == 1);
+    if (tensor.valueKnown(0))
+    {
+        return shapeScalar(tensor[0]);
+    }
+    return ShapeTensor(*addShuffle(ctx, tensor.tensor(ctx), shapeVector(1))->getOutput(0));
+}
+
+//! If all values of x are known, return Dims with those values.
 //! Otherwise return Dims with zeros.
 static nvinfer1::Dims toDims(const ShapeTensor& x)
 {
-    nvinfer1::Dims d{x.size, {}, {}};
-    if (x.valuesKnown())
+    nvinfer1::Dims d{-1, {}, {}};
+    if (x.sizeKnown())
     {
-        assert(x.size <= nvinfer1::Dims::MAX_DIMS);
-        std::copy(x.values.begin(), x.values.end(), d.d);
+        d.nbDims = x.size();
+        if (x.allValuesKnown())
+        {
+            assert(x.size() <= nvinfer1::Dims::MAX_DIMS);
+            std::copy(x.begin(), x.end(), d.d);
+        }
     }
     return d;
 }
 
-//! If x does not have known values, set layer input to tensor with value of x.
+//! If not all values in x are known, set layer input specifed by inputIndex
+//! to tensor with value of x.
 static void setShapeInputIfDynamic(IImporterContext* ctx, nvinfer1::ILayer* layer, int inputIndex, const ShapeTensor& x)
 {
-    if (!x.valuesKnown())
+    if (!x.allValuesKnown())
     {
         layer->setInput(inputIndex, x.tensor(ctx));
     }
 }
 
-nvinfer1::IShuffleLayer* addShuffle(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims)
+bool operator==(const ShapeTensor& x, const ShapeTensor& y)
+{
+    if (x.allValuesKnown() && y.allValuesKnown())
+    {
+        return x.mValues == y.mValues;
+    }
+    assert(x.mTensor || y.mTensor);
+    return x.mTensor == y.mTensor && x.mDepth == y.mDepth;
+}
+
+nvinfer1::ITensor& reshape(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape)
+{
+    const ShapeTensor oldShape = shapeOf(data);
+    if (newShape == oldShape)
+    {
+        return data;
+    }
+    return *addShuffle(ctx, data, newShape)->getOutput(0);
+}
+
+nvinfer1::IShuffleLayer* addShuffle(
+    IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder)
 {
     nvinfer1::IShuffleLayer* shuffle = ctx->network()->addShuffle(data);
-    if (reshapeDims.valuesKnown())
+    if (reshapeDims.allValuesKnown())
     {
         shuffle->setReshapeDimensions(toDims(reshapeDims));
     }
@@ -320,6 +441,7 @@ nvinfer1::IShuffleLayer* addShuffle(IImporterContext* ctx, nvinfer1::ITensor& da
     {
         shuffle->setInput(1, reshapeDims.tensor(ctx));
     }
+    shuffle->setZeroIsPlaceholder(zeroIsPlaceholder);
     return shuffle;
 }
 
@@ -343,17 +465,22 @@ nvinfer1::IFillLayer* addFill(IImporterContext* ctx, const ShapeTensor& shape, n
 std::ostream& operator<<(std::ostream& stream, const ShapeTensor& x)
 {
     stream << "(";
-    for (int i = 0; i < x.size; ++i)
+    for (int i = 0, e = x.size(); i < e; ++i)
     {
         stream << (i ? ", " : "");
-        if (x.valuesKnown())
+        if (x.valueKnown(i))
         {
-            stream << x.values[i];
+            stream << x[i];
         }
         else
         {
             stream << "_";
         }
+    }
+    if (x.size() == 1 && x.rank() == 1)
+    {
+        // Use Python convention to distinguish 1-element vector from a scalar.
+        stream << ",";
     }
     return stream << ")";
 }

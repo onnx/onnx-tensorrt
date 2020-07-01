@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -34,16 +34,11 @@ class IImporterContext;
 class TensorOrWeights;
 
 //! Represents a 0D or 1D tensor of int64_t.
-//! Unlike TensorRT, ShapeTensor allows empty tensors.
 class ShapeTensor
 {
 public:
     //! Create undefined ShapeTensor.
     ShapeTensor() = default;
-
-    //! Create ShapeTensor with known rank and size, but unknown values.
-    //! If rank_ is 0, the size_t must be 1.
-    ShapeTensor(int rank_, int32_t size_);
 
     //! Create ShapeTensor with known rank and values.
     ShapeTensor(int rank_, std::vector<int64_t>&& values_);
@@ -51,53 +46,141 @@ public:
     //! Create ShapeTensor representing value of TensorOrWeights.
     ShapeTensor(TensorOrWeights& t);
 
-    //! Number of dimensions (0 or 1), or -1 if undefined ShapeTensor.
-    int8_t rank{-1};
+    //! Construct ShapeTensor equivalent to applying IShapeLayer depth times.
+    //! The depth may be in [0,3].
+    explicit ShapeTensor(nvinfer1::ITensor& t, int depth = 0);
 
-    //! Number of values in the shape tensor, or -1 if undefined ShapeTensor.
-    int32_t size{-1};
-
-    //! Values of shape tensor if they are known, otherwise empty.
-    std::vector<int64_t> values;
-
-    //! True if values of the shape tensor are known.
-    bool valuesKnown() const
+    //! True if rank is known.
+    bool rankKnown() const
     {
-        return values.size() == static_cast<size_t>(size);
+        return mRank != kRANK_UNKNOWN;
     }
 
-    //! True if values of the shape tensor are known to be equal to given value.
+    //! Number of dimensions.  Always 0 or 1.
+    int32_t rank() const
+    {
+        assert(rankKnown());
+        return mRank;
+    }
+
+    //! True if number of elements in tensor is known.
+    bool sizeKnown() const
+    {
+        return mSize != kSIZE_UNKNOWN;
+    }
+
+    //! Number of elements in the tensor.  Asserts that sizeKnown()==true.
+    int32_t size() const
+    {
+        assert(sizeKnown());
+        return mSize;
+    }
+
+    //! True if all element values are known.
+    bool allValuesKnown() const
+    {
+        return mAllValuesKnown;
+    }
+
+    //! True if all element values equal the given value.
     bool isAll(int64_t value) const;
+
+    using const_iterator = std::vector<int64_t>::const_iterator;
+
+    //! Iterator pointing to beginning of sequence of element values.
+    //! Requires that allValuesKnown() is true.
+    const_iterator begin() const
+    {
+        assert(mAllValuesKnown);
+        return mValues.begin();
+    }
+
+    //! Iterator pointing to end of sequence of element values.
+    //! Requires that allValuesKnown() is true.
+    const_iterator end() const
+    {
+        assert(mAllValuesKnown);
+        return mValues.end();
+    }
+
+    //! True if operator[](k) is valid.
+    bool valueKnown(int k) const;
+
+    //! Return kth value.
+    //! For a 0D tensor, k must be 0.
+    //! Requires that valueKnown(k) is true.
+    int64_t operator[](int k) const
+    {
+        assert(valueKnown(k));
+        return mValues[k];
+    }
+
+    //! Return underlying mValues
+    std::vector<int64_t>& getValues()
+    {
+        assert(mAllValuesKnown);
+        return mValues;
+    }
+
+    //! Return true if x and y always have the same value.
+    friend bool operator==(const ShapeTensor& x, const ShapeTensor& y);
+    friend ShapeTensor shapeOf(const ShapeTensor& t);
 
     //! Get TensorRT tensor representation.
     nvinfer1::ITensor& tensor(IImporterContext* ctx) const;
 
-    //! Set TensorRT tensor representation to layer->getOutput(0).
-    //! Asserts that dimensions of the tensor agree with current rank and size.
-    //! This is a low-level routine for use by min, max, mul, sub, etc.
-    void assign(const nvinfer1::ILayer* layer);
-
 private:
-    //! Cached TensorRT representation, or null if not yet created.
+    //! Number of IShapeLayer to apply to mTensor to get ITensor representing value of *this.
+    //! -1 for undefined *this, a value in [0,2] otherwise.
+    //! 0: *this represents value of the tensor (always 0D or 1D)
+    //! 1: *this represents shape of mTensor (always 1D)
+    //! 2: *this represents rank of mTensor (always 1D tensor of length 1)
+    mutable int8_t mDepth{-1};
+
+    //! True if all values are known.
+    bool mAllValuesKnown{false};
+
+    static constexpr int kRANK_UNKNOWN = -1;
+    static constexpr int kSIZE_UNKNOWN = -1;
+
+    //! Rank of *this.
+    //! Always -1, 0 or 1.
+    int8_t mRank{kRANK_UNKNOWN};
+
+    //! Number of elements in the tensor, or -1 if unknown.
+    int32_t mSize{kSIZE_UNKNOWN};
+
+    //! Must be non-null if mAllValuesKnown.
     mutable nvinfer1::ITensor* mTensor{nullptr};
+
+    //! Values of elements if some might be known.
+    //! mValues.size() is always zero or equal to mSize.
+    //! When mAllValuesKnown==true, all the values in mValues are correct
+    //! and mValues.size() == mSize.
+    //! When mAllValuesKnown==false, only the non-negative values in mValues
+    //! are guranteed to be correct, and only so if mValues.size() == mSize.
+    std::vector<int64_t> mValues;
 };
 
+//! Print ShapeTensor.  Unknown values are printed as _.
 std::ostream& operator<<(std::ostream& stream, const ShapeTensor& x);
 
 //! Create 1D ShapeTensor of length n filled with value.
-ShapeTensor fillShapeVector(int32_t n, int64_t value);
+//! count must be 1D ShapeTensor of size 1.
+ShapeTensor fillShapeVector(IImporterContext* ctx, int64_t value, const ShapeTensor& count);
 
 //! Create 1D ShapeTensor of length 1 containing given value.
-inline ShapeTensor shapeVector(int64_t value)
-{
-    return fillShapeVector(1, value);
-}
+ShapeTensor shapeVector(int64_t value);
 
-//! Create 1D ShapeTensor with [0,n)
+//! Create 0D ShapeTensor containing the given value.
+ShapeTensor shapeScalar(int64_t value);
+
+//! Create 1D ShapeTensor containing [0,n).
 ShapeTensor iotaShapeVector(int32_t n);
 
 //! Create ShapeTensor filled with value that has same shape as exemplar.
-ShapeTensor similar(const ShapeTensor& exemplar, int64_t value);
+//! The exemplar must be 1D.
+ShapeTensor similar(IImporterContext* ctx, const ShapeTensor& exemplar, int64_t value);
 
 //! Elementwise addition
 ShapeTensor add(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
@@ -117,10 +200,17 @@ ShapeTensor max(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& 
 //! Elementwise floor division
 ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
+//! Elementwise f, for a partial function f defined by:
+//! f(x,x) = x
+//! f(1,x) = x
+//! f(x,1) = x
+//! Undefined otherwise or if x < 0.
+ShapeTensor broadcast(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+
 //! Return product of x[i] for i in [first..last), as 0D or one-element 1D tensor of given rank.
 ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank);
 
-//! Gather where x is 1D tensor and y can be 0D or 1D
+//! Gather where data is 1D tensor and indices can be 0D or 1D
 ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices);
 
 //! Concatenation of two 1D tensors
@@ -134,10 +224,9 @@ inline ShapeTensor interlace(
 }
 
 //! Return shape of a tensor.
-ShapeTensor shapeOf(IImporterContext* ctx, nvinfer1::ITensor& tensor);
-
-//! Return shape of the value represented by a TensorOrWeights.
-ShapeTensor shapeOf(IImporterContext* ctx, TensorOrWeights& t);
+ShapeTensor shapeOf(nvinfer1::ITensor& tensor);
+ShapeTensor shapeOf(const ShapeTensor& tensor);
+ShapeTensor shapeOf(TensorOrWeights& t);
 
 //! Reshape 0D tensor to 1D tensor.
 ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor);
@@ -147,9 +236,23 @@ nvinfer1::ISliceLayer* addSlice(IImporterContext* ctx, nvinfer1::ITensor& data, 
     const ShapeTensor& sizes, const ShapeTensor& strides);
 
 //! Add an IShuffleLayer.
-nvinfer1::IShuffleLayer* addShuffle(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims);
+//! If the result does not need to have its parameters changed, and
+//! optimizing the no-op case away is okay, use function reshape instead.
+//!
+//! In general the default zeroIsPlaceholder=false should be used so
+//! that reshaping to empty tensors works correctly.  Calling with
+//! zeroIsPlaceholder=true should happen only when replicating the
+//! semantics of the ONNX Reshape operator.
+nvinfer1::IShuffleLayer* addShuffle(
+    IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder = false);
 
 //! Add an IFillLayer.
 nvinfer1::IFillLayer* addFill(IImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op);
+
+//! Reshape a tensor.
+//!
+//! Treats any zeros in newShape as dimensions, not placeholders.
+//! Implementation note: does not insert shuffle if it's a no-op.
+nvinfer1::ITensor& reshape(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape);
 
 } // namespace onnx2trt

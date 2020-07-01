@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -23,6 +23,7 @@
 #include "OnnxAttrs.hpp"
 #include "ShapedWeights.hpp"
 #include "onnx2trt_utils.hpp"
+#include <onnx/onnx_pb.h>
 
 template <>
 float OnnxAttrs::get<float>(const std::string& key) const
@@ -109,10 +110,10 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(const std::strin
 {
     ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = this->at(key)->t();
     onnx2trt::ShapedWeights weights;
-    // Return empty weights if conversion failed
-    if (!convertOnnxWeights(onnx_weights_tensor, &weights, mCtx))
+    bool success = convertOnnxWeights(onnx_weights_tensor, &weights, mCtx);
+    if (!success)
     {
-        return onnx2trt::ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
+        throw std::runtime_error{"Unable to convert ONNX weights"};
     }
     return weights;
 }

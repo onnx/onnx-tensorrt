@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -48,8 +48,10 @@ class ImporterContext final : public IImporterContext
         mTensorNameCounts; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
     StringMap<size_t>
         mLayerNameCounts; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
-    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold any shape tensors that are the output of layers that do not support shape tensors.
+    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
     StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
+    std::string mOnnxFileLocation; // Keep track of the directory of the parsed ONNX file
+
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : _network(network)
@@ -88,7 +90,14 @@ public:
     {
         return mLoopTensors;
     }
-
+    virtual void setOnnxFileLocation(std::string location) override
+    {
+        mOnnxFileLocation = location;
+    }
+    virtual std::string getOnnxFileLocation() override
+    {
+        return mOnnxFileLocation;
+    }
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
     virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) override
     {

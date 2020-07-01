@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -32,6 +32,7 @@
 #include <onnx/onnx_pb.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <fstream>
 #include <vector>
 
 namespace onnx2trt
@@ -62,6 +63,8 @@ public:
     virtual StringMap<nvinfer1::DataType>& layerPrecisions() = 0;
     virtual std::unordered_set<std::string>& unsupportedShapeTensors() = 0;
     virtual StringMap<std::string>& loopTensors() = 0;
+    virtual void setOnnxFileLocation(std::string location) = 0;
+    virtual std::string getOnnxFileLocation() = 0;
     virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) = 0;
     virtual void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) = 0;
     virtual ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape) = 0;

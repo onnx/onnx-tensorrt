@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -31,6 +31,7 @@
 #include <google/protobuf/text_format.h>
 
 #include <limits>
+#include <functional>
 #include <unordered_set>
 
 namespace onnx2trt
@@ -81,8 +82,7 @@ Status setStringMap(
     return Status::success();
 }
 
-Status parseGraph(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork, int* currentNode)
+Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork, int* currentNode)
 {
     // Import initializers.
     for (const ::ONNX_NAMESPACE::TensorProto& initializer : graph.initializer())
@@ -129,17 +129,19 @@ Status parseGraph(
         LOG_VERBOSE(ssInputs.str());
 
         // Dispatch to appropriate converter.
-        if (!opImporters.count(node.op_type()))
+        const NodeImporter* importFunc{nullptr};
+        if (opImporters.count(node.op_type()))
         {
-            return MAKE_ERROR("No importer registered for op: " + node.op_type(), ErrorCode::kUNSUPPORTED_NODE);
+            importFunc = &opImporters.at(node.op_type());
         }
-        const NodeImporter& importFunc = opImporters.at(node.op_type());
+        else
+        {
+            LOG_INFO("No importer registered for op: " << node.op_type() << ". Attempting to import as plugin.");
+            importFunc = &opImporters.at("FallbackPluginImporter");
+        }
         std::vector<TensorOrWeights> outputs;
 
-        const int nbLayersBefore = ctx->network()->getNbLayers();
-        GET_VALUE(importFunc(ctx, node, nodeInputs), &outputs);
-
-        ctx->registerLayer(ctx->network()->getLayer(nbLayersBefore), node.name());
+        GET_VALUE((*importFunc)(ctx, node, nodeInputs), &outputs);
 
         if (deserializingINetwork)
         {
@@ -333,12 +335,35 @@ bool ModelImporter::supportsModel(
         }
     }
     auto* ctx = &_importer_ctx;
+
     auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
         for (auto input : node.input())
         {
             if (input_node == input || ctx->loopTensors()[input_node] == input)
             {
                 return true;
+            }
+        }
+        return false;
+    };
+
+    auto checkForShapeTensors = [&ctx](::ONNX_NAMESPACE::NodeProto const& node){
+        for (int i = 0; i < ctx->network()->getNbInputs(); i++)
+        {
+            auto input = ctx->network()->getInput(i);
+            if (input->isShapeTensor())
+            {
+                if (input->getType() == nvinfer1::DataType::kFLOAT || node.op_type() == "Loop" || node.op_type() == "Scan")
+                {
+                    auto name = input->getName();
+                    for (auto input : node.input())
+                    {
+                        if (input == name)
+                        {
+                            return true;
+                        }
+                    }
+                }
             }
         }
         return false;
@@ -356,19 +381,19 @@ bool ModelImporter::supportsModel(
     for (int node_idx : topological_order)
     {
         ::ONNX_NAMESPACE::NodeProto const& node = model.graph().node(node_idx);
-
         // Add the node to the subgraph if:
-        //     1. Importer function is registered for the operator type
-        //     2. It is NOT directly connected to an unsupported input
-        //     3. Parsing did NOT hit an error on the node
-        //     4. Any shape tensor output is coming from a supported node
+        //     1. There is an importer function registered for the operator type
+        //     2. It is not directly connected to an unsupported input
+        //     3. It is not directly connected to an unsupported shape tensor input
+        //     4. It did not illegally produce a shape tensor output
+        //     5. It was sucessfully parsed
         bool registered = supportsOperator(node.op_type().c_str());
         bool containsInput = (input_node.empty()) ? false : checkForInput(node);
+        bool containsShapeInput = checkForShapeTensors(node);
+        auto tensorName = node.name();
+        bool supportedShapeTensor = ctx->unsupportedShapeTensors().count(tensorName) == 0 ? true : false;
         bool containsIndex = node_idx == error_node;
-        auto const tensor = node.output(0);
-        bool supportedShapeTensorOutput = ctx->unsupportedShapeTensors().count(tensor) == 0 ? true : false;
-
-        if (registered && !containsInput && !containsIndex && supportedShapeTensorOutput)
+        if (registered && !containsInput && !containsShapeInput && supportedShapeTensor && !containsIndex)
         {
             if (newSubGraph)
             {
@@ -383,6 +408,7 @@ bool ModelImporter::supportsModel(
         }
         else
         {
+            std::cout << "Found unsupported node: " << tensorName << std::endl;
             // This is not a supported node, reset newSubGraph
             newSubGraph = true;
             allSupported = false;
@@ -440,31 +466,29 @@ void removeShapeTensorCasts(IImporterContext* ctx)
     for (int i = 0, e = ctx->network()->getNbLayers(); i < e; ++i)
     {
         nvinfer1::ILayer* layer = ctx->network()->getLayer(i);
-        constexpr nvinfer1::DataType SHAPE_TENSOR_TYPE = nvinfer1::DataType::kINT32;
         if (layer->getNbOutputs() > 0 && layer->getOutput(0)->isShapeTensor())
         {
-            layer->resetPrecision();
             layer->resetOutputType(0);
-            layer->setPrecision(SHAPE_TENSOR_TYPE);
-            layer->setOutputType(0, SHAPE_TENSOR_TYPE);
             nvinfer1::ITensor& t = *layer->getOutput(0);
+            // Assume that boolean tensors were not cast, and thus have their type correctly set.
+            const nvinfer1::DataType shapeTensorType = t.getType() == nvinfer1::DataType::kBOOL ? nvinfer1::DataType::kBOOL : nvinfer1::DataType::kINT32;
+            layer->setOutputType(0, shapeTensorType);
             // Set type only if necessary, to avoid TensorRT warnings
             // about setting type of non-input/output tensors.
-            if (t.getType() != SHAPE_TENSOR_TYPE)
+            if (t.getType() != shapeTensorType)
             {
-                t.setType(SHAPE_TENSOR_TYPE);
+                t.setType(shapeTensorType);
             }
             // Some layers do not support shape tensor outputs. Keep track of these tensor names
             // for supportsModel().
             auto type = layer->getType();
-            auto elementwiseOp = layer->getType() == nvinfer1::LayerType::kELEMENTWISE ? (static_cast<nvinfer1::IElementWiseLayer*>(layer))->getOperation() : nvinfer1::ElementWiseOperation::kSUM;
-            auto reduceOp = layer->getType() == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
-
+            auto elementwiseOp = type == nvinfer1::LayerType::kELEMENTWISE ? (static_cast<nvinfer1::IElementWiseLayer*>(layer))->getOperation() : nvinfer1::ElementWiseOperation::kSUM;
+            auto reduceOp = type == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
             if (!supportsShapeTensor(type, elementwiseOp, reduceOp))
             {
-                auto name = layer->getOutput(0)->getName();
+                auto name = layer->getName();
                 ctx->unsupportedShapeTensors().insert(name);
-                LOG_ERROR("Found " << name << " as a shape tensor output from a layer that does not support it!");
+                LOG_ERROR("Found unsupported shape-tensor producing layer:" << name);
             }
         }
     }
@@ -477,7 +501,7 @@ Status ModelImporter::importModel(
     auto* ctx = &_importer_ctx;
     _importer_ctx.clearOpsets();
     // Initialize plugin registry
-    initLibNvInferPlugins(static_cast<void*>(&ctx->logger()), "ONNXTRT_NAMESPACE");
+    initLibNvInferPlugins(static_cast<void*>(&ctx->logger()), "");
     for (int i = 0; i < model.opset_import().size(); ++i)
     {
         std::string domain = model.opset_import(i).domain();
@@ -486,9 +510,7 @@ Status ModelImporter::importModel(
         // ONNX spec says that the default domain is either an empty string or is "ai.onnx".
         if ((domain.empty() || domain == "ai.onnx") && version < 7)
         {
-            LOG_WARNING(
-                "TensorRT supports ONNX graphs generated with at least opset 7. Models using older opsets are not "
-                "guaranteed to work.");
+            LOG_WARNING("TensorRT supports ONNX graphs generated with at least opset 7. Models using older opsets are not guaranteed to work.");
         }
         _importer_ctx.addOpset(domain, version);
     }
@@ -629,6 +651,9 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)
         cerr << "Failed to parse ONNX model from file" << onnxModelFile << endl;
         return EXIT_FAILURE;
     }
+
+    // Keep track of the absolute path to the ONNX file.
+    _importer_ctx.setOnnxFileLocation(onnxModelFile);
 
     if (verbosity >= (int) nvinfer1::ILogger::Severity::kWARNING)
     {

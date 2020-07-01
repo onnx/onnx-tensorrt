@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -152,7 +152,7 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
 bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
 
 // Helper function for constantOfShape operator. Input shape must be a shape tensor
-nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape);
+nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape);
 
 // Helper function to convert an ONNX axis into a TRT axis
 Status convertAxis(int& axis, int nbDims);
@@ -166,6 +166,9 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
 // Helper function to convert ONNX padding into TRT padding
 bool convertOnnxPadding(
     const std::vector<int64_t>& onnxPadding, nvinfer1::Dims2* begPadding, nvinfer1::Dims2* endPadding);
+
+// Helper function to create zero shifts for QuantizeLinear/DequantizeLinear ops
+onnx2trt::ShapedWeights createZeroShifts(const onnx2trt::ShapedWeights& shiftInt8, int32_t type, IImporterContext* ctx);
 
 // Helper function to convert an ONNX weight into a ShapedWeights object
 bool convertOnnxWeights(
@@ -199,7 +202,7 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
     std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper function to flatten a tensor on a given axis
-nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, int axis = 0);
+nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, int axis = 0, bool regLayer = false);
 
 // Gathers the specified dimension from a shape tensor. e.g. gatherDimension(shape=(7, 6, 5), dim=2) would return 5.
 // shape specifies the shape of the returned Tensor. Must have a volume of 1.
@@ -207,9 +210,9 @@ nvinfer1::ITensor* gatherDimension(
     IImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape);
 
 // Helper function to generate padding values for convTranspose
-void generatePadding(nvinfer1::Dims input_dims, nvinfer1::Dims output_shape, nvinfer1::Dims kernel_size,
-    nvinfer1::Dims strides, nvinfer1::Dims dilations, const int nbSpatialDims, nvinfer1::Dims& beg_padding,
-    nvinfer1::Dims& end_padding, nvinfer1::Dims& output_padding, nvinfer1::PaddingMode paddingMode);
+void generatePadding(nvinfer1::Dims inputShape, nvinfer1::Dims outputShape, nvinfer1::Dims kernelSize,
+    nvinfer1::Dims strides, nvinfer1::Dims dilations, const int nbSpatialDims, nvinfer1::Dims& begPadding,
+    nvinfer1::Dims& endPadding, nvinfer1::Dims& outputPadding, nvinfer1::PaddingMode paddingMode);
 
 // Helper function to get default ONNX activation alpha values
 float getActivationDefaultAlpha(nvinfer1::ActivationType type);
@@ -237,18 +240,20 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
 nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::Dims const& tensor_shape);
 
 // Helper function to map ONNX Global Pooling ops into TensorRT.
-nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
-
-// Helper function to get a plugin from the PluginRegistry
-nvinfer1::IPluginV2* importPluginFromRegistry(IImporterContext* ctx, const std::string& pluginName,
-    const std::string& pluginVersion, const std::string& nodeName,
-    const std::vector<nvinfer1::PluginField>& pluginFields);
+nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
 
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
 
 // Helper function to determine if a ONNX tensor is empty
 bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor);
+
+// Helper function to load a creator from the registry
+nvinfer1::IPluginCreator* importPluginCreator(const std::string& pluginName, const std::string& pluginVersion, const std::string& pluginNamespace="");
+
+// Helper function to get a plugin from the PluginRegistry
+nvinfer1::IPluginV2* createPlugin(const std::string& name,
+    nvinfer1::IPluginCreator* pluginCreator, const std::vector<nvinfer1::PluginField>& pluginFields);
 
 // Helper function to determine if a transpose is required
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
@@ -259,6 +264,10 @@ NodeImportResult lstmLegacyImporter(
 
 // Helper function to create and fill a Dims object with defined values
 nvinfer1::Dims makeDims(int nbDims, int val);
+
+// Helper function to read weights from an external file
+bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int offset, int length,
+    std::vector<char>& weightsBuf, size_t& size);
 
 // Helper function to map various ONNX pooling ops into TensorRT.
 NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
@@ -272,28 +281,28 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
 nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 
 // Helper function to map attributes to a TRT scale layer
-NodeImportResult scaleHelper(IImporterContext* ctx, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
+NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
     nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power);
 
 // Helper function to set an ONNX attribute
 void setAttr(
     nvinfer1::Dims* trtAttr, ::ONNX_NAMESPACE::AttributeProto const* onnxAttr, int nbSpatialDims, int defaultVal);
 
-// Helper function to squeeze a tensor on a given set of axes
-nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
-
-// Helper function to transpose a tensor given a permutation
-nvinfer1::ITensor* transposeTensor(
-    IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, bool permute_dim_types = true);
-
 // Helper function to filter out shape tensor outputs for layers that do not support it
 bool supportsShapeTensor(nvinfer1::LayerType type, nvinfer1::ElementWiseOperation eleOp, nvinfer1::ReduceOperation redOp);
 
+// Helper function to squeeze a tensor on a given set of axes
+nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor, const std::vector<int>& axes, bool regLayer = false);
+
+// Helper function to transpose a tensor given a permutation
+nvinfer1::ITensor* transposeTensor(
+    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm, bool permute_dim_types = true);
+
 // Helper function to import ONNX unary ops into TRT
-NodeImportResult unaryHelper(IImporterContext* ctx, TensorOrWeights& input, nvinfer1::UnaryOperation op);
+NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, TensorOrWeights& input, nvinfer1::UnaryOperation op);
 
 // Helper function to unsqueeze tensors on a given set of axes
-nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, const std::vector<int>& axes);
+nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor, const std::vector<int>& axes, bool regLayer = false);
 
 // Helper function to convert a ShapedWeights object into a vector
 Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector);

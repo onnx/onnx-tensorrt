@@ -6,7 +6,7 @@ See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 7.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 7.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -38,8 +38,8 @@ Current supported ONNX operators are found in the [operator support matrix](oper
 ### Dependencies
 
  - [Protobuf >= 3.8.x](https://github.com/google/protobuf/releases)
- - [TensorRT 7.0](https://developer.nvidia.com/tensorrt)
- - [TensorRT 7.0 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 7.1](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 7.1 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -58,7 +58,7 @@ ONNX models can also be converted to human-readable text:
 
     onnx2trt my_model.onnx -t my_model.onnx.txt
 
-ONNX models can also be optimized by ONNX's optimization libraries.
+ONNX models can also be optimized by ONNX's optimization libraries (added by [dsandler](https://gitlab-master.nvidia.com/dsandler)).
 To optimize an ONNX model and output a new one use `-m` to specify the output model name and `-O` to specify a semicolon-separated list of optimization passes to apply:
 
     onnx2trt my_model.onnx -O "pass_1;pass_2;pass_3" -m my_model_optimized.onnx
@@ -76,7 +76,7 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     pip install <tensorrt_install_dir>/python/tensorrt-7.x.x.x-cp27-none-linux_x86_64.whl
 
-TensorRT 7.0 supports ONNX release 1.6.0. Install it with:
+TensorRT 7.1 supports ONNX release 1.6.0. Install it with:
 
     pip install onnx==1.6.0
 

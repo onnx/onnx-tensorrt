@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -46,10 +46,12 @@ public:
             _attrs.insert({attr.name(), &attr});
         }
     }
-    bool count(std::string key) const
+
+    bool count(const std::string& key) const
     {
         return _attrs.count(key);
     }
+
     ::ONNX_NAMESPACE::AttributeProto const* at(std::string key) const
     {
         if (!_attrs.count(key))
@@ -58,8 +60,16 @@ public:
         }
         return _attrs.at(key);
     }
+
+    ::ONNX_NAMESPACE::AttributeProto::AttributeType type(const std::string& key) const
+    {
+        return this->at(key)->type();
+    }
+
+
     template <typename T>
     T get(const std::string& key) const;
+
     template <typename T>
     T get(const std::string& key, T const& default_value) const
     {
