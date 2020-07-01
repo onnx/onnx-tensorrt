@@ -172,7 +172,8 @@ Status parseGraph(
             auto& output = outputs.at(i);
             ssOutputs << "[" << outputName << " -> " << output.shape() << "], ";
             // Note: This condition is to allow ONNX outputs to be ignored
-            if (output && !outputName.empty())
+            // Always register output weights (even empty ones) as it may be mapped to an unused input
+            if ((output || output.is_weights()) && !outputName.empty())
             {
                 ctx->registerTensor(std::move(output), outputName);
             }
@@ -331,11 +332,11 @@ bool ModelImporter::supportsModel(
             }
         }
     }
-
-    auto checkForInput = [&input_node](::ONNX_NAMESPACE::NodeProto const& node) {
+    auto* ctx = &_importer_ctx;
+    auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
         for (auto input : node.input())
         {
-            if (input_node == input)
+            if (input_node == input || ctx->loopTensors()[input_node] == input)
             {
                 return true;
             }
@@ -351,17 +352,23 @@ bool ModelImporter::supportsModel(
         cout << "Failed to sort model topologically, exiting ..." << endl;
         return false;
     }
+
     for (int node_idx : topological_order)
     {
         ::ONNX_NAMESPACE::NodeProto const& node = model.graph().node(node_idx);
+
         // Add the node to the subgraph if:
-        //     1. Importer function is regestiered for the operator type
-        //     2. It is not directly connected to an unsupported input
-        //     3. Parsing did not hit an error on the node
+        //     1. Importer function is registered for the operator type
+        //     2. It is NOT directly connected to an unsupported input
+        //     3. Parsing did NOT hit an error on the node
+        //     4. Any shape tensor output is coming from a supported node
         bool registered = supportsOperator(node.op_type().c_str());
         bool containsInput = (input_node.empty()) ? false : checkForInput(node);
         bool containsIndex = node_idx == error_node;
-        if (registered && !containsInput && !containsIndex)
+        auto const tensor = node.output(0);
+        bool supportedShapeTensorOutput = ctx->unsupportedShapeTensors().count(tensor) == 0 ? true : false;
+
+        if (registered && !containsInput && !containsIndex && supportedShapeTensorOutput)
         {
             if (newSubGraph)
             {
@@ -446,6 +453,18 @@ void removeShapeTensorCasts(IImporterContext* ctx)
             if (t.getType() != SHAPE_TENSOR_TYPE)
             {
                 t.setType(SHAPE_TENSOR_TYPE);
+            }
+            // Some layers do not support shape tensor outputs. Keep track of these tensor names
+            // for supportsModel().
+            auto type = layer->getType();
+            auto elementwiseOp = layer->getType() == nvinfer1::LayerType::kELEMENTWISE ? (static_cast<nvinfer1::IElementWiseLayer*>(layer))->getOperation() : nvinfer1::ElementWiseOperation::kSUM;
+            auto reduceOp = layer->getType() == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
+
+            if (!supportsShapeTensor(type, elementwiseOp, reduceOp))
+            {
+                auto name = layer->getOutput(0)->getName();
+                ctx->unsupportedShapeTensors().insert(name);
+                LOG_ERROR("Found " << name << " as a shape tensor output from a layer that does not support it!");
             }
         }
     }

@@ -91,6 +91,30 @@ namespace common
     return msg->ParseFromCodedStream(&coded_input);
   }
 
+  inline bool MessageToFile(const google::protobuf::Message* msg,
+                         const char*                filename) {
+    int fd = ::open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    google::protobuf::io::FileOutputStream raw_output(fd);
+    raw_output.SetCloseOnDelete(true);
+    google::protobuf::io::CodedOutputStream output(&raw_output);
+
+    // Write the size.
+    const int size = msg->ByteSize();
+
+    uint8_t* buffer = output.GetDirectBufferForNBytesAndAdvance(size);
+    if (buffer != NULL) {
+      // Optimization:  The msg fits in one buffer, so use the faster
+      // direct-to-array serialization path.
+      msg->SerializeWithCachedSizesToArray(buffer);
+    } else {
+      // Slightly-slower path when the msg is multiple buffers.
+      msg->SerializeWithCachedSizes(&output);
+      if (output.HadError()) return false;
+    }
+
+    return true;
+  }
+
   inline bool ParseFromTextFile(google::protobuf::Message* msg,
                          const char*                filename) {
     int fd = ::open(filename, O_RDONLY);

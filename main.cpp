@@ -23,6 +23,7 @@
 #include "NvOnnxParser.h"
 #include "onnx_utils.hpp"
 #include "common.hpp"
+#include <onnx/optimizer/optimize.h>
 
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -44,11 +45,15 @@ void print_usage() {
        << "                [-o engine_file.trt]  (output TensorRT engine)" << "\n"
        << "                [-t onnx_model.pbtxt] (output ONNX text file without weights)" << "\n"
        << "                [-T onnx_model.pbtxt] (output ONNX text file with weights)" << "\n"
+       << "                [-m onnx_model_out.pb] (output ONNX model)" << "\n"
        << "                [-b max_batch_size (default 32)]" << "\n"
        << "                [-w max_workspace_size_bytes (default 1 GiB)]" << "\n"
        << "                [-d model_data_type_bit_depth] (32 => float32, 16 => float16)" << "\n"
+       << "                [-O passes] (optimize onnx model. Argument is a semicolon-separated list of passes)" << "\n"
+       << "                [-p] (list available optimization passes and exit)" << "\n"
        << "                [-l] (list layers and their shapes)" << "\n"
        << "                [-g] (debug mode)" << "\n"
+       << "                [-F] (optimize onnx model in fixed mode)" << "\n"
        << "                [-v] (increase verbosity)" << "\n"
        << "                [-q] (decrease verbosity)" << "\n"
        << "                [-V] (show version information)" << "\n"
@@ -59,21 +64,29 @@ int main(int argc, char* argv[]) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   std::string engine_filename;
+  std::string model_filename;
   std::string text_filename;
+  std::string optimization_passes_string;
   std::string full_text_filename;
   size_t max_batch_size = 32;
   size_t max_workspace_size = 1 << 30;
   int model_dtype_nbits = 32;
   int verbosity = (int)nvinfer1::ILogger::Severity::kWARNING;
+  bool optimize_model = false;
+  bool optimize_model_fixed = false;
+  bool print_optimization_passes_info = false;
   bool print_layer_info = false;
   bool debug_builder = false;
 
   int arg = 0;
-  while( (arg = ::getopt(argc, argv, "o:b:w:t:T:d:lgvqVh")) != -1 ) {
+  while( (arg = ::getopt(argc, argv, "o:b:w:t:T:m:d:O:plgFvqVh")) != -1 ) {
     switch (arg){
     case 'o':
       if( optarg ) { engine_filename = optarg; break; }
       else { cerr << "ERROR: -o flag requires argument" << endl; return -1; }
+    case 'm':
+      if( optarg ) { model_filename  = optarg; break; }
+      else { cerr << "ERROR: -m flag requires argument" << endl; return -1; }
     case 't':
       if( optarg ) { text_filename = optarg; break; }
       else { cerr << "ERROR: -t flag requires argument" << endl; return -1; }
@@ -89,14 +102,36 @@ int main(int argc, char* argv[]) {
     case 'd':
       if( optarg ) { model_dtype_nbits = atoi(optarg); break; }
       else { cerr << "ERROR: -d flag requires argument" << endl; return -1; }
+    case 'O':
+      optimize_model = true;
+      if( optarg ) { optimization_passes_string = optarg; break; }
+      else { cerr << "ERROR: -O flag requires argument" << endl; return -1; }
+    case 'p': print_optimization_passes_info = true; break;
     case 'l': print_layer_info = true; break;
     case 'g': debug_builder = true; break;
+    case 'F': optimize_model_fixed = true; optimize_model = true; break;
     case 'v': ++verbosity; break;
     case 'q': --verbosity; break;
     case 'V': common::print_version(); return 0;
     case 'h': print_usage(); return 0;
     }
   }
+
+  std::vector<std::string> optimizationPassNames;
+
+  if(optimize_model || print_optimization_passes_info) {
+    optimizationPassNames = ::ONNX_NAMESPACE::optimization::GetAvailablePasses();
+  }
+
+  if(print_optimization_passes_info) {
+    cout << "Available optimization passes are:" << endl;
+    for( auto it = optimizationPassNames.begin(); it != optimizationPassNames.end(); it++ )
+    {
+      cout << " " << it->c_str() << endl;
+    }
+    return 0;
+  }
+
   int num_args = argc - optind;
   if( num_args != 1 ) {
     print_usage();
@@ -118,7 +153,8 @@ int main(int argc, char* argv[]) {
     return -3;
   }
 
-  ::ONNX_NAMESPACE::ModelProto onnx_model;
+  ::ONNX_NAMESPACE::ModelProto _the_onnx_model;
+  ::ONNX_NAMESPACE::ModelProto& onnx_model = _the_onnx_model;
   bool is_binary = common::ParseFromFile_WAR(&onnx_model, onnx_filename.c_str());
   if( !is_binary && !common::ParseFromTextFile(&onnx_model, onnx_filename.c_str()) ) {
     cerr << "Failed to parse ONNX model" << endl;
@@ -146,7 +182,33 @@ int main(int argc, char* argv[]) {
          << ") than this parser was built against ("
          << common::onnx_ir_version_string(::ONNX_NAMESPACE::IR_VERSION) << ")." << endl;
   }
+  
+  if( !model_filename.empty() ) {
+    if( optimize_model ) {
+      std::vector<std::string> passes;
 
+      std::string curPass;
+      std::stringstream passStream(optimization_passes_string);
+      while( std::getline(passStream, curPass, ';') ) {
+        if( std::find(optimizationPassNames.begin(), optimizationPassNames.end(), curPass) != optimizationPassNames.end() ) {
+          passes.push_back(curPass);
+        }
+      }
+
+      if( !passes.empty() ) {
+        cout << "Optimizing '" << model_filename << "'" << endl;
+        ::ONNX_NAMESPACE::ModelProto _the_onnx_model_optimized = optimize_model_fixed
+                                                               ? ::ONNX_NAMESPACE::optimization::OptimizeFixed(onnx_model, passes)
+                                                               : ::ONNX_NAMESPACE::optimization::Optimize(onnx_model, passes);
+        onnx_model = _the_onnx_model_optimized;
+      }
+    }
+
+    if( !common::MessageToFile( &onnx_model, model_filename.c_str() ) ) {
+      cerr << "ERROR: Problem writing ONNX model" << endl;
+    }
+  }
+ 
   if( !text_filename.empty() ) {
     if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {
       cout << "Writing ONNX model (without weights) as text to " << text_filename << endl;

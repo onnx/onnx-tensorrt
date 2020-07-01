@@ -67,14 +67,18 @@ public:
     {
         return _variant == NODE_WEIGHTS;
     }
+    bool isNullTensor() const
+    {
+        return is_tensor() && _tensor == nullptr;
+    }
     nvinfer1::ITensor& tensor()
     {
-        assert(is_tensor());
+        assert(!isNullTensor());
         return *_tensor;
     }
     nvinfer1::ITensor const& tensor() const
     {
-        assert(is_tensor());
+        assert(!isNullTensor());
         return *_tensor;
     }
     ShapedWeights& weights()
@@ -98,6 +102,10 @@ public:
     bool isInt32() const
     {
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT32 : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+    }
+    bool isBool() const
+    {
+        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kBOOL : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
     }
 };
 

@@ -111,9 +111,15 @@ find_library(TENSORRT_LIBRARY_INFER nvinfer
 find_library(TENSORRT_LIBRARY_INFER_PLUGIN nvinfer_plugin
   HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
   PATH_SUFFIXES lib lib64 lib/x64)
-find_library(TENSORRT_LIBRARY_MYELIN myelin
-  HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
-  PATH_SUFFIXES lib lib64 lib/x64)
+if(WIN32)
+  find_library(TENSORRT_LIBRARY_MYELIN myelin64_1
+    HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+else()
+  find_library(TENSORRT_LIBRARY_MYELIN myelin
+    HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+endif()
 set(TENSORRT_LIBRARY ${TENSORRT_LIBRARY_INFER} ${TENSORRT_LIBRARY_INFER_PLUGIN} ${TENSORRT_LIBRARY_MYELIN})
 MESSAGE(STATUS "Find TensorRT libs at ${TENSORRT_LIBRARY}")
 find_package_handle_standard_args(
@@ -152,7 +158,7 @@ endif()
 # --------------------------------
 add_executable(onnx2trt ${EXECUTABLE_SOURCES})
 target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS})
-target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
+target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} onnx nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
 
 # --------------------------------
 # API Tests
