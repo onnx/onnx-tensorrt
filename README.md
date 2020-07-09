@@ -43,10 +43,15 @@ Current supported ONNX operators are found in the [operator support matrix](oper
 
 ### Building
 
-For building on master, we recommend following the instructions on the [master branch of TensorRT](https://github.com/NVIDIA/TensorRT/) as there are new dependencies that were introduced to support these new features.
+For building on master, we recommend following the instructions on the [master branch of TensorRT](https://github.com/NVIDIA/TensorRT/) to take advatange of the latest plugin code required for importing certain operators.
 
-To build on older branches refer to their respective READMEs.
+To build only the ONNX-TensorRT parser, follow the following steps:
 
+    cd onnx-tensorrt
+    mkdir build && cd build
+    cmake .. -DTENSORRT_ROOT=<path_to_trt> && make -j
+    // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
+    export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
 ## Executable usage
 
