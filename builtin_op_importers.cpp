@@ -2562,10 +2562,42 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
                 && "This version of TensorRT only supports floor nearest_mode!",
             ErrorCode::kUNSUPPORTED_NODE);
 
-        // Note both asymmetric and align_corners resize modes go through the same import path in TRT:
-        if (transformationMode == "asymmetric" || transformationMode == "align_corners")
+        // For TRT nn:
+        //     alignCorners = 0: input/output * index
+        //     alignCorners = 1: (input-1)/(output-1) * index
+        //
+        // For TRT linear:
+        //     alignCorners = 0: input/output * (index + 0.5) - 0.5
+        //     alignCorners = 1: (input-1)/(output-1) * index
+        switch (resizeMode)
         {
-            layer->setAlignCorners(true);
+        case nvinfer1::ResizeMode::kNEAREST:
+            // For Pytorch nearest, there is no alignCorners support, and we use the same algo as AlignCorners=False algo in TRT
+            //
+            // For TF nn:
+            //    alignCorners = 0, halfPixel = 0: onnx.resize.transformationMode = asymmetric, input/output * index
+            //    alignCorners = 1, halfPixel = 0: onnx.resize.transformationMode = asymmetric, (input-1)/(output-1) * index
+            //    alignCorners = 0, halfPixel = 1: onnx.resize.transformationMode = half_pixel, input/output * (index+0.5)
+            //
+            // For PyT nn:
+            //    alignCorners = 0: onnx.resize.transformationMode = asymmetric, input/output * index
+            break;
+        case nvinfer1::ResizeMode::kLINEAR:
+            // Note both asymmetric and align_corners resize modes go through the same import path in TRT:
+            //
+            // For TF linear:
+            //    alignCorners = 0, halfPixel = 0: onnx.resize.transformationMode = asymmetric, input/output * index
+            //    alignCorners = 1, halfPixel = 0: onnx.resize.transformationMode = asymmetric, (input-1)/(output-1) * index
+            //    alignCorners = 0, halfPixel = 1: onnx.resize.transformationMode = half_pixel, input/output * (index + 0.5) - 0.5
+            //
+            // For PyT linear:
+            //    alignCorners = 0: onnx.resize.transformationMode = pytorch_half_pixel, input/output * (index + 0.5) - 0.5
+            //    alignCorners = 1: onnx.resize.transformationMode = align_corners, (input-1)/(output-1) * index
+            if (transformationMode == "asymmetric" || transformationMode == "align_corners")
+            {
+                layer->setAlignCorners(true);
+            }
+            break;
         }
 
         // The existence of a fourth input means a shape was passed as the resize parameter
@@ -2621,9 +2653,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
         }
         else
         {
-            LOG_WARNING("TensorRT currently uses half_pixel calculation for the pytorch_half_pixel transformation mode. These are equivalent except for interpolations down to 1D.");
+            LOG_WARNING(
+                "TensorRT currently uses half_pixel calculation for the pytorch_half_pixel transformation mode. These "
+                "are equivalent except for interpolations down to 1D.");
         }
-    }            
+    }
 
     RETURN_FIRST_OUTPUT(layer);
 }
