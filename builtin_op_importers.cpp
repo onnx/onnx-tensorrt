@@ -1613,7 +1613,8 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
-    ASSERT(!isDynamic(tensorPtr->getDimensions()) && "InstanceNormalization does not support dynamic inputs!",
+    int nbDims = tensorPtr->getDimensions().nbDims;
+    ASSERT(nbDims >= 3 && nbDims <= 4 && "TensorRT only supports InstanceNormalization on 3D or 4D tensors!",
         ErrorCode::kUNSUPPORTED_NODE);
     auto scale_weights = inputs.at(1).weights();
     auto bias_weights = inputs.at(2).weights();
