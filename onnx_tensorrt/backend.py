@@ -58,7 +58,7 @@ if not _config.USE_PYBIND:
 
 
 class TensorRTBackendRep(BackendRep):
-    def __init__(self, model, device, max_batch_size=32,
+    def __init__(self, model, device, max_batch_size=32, fp16_mode=False,
                  max_workspace_size=None, serialize_engine=False, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
@@ -89,6 +89,7 @@ class TensorRTBackendRep(BackendRep):
 
         self.builder.max_batch_size = max_batch_size
         self.builder.max_workspace_size = max_workspace_size
+        self.builder.fp16_mode = fp16_mode
 
         for layer in self.network:
             print(layer.name)
