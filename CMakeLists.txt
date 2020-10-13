@@ -86,9 +86,9 @@ set(API_TESTS_SOURCES
   ModelImporter.cpp
 )
 
-
 set(HEADERS
   NvOnnxParser.h
+  NvOnnxParserTypedefs.h
 )
 
 if (NOT TARGET protobuf::libprotobuf)
