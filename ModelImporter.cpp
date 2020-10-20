@@ -374,7 +374,7 @@ bool ModelImporter::supportsModel(
     std::vector<size_t> topological_order;
     if (!toposort(model.graph().node(), &topological_order))
     {
-        cout << "Failed to sort model topologically, exiting ..." << endl;
+        LOG_ERROR("Failed to sort model topologically, exiting ...");
         return false;
     }
 
@@ -408,7 +408,7 @@ bool ModelImporter::supportsModel(
         }
         else
         {
-            std::cout << "Found unsupported node: " << tensorName << std::endl;
+            LOG_WARNING("Found unsupported node: " << tensorName);
             // This is not a supported node, reset newSubGraph
             newSubGraph = true;
             allSupported = false;

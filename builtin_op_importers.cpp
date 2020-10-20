@@ -430,7 +430,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
     if (inputs.at(1).is_tensor())
     {
-        ASSERT(inputs.at(1).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(ctx->network()->hasExplicitPrecision() && "TensorRT only supports multi-input conv for explicit precision QAT networks!", ErrorCode::kUNSUPPORTED_NODE);
         if (inputs.size() == 3)
         {
             ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
@@ -1613,7 +1613,8 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     ASSERT(inputs.at(1).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
-    ASSERT(!isDynamic(tensorPtr->getDimensions()) && "InstanceNormalization does not support dynamic inputs!",
+    int nbDims = tensorPtr->getDimensions().nbDims;
+    ASSERT(nbDims >= 3 && nbDims <= 4 && "TensorRT only supports InstanceNormalization on 3D or 4D tensors!",
         ErrorCode::kUNSUPPORTED_NODE);
     auto scale_weights = inputs.at(1).weights();
     auto bias_weights = inputs.at(2).weights();
@@ -2535,9 +2536,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 {
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
     // TRT does not support INT32 nor BOOL input types for this node
-    ASSERT(input.getType() != nvinfer1::DataType::kINT32 && input.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT( (input.getType() != nvinfer1::DataType::kINT32
+                && input.getType() != nvinfer1::DataType::kBOOL)
+                && "This version of TensorRT does not support INT32 or BOOL input for the Resize operator.", ErrorCode::kUNSUPPORTED_NODE);
     int inputRank = input.getDimensions().nbDims;
-    ASSERT(inputRank > 0, ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT( (inputRank > 0) && "The input tensor cannot be a scalar.", ErrorCode::kUNSUPPORTED_NODE);
     // Add resize layer
     nvinfer1::IResizeLayer* layer = ctx->network()->addResize(input);
     ctx->registerLayer(layer, node.name());
@@ -2562,22 +2565,57 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
                 && "This version of TensorRT only supports floor nearest_mode!",
             ErrorCode::kUNSUPPORTED_NODE);
 
-        // Note both asymmetric and align_corners resize modes go through the same import path in TRT:
-        if (transformationMode == "asymmetric" || transformationMode == "align_corners")
-        {
-            layer->setAlignCorners(true);
-        }
-
         // The existence of a fourth input means a shape was passed as the resize parameter
+        // For ONNX resize with the "sizes", TensorRT's resize maps to ONNX's in the following ways:
+        // Nearest:
+        //     alignCorners = 0: ASYMMETRIC
+        //     alignCorners = 1: ALIGN_CORNERS
+        // Linear:
+        //     alignCorners = 0: HALF_PIXEL
+        //     alignCorners = 1: ALIGN_CORNERS
         if (inputs.size() == 4)
         {
+            if (transformationMode == "align_corners")
+            {
+                layer->setAlignCorners(true);
+            }
+            if (mode == "nearest")
+            {
+                ASSERT((transformationMode == "asymmetric" || transformationMode == "align_corners") && "TensorRT only supports asymmetric and align_corners transformation modes for nearest neighbor resizes when sizes are provided!", ErrorCode::kUNSUPPORTED_NODE);
+            }
+            else if (mode == "linear")
+            {
+                ASSERT((transformationMode == "half_pixel" || transformationMode == "pytorch_half_pixel" || transformationMode == "align_corners") && "TensorRT only supports half_pixel, pytorch_half_pixel, and align_corners transofmration modes for linear resizes when sizes are provided!", ErrorCode::kUNSUPPORTED_NODE);
+            }
             auto* resizeShape = &convertToTensor(inputs.at(3), ctx);
             layer->setInput(1, *resizeShape);
             layer->setResizeMode(resizeMode);
             RETURN_FIRST_OUTPUT(layer);
         }
+        // For ONNX resize with "scales", TensorRT's resize maps to ONNX's in the following ways:
+        // Nearest:
+        //    alignCorners = 0: ASYMMETRIC
+        //    alignCorners = 1: ASYMMETRIC
+        // Linear:
+        //    alignCorners = 0: HALF_PIXEL
+        //    alignCorners = 1: ASYMMETRIC
+        else
+        {
+            if (mode == "nearest")
+            {
+                ASSERT(transformationMode == "asymmetric" && "TensorRT only supports asymmetric tranformation mode for nearest neighbor resizes when scales are provided!",ErrorCode::kUNSUPPORTED_NODE);
+            }
+            else if (mode == "linear")
+            {
+                ASSERT((transformationMode == "asymmetric" || transformationMode == "pytorch_half_pixel" || transformationMode == "half_pixel") && "TensorRT only supports half pixel, pytorch half_pixel, and asymmetric tranformation mode for linear resizes when scales are provided!", ErrorCode::kUNSUPPORTED_NODE);
+                if (transformationMode == "asymmetric")
+                {
+                    layer->setAlignCorners(true);
+                }
+            }
+        }
     }
-    // For opset 10 resize, the only supported mode is asymmetric resize, which is mapped to TRT's alignCorners.
+    // For opset 10 resize, the only supported mode is asymmetric resize with scales.
     else
     {
         transformationMode = "asymmetric";

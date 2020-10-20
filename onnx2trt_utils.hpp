@@ -39,7 +39,7 @@
     do                                                                                                                 \
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
-        ss << __FILENAME__ << ":" << __LINE__ << ": " << msg;                                                          \
+        ss << "[TRT]" << __FILENAME__ << ":" << __LINE__ << ": " << msg;                                               \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
 
