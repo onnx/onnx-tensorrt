@@ -242,14 +242,16 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
             ASSERT(weight_desc.memoryType == ONNXIFI_MEMORY_TYPE_CPU, ErrorCode::kINVALID_VALUE);
             ASSERT(convertWeightDescriptor(weight_desc, &weights, ctx), ErrorCode::kUNSUPPORTED_NODE);
             tensor = weights;
+            ctx->registerTensor(std::move(tensor), input.name());
         }
+        // Do not register any initializers
         else if (!initializers.count(input.name()))
         {
             nvinfer1::ITensor* tensor_ptr;
             TRT_CHECK(importInput(ctx, input, &tensor_ptr));
             tensor = tensor_ptr;
+            ctx->registerTensor(std::move(tensor), input.name());
         }
-        ctx->registerTensor(std::move(tensor), input.name());
     }
 
     return Status::success();
@@ -335,7 +337,6 @@ bool ModelImporter::supportsModel(
         }
     }
     auto* ctx = &_importer_ctx;
-
     auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
         for (auto input : node.input())
         {
@@ -347,7 +348,7 @@ bool ModelImporter::supportsModel(
         return false;
     };
 
-    auto checkForShapeTensors = [&ctx](::ONNX_NAMESPACE::NodeProto const& node){
+    auto checkShapeTensorType = [&ctx](::ONNX_NAMESPACE::NodeProto const& node){
         for (int i = 0; i < ctx->network()->getNbInputs(); i++)
         {
             auto input = ctx->network()->getInput(i);
@@ -374,7 +375,7 @@ bool ModelImporter::supportsModel(
     std::vector<size_t> topological_order;
     if (!toposort(model.graph().node(), &topological_order))
     {
-        LOG_ERROR("Failed to sort model topologically, exiting ...");
+        cout << "Failed to sort model topologically, exiting ..." << endl;
         return false;
     }
 
@@ -386,14 +387,13 @@ bool ModelImporter::supportsModel(
         //     2. It is not directly connected to an unsupported input
         //     3. It is not directly connected to an unsupported shape tensor input
         //     4. It did not illegally produce a shape tensor output
-        //     5. It was sucessfully parsed
+        //     5. The importer function did not throw an assertion
         bool registered = supportsOperator(node.op_type().c_str());
-        bool containsInput = (input_node.empty()) ? false : checkForInput(node);
-        bool containsShapeInput = checkForShapeTensors(node);
-        auto tensorName = node.name();
-        bool supportedShapeTensor = ctx->unsupportedShapeTensors().count(tensorName) == 0 ? true : false;
-        bool containsIndex = node_idx == error_node;
-        if (registered && !containsInput && !containsShapeInput && supportedShapeTensor && !containsIndex)
+        bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
+        bool unsupportedShapeType = checkShapeTensorType(node);
+        bool unsupportedShapeTensor = ctx->unsupportedShapeTensors().count(node.name()) > 0 ? true : false;
+        bool unsuccessfulParse = node_idx == error_node;
+        if (registered && !unsupportedInput && !unsupportedShapeType && !unsupportedShapeTensor && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
@@ -408,7 +408,6 @@ bool ModelImporter::supportsModel(
         }
         else
         {
-            LOG_WARNING("Found unsupported node: " << tensorName);
             // This is not a supported node, reset newSubGraph
             newSubGraph = true;
             allSupported = false;
@@ -468,10 +467,12 @@ void removeShapeTensorCasts(IImporterContext* ctx)
         nvinfer1::ILayer* layer = ctx->network()->getLayer(i);
         if (layer->getNbOutputs() > 0 && layer->getOutput(0)->isShapeTensor())
         {
+            layer->resetPrecision();
             layer->resetOutputType(0);
             nvinfer1::ITensor& t = *layer->getOutput(0);
             // Assume that boolean tensors were not cast, and thus have their type correctly set.
             const nvinfer1::DataType shapeTensorType = t.getType() == nvinfer1::DataType::kBOOL ? nvinfer1::DataType::kBOOL : nvinfer1::DataType::kINT32;
+            layer->setPrecision(shapeTensorType);
             layer->setOutputType(0, shapeTensorType);
             // Set type only if necessary, to avoid TensorRT warnings
             // about setting type of non-input/output tensors.
@@ -486,9 +487,9 @@ void removeShapeTensorCasts(IImporterContext* ctx)
             auto reduceOp = type == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
             if (!supportsShapeTensor(type, elementwiseOp, reduceOp))
             {
-                auto name = layer->getName();
+                auto name = layer->getOutput(0)->getName();
                 ctx->unsupportedShapeTensors().insert(name);
-                LOG_ERROR("Found unsupported shape-tensor producing layer:" << name);
+                LOG_ERROR("Found " << name << " as a shape tensor output from a layer that does not support it!");
             }
         }
     }
@@ -526,14 +527,17 @@ Status ModelImporter::importModel(
     TRT_CHECK(importInputs(&_importer_ctx, graph, &_importer_ctx.tensors(), weight_count, weight_descriptors));
     TRT_CHECK(parseGraph(&_importer_ctx, graph, model.producer_name() == "TensorRT", &_current_node));
 
+    _current_node = -1;
     // Mark outputs defined in the ONNX model (unless tensors are user-requested)
     for (::ONNX_NAMESPACE::ValueInfoProto const& output : graph.output())
     {
         ASSERT(_importer_ctx.tensors().count(output.name()), ErrorCode::kINVALID_GRAPH);
-        ASSERT(_importer_ctx.tensors().at(output.name()).is_tensor(), ErrorCode::kUNSUPPORTED_GRAPH);
-        nvinfer1::ITensor* output_tensor_ptr = &_importer_ctx.tensors().at(output.name()).tensor();
+
+        nvinfer1::ITensor* output_tensor_ptr
+            = &convertToTensor(_importer_ctx.tensors().at(output.name()), &_importer_ctx);
         LOG_VERBOSE("Marking " << output_tensor_ptr->getName() << " as output: " << output.name());
         output_tensor_ptr->setName(output.name().c_str());
+
         if (output_tensor_ptr->isNetworkInput())
         {
             // HACK WAR for TRT not allowing input == output
@@ -543,6 +547,7 @@ Status ModelImporter::importModel(
             ASSERT(output_tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
             output_tensor_ptr->setName(output.name().c_str());
         }
+
         nvinfer1::ITensor** user_output = _importer_ctx.getUserOutput(output.name().c_str());
         if (!user_output)
         {
@@ -640,24 +645,24 @@ Status ModelImporter::importModel(
     return Status::success();
 }
 
-bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)
+bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
 {
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     ::ONNX_NAMESPACE::ModelProto onnx_model;
 
-    bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
+    const bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
     {
-        cerr << "Failed to parse ONNX model from file" << onnxModelFile << endl;
+        cerr << "Failed to parse ONNX model from file: " << onnxModelFile << endl;
         return EXIT_FAILURE;
     }
 
     // Keep track of the absolute path to the ONNX file.
     _importer_ctx.setOnnxFileLocation(onnxModelFile);
 
-    if (verbosity >= (int) nvinfer1::ILogger::Severity::kWARNING)
+    if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kWARNING))
     {
-        int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
+        const int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
         cout << "----------------------------------------------------------------" << endl;
         cout << "Input filename:   " << onnxModelFile << endl;
         cout << "ONNX IR version:  " << onnx_ir_version_string(onnx_model.ir_version()) << endl;
@@ -672,30 +677,30 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)
 
     { //...Read input file, parse it
         std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
-        std::streamsize file_size = onnx_file.tellg();
+        const std::streamsize file_size = onnx_file.tellg();
         onnx_file.seekg(0, std::ios::beg);
         std::vector<char> onnx_buf(file_size);
         if (!onnx_file.read(onnx_buf.data(), onnx_buf.size()))
         {
-            cerr << "ERROR: Failed to read from file " << onnxModelFile << endl;
+            cerr << "ERROR: Failed to read from file: " << onnxModelFile << endl;
             return false;
         }
         if (!parse(onnx_buf.data(), onnx_buf.size()))
         {
-            int nerror = getNbErrors();
-            for (int i = 0; i < nerror; ++i)
+            const int32_t nerror = getNbErrors();
+            for (int32_t i = 0; i < nerror; ++i)
             {
                 nvonnxparser::IParserError const* error = getError(i);
                 if (error->node() != -1)
                 {
                     ::ONNX_NAMESPACE::NodeProto const& node = onnx_model.graph().node(error->node());
                     cerr << "While parsing node number " << error->node() << " [" << node.op_type();
-                    if (node.output().size() && verbosity >= (int) nvinfer1::ILogger::Severity::kVERBOSE)
+                    if (node.output().size() && verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
                     {
                         cerr << " -> \"" << node.output(0) << "\"";
                     }
                     cerr << "]:" << endl;
-                    if (verbosity >= (int) nvinfer1::ILogger::Severity::kVERBOSE)
+                    if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
                     {
                         cout << "--- Begin node ---" << endl;
                         cout << node << endl;
@@ -708,7 +713,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int verbosity)
             return false;
         }
 
-        if (verbosity >= (int) nvinfer1::ILogger::Severity::kVERBOSE)
+        if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
         {
             cout << " ----- Parsing of ONNX model " << onnxModelFile << " is Done ---- " << endl;
         }

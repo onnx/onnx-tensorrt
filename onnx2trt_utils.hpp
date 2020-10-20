@@ -39,7 +39,7 @@
     do                                                                                                                 \
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
-        ss << "[TRT]" << __FILENAME__ << ":" << __LINE__ << ": " << msg;                                               \
+        ss << __FILENAME__ << ":" << __LINE__ << ": " << msg;                                                          \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
 
@@ -236,6 +236,9 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
     nvinfer1::PaddingMode& paddingMode, bool& count_exclude_padding, nvinfer1::Dims* dilations = nullptr,
     nvinfer1::Dims* output_padding = nullptr, const bool poolingCeilMode = false);
 
+// Helper function to convert ONNX node name. If no node name is provided, use the name of the first output.
+const std::string getNodeName(const ::ONNX_NAMESPACE::NodeProto& node);
+
 // Helper function to get the scaling mode for TRT's scale layer
 nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::Dims const& tensor_shape);
 
@@ -282,7 +285,7 @@ nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
 
 // Helper function to map attributes to a TRT scale layer
 NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
-    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power);
+    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power, std::string shiftName, std::string scaleName);
 
 // Helper function to set an ONNX attribute
 void setAttr(

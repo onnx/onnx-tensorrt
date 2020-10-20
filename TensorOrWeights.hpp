@@ -107,6 +107,10 @@ public:
     {
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kBOOL : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
     }
+    std::string getName() const
+    {
+        return is_tensor() ? _tensor->getName() : _weights.getName();
+    }
 };
 
 } // namespace onnx2trt

@@ -293,12 +293,12 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     if (!needToExpandDims)
     {
         return scaleHelper(
-            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {});
+            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {}, bias_weights.getName(), scale_weights.getName());
     }
     else
     {
         auto scaledResult = scaleHelper(
-            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {});
+            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {}, bias_weights.getName(), scale_weights.getName());
         // Squeeze spatial dims back to 1D
         tensorPtr = &convertToTensor(scaledResult.value().at(0), ctx);
         std::vector<int> axes{3};
@@ -517,7 +517,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     int ngroup = attrs.get("group", 1);
     ASSERT(nchan == -1 || kernelWeights.shape.d[1] * ngroup == nchan, ErrorCode::kINVALID_NODE);
     layer->setNbGroups(ngroup);
-    ctx->registerLayer(layer, node.name());
+    // Register layer name as well as kernel weights and bias weights (if any)
+    ctx->registerLayer(layer, getNodeName(node));
+    ctx->insertRefitMap(inputs.at(1).weights().getName(), getNodeName(node), nvinfer1::WeightsRole::kKERNEL);
+    if (inputs.size() == 3)
+    {
+        ctx->insertRefitMap(inputs.at(2).weights().getName(), getNodeName(node), nvinfer1::WeightsRole::kBIAS);
+    }
     tensorPtr = layer->getOutput(0);
     dims = tensorPtr->getDimensions();
 
@@ -696,7 +702,13 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
                 << "Pre-padding: " << begPadding << "\n"
                 << "Post-padding: " << endPadding);
 
-    ctx->registerLayer(layer, node.name());
+    // Register layer, along with refittable kernel weights and bias weights (if any)
+    ctx->registerLayer(layer, getNodeName(node));
+    ctx->insertRefitMap(inputs.at(1).weights().getName(), getNodeName(node), nvinfer1::WeightsRole::kKERNEL);
+    if (inputs.size() == 3)
+    {
+        ctx->insertRefitMap(inputs.at(2).weights().getName(), getNodeName(node), nvinfer1::WeightsRole::kBIAS);
+    }
     tensorPtr = layer->getOutput(0);
     dims = tensorPtr->getDimensions();
 
@@ -1004,23 +1016,39 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
 
     // Use FC if it is likely to be faster - which is usually when no Shuffles are required.
     bool canUseFC = inputs.at(0).is_tensor() && inputs.at(1).is_weights() && inputs.at(2).is_weights() && alpha == 1.f
-        && beta == 1.f && inputs.at(0).tensor().getDimensions().nbDims == 3 && inputs.at(1).weights().shape.nbDims == 2
+        && beta == 1.f && inputs.at(0).tensor().getDimensions().nbDims == 2 && inputs.at(1).weights().shape.nbDims == 2
         && inputs.at(2).weights().shape.nbDims == 1;
     if (canUseFC)
     {
         LOG_VERBOSE("GEMM: using FC layer instead of MM because all criteria were met.");
-        nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+        const std::vector<int> axesInput{2, 3};
+        nvinfer1::ITensor* inputAExtendDim = unsqueezeTensor(ctx, node, inputA, axesInput);
+
         ShapedWeights weights = inputs.at(1).weights();
         if (!transB)
         {
             auto transposedWeights = ctx->createTempWeights(weights.type, weights.shape);
             ASSERT(transposeWeights(weights, {1, 0}, &transposedWeights), ErrorCode::kUNSUPPORTED_NODE);
+            transposedWeights.setName(weights.getName());
+            LOG_WARNING("Weight " << transposedWeights.getName() << " has been transposed! If you plan on overwriting this weight with the Refitter API, the new weights must be pre-transposed");
             weights = transposedWeights;
         }
-        ShapedWeights biases = inputs.at(2).weights();
-        auto* layer = ctx->network()->addFullyConnected(tensor, biases.shape.d[0], weights, biases);
-        ctx->registerLayer(layer, node.name());
-        RETURN_FIRST_OUTPUT(layer);
+        ShapedWeights biases{};
+        if (inputs.size() > 2)
+        {
+            biases = inputs.at(2).weights();
+        }
+        nvinfer1::IFullyConnectedLayer* fc = ctx->network()->addFullyConnected(*inputAExtendDim, biases.shape.d[0], weights, biases);
+        // Register layer, kernel weights and bias weights (if any)
+        ctx->registerLayer(fc, node.name());
+        ctx->insertRefitMap(weights.getName(), node.name(), nvinfer1::WeightsRole::kKERNEL);
+        if (inputs.size() == 3)
+        {
+            ctx->insertRefitMap(biases.getName(), node.name(), nvinfer1::WeightsRole::kBIAS);
+        }
+        const std::vector<int> axesOutput{2, 3};
+        return {{squeezeTensor(ctx, node, *fc->getOutput(0), axesOutput)}};
+
     }
 
     nvinfer1::ITensor* inputB {nullptr};
@@ -1276,12 +1304,9 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS) 
-            && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Need to split weights/biases into ZR gates and H gate, because h(t) computations depend on z(t) and r(t).
@@ -1395,7 +1420,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
 
     // Add X(t)
     nvinfer1::ITensor* iterationInput = addRNNInput(ctx, node, loop, inputs, direction);
-    ASSERT(iterationInput && "Failed to add RNN input.", ErrorCode::kINVALID_NODE);
+    ASSERT(iterationInput, ErrorCode::kINVALID_NODE);
 
     // H(t-1)
     const auto getInitialInputValue = [&ctx, &gateOutputShape, &inputs, &node](size_t inputIdx) -> nvinfer1::ITensor* {
@@ -1707,9 +1732,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     {
         tripLimit = convertToScalar(ctx, &convertToTensor(inputs[0], ctx));
         ASSERT(tripLimit, ErrorCode::kINVALID_NODE);
-        ctx->loopTensors()[body.input(0).name()] = node.input(0);
+        ctx->loopTensors()[body.input(0).name() + " tripLimit"] = node.input(0);
         loop->addTripLimit(*tripLimit, nvinfer1::TripLimit::kCOUNT);
-        //ctx->registerTensor(tripLimit, body.input(0).name());
+        // First graph input is iteration_num, so create a loop counter
+        auto counter = addLoopCounter(ctx, loop, 0);
+        ctx->registerTensor(counter, body.input(0).name());
+        ctx->registerTensor(tripLimit, body.input(0).name() + " tripLimit");
     }
     if (inputs[1])
     {
@@ -1830,12 +1858,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].
@@ -1903,7 +1928,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
 
     // Add X(t)
     nvinfer1::ITensor* iterationInput = addRNNInput(ctx, node, loop, inputs, direction);
-    ASSERT(iterationInput && "Failed to add RNN input.", ErrorCode::kINVALID_NODE);
+    ASSERT(iterationInput, ErrorCode::kINVALID_NODE);
 
     // H(t-1)
     nvinfer1::IRecurrenceLayer* Ht1 = loop->addRecurrence(*initialHidden);
@@ -2074,6 +2099,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
 
     return {{outputs}};
 }
+
 DEFINE_BUILTIN_OP_IMPORTER(MatMul)
 {
     nvinfer1::ITensor* inputA = &convertToTensor(inputs.at(0), ctx);
@@ -2092,7 +2118,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     if (canUseFC)
     {
         LOG_VERBOSE("GEMM: using FC layer instead of MM because all criteria were met.");
-        const std::vector<int> axesInput{1, 2};
+        const std::vector<int> axesInput{2, 3};
         nvinfer1::ITensor* inputAExtendDim = unsqueezeTensor(ctx, node, *inputA, axesInput);
 
         ShapedWeights weights = inputs.at(1).weights();
@@ -2104,7 +2130,9 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
         auto biasWeights = ctx->createTempWeights(biasDtype, biasShape);
         std::fill(static_cast<float*>(biasWeights.values), static_cast<float*>(biasWeights.values) + biasWeights.count(), 0.0);
         nvinfer1::IFullyConnectedLayer* fc = ctx->network()->addFullyConnected(*inputAExtendDim, inputBDims.d[1], transposedWeights, biasWeights);
-        ctx->registerLayer(fc, node.name());
+        // Register layer name and kernel weights for FC.
+        ctx->registerLayer(fc, getNodeName(node));
+        ctx->insertRefitMap(weights.getName(), getNodeName(node), nvinfer1::WeightsRole::kKERNEL);
         const std::vector<int> axesOutput{2, 3};
         return {{squeezeTensor(ctx, node, *fc->getOutput(0), axesOutput)}};
     }
@@ -2543,7 +2571,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
     ASSERT( (inputRank > 0) && "The input tensor cannot be a scalar.", ErrorCode::kUNSUPPORTED_NODE);
     // Add resize layer
     nvinfer1::IResizeLayer* layer = ctx->network()->addResize(input);
-    ctx->registerLayer(layer, node.name());
+    ctx->registerLayer(layer, getNodeName(node));
     OnnxAttrs attrs(node, ctx);
 
     auto mode = attrs.get<std::string>("mode", "nearest");
@@ -2659,9 +2687,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
         }
         else
         {
-            LOG_WARNING("TensorRT currently uses half_pixel calculation for the pytorch_half_pixel transformation mode. These are equivalent except for interpolations down to 1D.");
+            LOG_WARNING(
+                "TensorRT currently uses half_pixel calculation for the pytorch_half_pixel transformation mode. These "
+                "are equivalent except for interpolations down to 1D.");
         }
-    }            
+    }
 
     RETURN_FIRST_OUTPUT(layer);
 }
@@ -2733,12 +2763,9 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS) 
-            && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS) 
-            && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS) 
-            && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS) && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].
@@ -2801,7 +2828,7 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
 
     // Add X(t)
     nvinfer1::ITensor* iterationInput = addRNNInput(ctx, node, loop, inputs, direction);
-    ASSERT(iterationInput && "Failed to add RNN input.", ErrorCode::kINVALID_NODE);
+    ASSERT(iterationInput, ErrorCode::kINVALID_NODE);
 
     // H(t-1)
     nvinfer1::IRecurrenceLayer* hiddenState = loop->addRecurrence(*initialHidden);
@@ -3722,11 +3749,11 @@ std::vector<nvinfer1::PluginField> loadFields(string_map<std::vector<uint8_t>>& 
                 break;
             }
             case ::ONNX_NAMESPACE::AttributeProto::UNDEFINED:
+            case ::ONNX_NAMESPACE::AttributeProto::SPARSE_TENSOR:
             case ::ONNX_NAMESPACE::AttributeProto::GRAPH:
             case ::ONNX_NAMESPACE::AttributeProto::TENSORS:
-            case ::ONNX_NAMESPACE::AttributeProto::GRAPHS:
-            case ::ONNX_NAMESPACE::AttributeProto::SPARSE_TENSOR:
             case ::ONNX_NAMESPACE::AttributeProto::SPARSE_TENSORS:
+            case ::ONNX_NAMESPACE::AttributeProto::GRAPHS:
                 MAKE_ERROR(
                     "Attributes of type: " + ::ONNX_NAMESPACE::AttributeProto::AttributeType_Name(attrs.type(fieldName))
                         + " are unsupported",

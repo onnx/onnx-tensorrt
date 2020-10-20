@@ -32,8 +32,7 @@
 namespace onnx2trt
 {
 
-Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork = false,
-    int* currentNode = nullptr);
+Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork = false, int* currentNode = nullptr);
 
 class ModelImporter : public nvonnxparser::IParser
 {
@@ -44,6 +43,7 @@ protected:
 
 private:
     ImporterContext _importer_ctx;
+    RefitMap_t mRefitMap;
     std::list<::ONNX_NAMESPACE::ModelProto> _onnx_models; // Needed for ownership of weights
     int _current_node;
     std::vector<Status> _errors;
@@ -51,7 +51,7 @@ private:
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : _op_importers(getBuiltinOpImporterMap())
-        , _importer_ctx(network, logger)
+        , _importer_ctx(network, logger, &mRefitMap)
     {
     }
     bool parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
@@ -86,7 +86,27 @@ public:
     {
         _errors.clear();
     }
-
+    virtual int getRefitMap(const char** weightNames, const char** layerNames, nvinfer1::WeightsRole* roles) override
+    {
+        int count = 0;
+        for (const auto& entry: mRefitMap)
+        {
+            if (weightNames != nullptr)
+            {
+                weightNames[count] = entry.first.c_str();
+            }
+            if (layerNames != nullptr)
+            {
+                layerNames[count] = entry.second.first.c_str();
+            }
+            if (roles != nullptr)
+            {
+                roles[count] = entry.second.second;
+            }
+            ++count;
+        }
+        return mRefitMap.size();
+    }
     //...LG: Move the implementation to .cpp
     bool parseFromFile(const char* onnxModelFile, int verbosity) override;
 };

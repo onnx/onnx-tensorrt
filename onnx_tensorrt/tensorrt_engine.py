@@ -47,7 +47,8 @@ class Binding(object):
         dtype = engine.get_binding_dtype(self.index)
         dtype_map = {trt.DataType.FLOAT: np.float32,
                         trt.DataType.HALF:  np.float16,
-                        trt.DataType.INT8:  np.int8}
+                        trt.DataType.INT8:  np.int8,
+                        trt.DataType.BOOL: np.bool}
         if hasattr(trt.DataType, 'INT32'):
             dtype_map[trt.DataType.INT32] = np.int32
 
@@ -55,6 +56,14 @@ class Binding(object):
         shape = engine.get_binding_shape(self.index)
 
         self.shape = tuple(shape)
+        # Must allocate a buffer of size 1 for empty inputs / outputs
+        if 0 in self.shape:
+            self.empty = True
+            # Save original shape to reshape output binding when execution is done
+            self.empty_shape = self.shape
+            self.shape = tuple([1])
+        else:
+            self.empty = False
         self._host_buf   = None
         self._device_buf = None
     @property
@@ -123,6 +132,7 @@ class Engine(object):
             _ = binding.host_buffer   # Force buffer allocation
         self.context = self.engine.create_execution_context()
         self.stream = pycuda.driver.Stream()
+
     def __del__(self):
         if self.engine is not None:
             del self.engine
@@ -136,11 +146,6 @@ class Engine(object):
         if isinstance(inputs, dict):
             inputs = [inputs[b.name] for b in self.inputs]
         
-        batch_size = 0
-        if inputs:
-            batch_size = inputs[0].shape[0]
-        else:
-            batch_size = self.outputs[0].shape[0]
 
         for i, (input_array, input_binding) in enumerate(zip(inputs, self.inputs)):
             input_array = check_input_validity(i, input_array, input_binding)
@@ -152,6 +157,12 @@ class Engine(object):
 
         results = [output.get_async(self.stream)
                    for output in self.outputs]
+
+        # For any empty bindings, update the result shape to the expected empty shape
+        for i, (output_array, output_binding) in enumerate(zip(results, self.outputs)):
+            if output_binding.empty:
+                results[i] = np.empty(shape=output_binding.empty_shape, dtype=output_binding.dtype)
+
         self.stream.synchronize()
         return results
 

@@ -35,11 +35,14 @@ public:
     DataType type;
     void* values;
     nvinfer1::Dims shape;
+    const char* name = nullptr;
     static ShapedWeights empty(DataType type);
     ShapedWeights();
     explicit ShapedWeights(DataType type, void* values, nvinfer1::Dims shape_);
     size_t count() const;
     size_t size_bytes() const;
+    const char* getName() const;
+    void setName(const char* name);
     explicit operator bool() const;
     operator nvinfer1::Weights() const;
 };

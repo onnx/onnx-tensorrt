@@ -68,6 +68,16 @@ size_t ShapedWeights::size_bytes() const
     return this->count() * getDtypeSize(this->type);
 }
 
+const char* ShapedWeights::getName() const
+{
+    return this->name;
+}
+
+void ShapedWeights::setName(const char* name)
+{
+    this->name = name;
+}
+
 ShapedWeights::operator bool() const
 {
     return (bool) this->values;

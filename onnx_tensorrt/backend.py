@@ -59,7 +59,7 @@ if not _config.USE_PYBIND:
 
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device, max_batch_size=32,
-                 max_workspace_size=None, serialize_engine=False, **kwargs):
+                 max_workspace_size=None, serialize_engine=False, verbose=False, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)
@@ -67,6 +67,12 @@ class TensorRTBackendRep(BackendRep):
         self.builder = trt.Builder(self._logger)
         self.network = self.builder.create_network(flags=1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         self.parser = trt.OnnxParser(self.network, self._logger)
+        self.shape_tensor_inputs = []
+        self.serialize_engine = serialize_engine
+        self.verbose = verbose
+
+        if self.verbose:
+            print(f'\nRunning {model.graph.name}...')
 
         if not isinstance(model, six.string_types):
             model_str = model.SerializeToString()
@@ -90,17 +96,26 @@ class TensorRTBackendRep(BackendRep):
         self.builder.max_batch_size = max_batch_size
         self.builder.max_workspace_size = max_workspace_size
 
-        for layer in self.network:
-            print(layer.name)
+        num_inputs = self.network.num_inputs
+        for idx in range(num_inputs):
+            inp_tensor = self.network.get_input(idx)
+            if inp_tensor.is_shape_tensor:
+                self.shape_tensor_inputs.append((inp_tensor.name, idx))
+                if self.verbose:
+                    print(f'\nInput \'{inp_tensor.name}\' at index {idx} is a shape tensor')
+        
+        if self.verbose:
+            for layer in self.network:
+                print(layer)
 
-        print(self.network[-1].get_output(0).shape)
-
-        trt_engine = self.builder.build_cuda_engine(self.network)
-        if trt_engine is None:
-            raise RuntimeError("Failed to build TensorRT engine from network")
-        if serialize_engine:
-            trt_engine = self._serialize_deserialize(trt_engine)
-        self.engine = Engine(trt_engine)
+            print(f'Output shape: {self.network[-1].get_output(0).shape}')
+        
+        if len(self.shape_tensor_inputs) == 0:
+            self._build_engine()
+        else:
+            if self.verbose:
+                print("Deferring engine build to run stage")
+        
         self._output_shapes = {}
         self._output_dtype = {}
         for output in model.graph.output:
@@ -108,10 +123,44 @@ class TensorRTBackendRep(BackendRep):
             output_shape = tuple([dim.dim_value for dim in dims])
             self._output_shapes[output.name] = output_shape
             self._output_dtype[output.name] = output.type.tensor_type.elem_type
+    
+    def _build_engine(self, inputs=None):
+        """
+        Builds TensorRT Engine, with BuilderConfig if needed
+        :param inputs: inputs to the model; if not None, this means we are building the engine at run time,
+                       because we need to register optimization profiles for some inputs
+        :type inputs: List of np.ndarray
+        """
+        
+        if inputs:
+            config = self.builder.create_builder_config()
+            opt_profile = self.builder.create_optimization_profile()
+            for name, idx in self.shape_tensor_inputs:
+                if inputs[idx].ndim > 0:
+                    val_list = inputs[idx].tolist()
+                    opt_profile.set_shape_input(name, val_list, val_list, val_list)
+                else:
+                    opt_profile.set_shape_input(name, [inputs[idx]], [inputs[idx]], [inputs[idx]])
+            config.add_optimization_profile(opt_profile)
+            if self.verbose:
+                print("Building engine with config...")
+            trt_engine = self.builder.build_engine(self.network, config)
+        else:
+            if self.verbose:
+                print("Building engine...")
+            trt_engine = self.builder.build_cuda_engine(self.network)
+        
+        if trt_engine is None:
+            raise RuntimeError("Failed to build TensorRT engine from network")
+        if self.serialize_engine:
+            trt_engine = self._serialize_deserialize(trt_engine)
+        self.engine = Engine(trt_engine)
+
     def _set_device(self, device):
         self.device = device
         assert(device.type == DeviceType.CUDA)
         cudaSetDevice(device.device_id)
+    
     def _serialize_deserialize(self, trt_engine):
         self.runtime = trt.Runtime(TRT_LOGGER)
         serialized_engine = trt_engine.serialize()
@@ -119,12 +168,17 @@ class TensorRTBackendRep(BackendRep):
         trt_engine = self.runtime.deserialize_cuda_engine(
                 serialized_engine)
         return trt_engine
+    
     def run(self, inputs, **kwargs):
         """Execute the prepared engine and return the outputs as a named tuple.
         inputs -- Input tensor(s) as a Numpy array or list of Numpy arrays.
         """
         if isinstance(inputs, np.ndarray):
             inputs = [inputs]
+        
+        if len(self.shape_tensor_inputs) > 0:
+            self._build_engine(inputs)
+
         outputs = self.engine.run(inputs)
         output_names = [output.name for output in self.engine.outputs]
 

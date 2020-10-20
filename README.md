@@ -4,9 +4,11 @@ Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/te
 
 See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
 
+For the list of recent changes, see the [changelog](Changelog.md).
+
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 7.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 7.2.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -37,15 +39,15 @@ Current supported ONNX operators are found in the [operator support matrix](oper
 
 ### Dependencies
 
- - [Protobuf >= 3.8.x](https://github.com/google/protobuf/releases)
- - [TensorRT 7.1](https://developer.nvidia.com/tensorrt)
- - [TensorRT 7.1 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
+ - [TensorRT 7.2.1](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 7.2.1 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
-For building on master, we recommend following the instructions on the [master branch of TensorRT](https://github.com/NVIDIA/TensorRT/) to take advatange of the latest plugin code required for importing certain operators.
+For building within docker, we recommend using and setting up the docker containers as instructed in the main (TensorRT repository)[https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment] to build the onnx-tensorrt library.
 
-To build only the ONNX-TensorRT parser, follow the following steps:
+Once you have cloned the repository, you can build the parser libraries and executables by running:
 
     cd onnx-tensorrt
     mkdir build && cd build
@@ -79,9 +81,9 @@ See more usage information by running:
 ### Python modules
 Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. Install them with
 
-    pip install <tensorrt_install_dir>/python/tensorrt-7.x.x.x-cp27-none-linux_x86_64.whl
+    pip install <tensorrt_install_dir>/python/tensorrt-7.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 7.1 supports ONNX release 1.6.0. Install it with:
+TensorRT 7.2.1 supports ONNX release 1.6.0. Install it with:
 
     pip install onnx==1.6.0
 
@@ -107,26 +109,6 @@ print(output_data.shape)
 The model parser library, libnvonnxparser.so, has its C++ API declared in this header:
 
     NvOnnxParser.h
-
-### Docker image
-
-#### Tar-Based TensorRT
-
-Build the onnx_tensorrt Docker image using tar-based TensorRT by running:
-
-    git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
-    cd onnx-tensorrt
-    cp /path/to/TensorRT-7.x.x.tar.gz .
-    docker build -f docker/onnx-tensorrt-tar.Dockerfile --tag=onnx-tensorrt:7.x.x .
-
-#### Deb-Based TensorRT
-
-Build the onnx_tensorrt Docker image using deb-based TensorRT by running:
-
-    git clone --recurse-submodules https://github.com/onnx/onnx-tensorrt.git
-    cd onnx-tensorrt
-    cp /path/to/nv-tensorrt-repo-ubuntu1x04-cudax.x-trt7.x.x.x-ga-yyyymmdd_1-1_amd64.deb .
-    docker build -f docker/onnx-tensorrt-deb.Dockerfile --tag=onnx-tensorrt:7.x.x.x .
 
 ### Tests
 

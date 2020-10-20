@@ -521,7 +521,14 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx
         }
         else
         {
-            return *(ctx->network()->addConstant(weights.shape, weights)->getOutput(0));
+            auto* constantLayer = ctx->network()->addConstant(weights.shape, weights);
+            // Register layer and constant name (if set) into RefitMap:
+            if (weights.getName())
+            {
+                ctx->registerLayer(constantLayer, weights.getName());
+                ctx->insertRefitMap(weights.getName(), weights.getName(), nvinfer1::WeightsRole::kCONSTANT);
+            }
+            return *(constantLayer->getOutput(0));
         }
     }
 }
@@ -933,6 +940,18 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
         {
             throw std::invalid_argument("Unexpected auto_pad value: " + onnx_auto_pad);
         }
+    }
+}
+
+const std::string getNodeName(const ::ONNX_NAMESPACE::NodeProto& node)
+{
+    if (node.name().empty() && (node.output_size() != 0))
+    {
+        return "node_of_" + node.output(0);
+    }
+    else
+    {
+        return node.name();
     }
 }
 
@@ -1468,7 +1487,7 @@ nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
 }
 
 NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
-    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power)
+    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power, std::string shiftName, std::string scaleName)
 {
     nvinfer1::ITensor* tensor_ptr = &tensor_;
     nvinfer1::Dims dims = tensor_ptr->getDimensions();
@@ -1519,7 +1538,10 @@ NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::Node
     power.type = *dtype_ptr;
     auto* layer = ctx->network()->addScaleNd(*tensor_ptr, mode, shift, scale, power, 1);
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
-    ctx->registerLayer(layer, node.name());
+    // Register layer name, and shift and scale weight names for the refit map.
+    ctx->registerLayer(layer, getNodeName(node));
+    ctx->insertRefitMap(shiftName, getNodeName(node), nvinfer1::WeightsRole::kSHIFT);
+    ctx->insertRefitMap(scaleName, getNodeName(node), nvinfer1::WeightsRole::kSCALE);
     tensor_ptr = layer->getOutput(0);
 
     if (needToExpandDims)

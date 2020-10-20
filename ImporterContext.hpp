@@ -26,12 +26,11 @@
 #include "onnx2trt_utils.hpp"
 
 #include <list>
-#include <set>
-#include <string>
 #include <unordered_map>
 
 namespace onnx2trt
 {
+
 class ImporterContext final : public IImporterContext
 {
     nvinfer1::INetworkDefinition* _network;
@@ -45,22 +44,20 @@ class ImporterContext final : public IImporterContext
     StringMap<float> mTensorRangeMins;
     StringMap<float> mTensorRangeMaxes;
     StringMap<nvinfer1::DataType> mLayerPrecisions;
-    std::set<std::string> mTensorNames;                       // keep track of tensor names used so far,
-                                                              // to avoid duplicate naming in TRT.
-    std::set<std::string> mLayerNames;                        // keep track of layer names used so far,
-                                                              // to avoid duplicate naming in TRT.
-    int64_t mSuffixCounter = 0;                               // increasing suffix counter used to uniquify layer names.
-    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold any shape tensors that are
-                                                              // the output of layers that do not support
-                                                              // shape tensors.
-    StringMap<std::string> mLoopTensors;                      // Container to map subgraph tensors to
-                                                              // their original outer graph names.
-    std::string mOnnxFileLocation;                            // Keep track of the directory of the parsed ONNX file
+    std::set<std::string> mTensorNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mLayerNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    int64_t mSuffixCounter = 0; // increasing suffix counter used to uniquify layer names.
+    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
+    StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
+    std::string mOnnxFileLocation; // Keep track of the directory of the parsed ONNX file
+    std::list<std::string> mInitializerNames; // Keep track of unique names of any initializers
+    RefitMap_t* mRefitMap; // Keep track of names of ONNX refittable weights with their corresponding TRT layer and role
 
 public:
-    ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
+    ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger, RefitMap_t* refitMap)
         : _network(network)
         , _logger(logger)
+        , mRefitMap(refitMap)
     {
     }
     virtual nvinfer1::INetworkDefinition* network() override
@@ -103,8 +100,11 @@ public:
     {
         return mOnnxFileLocation;
     }
-    // This actually handles weights as well, but is named this way to be
-    // consistent with the tensors()
+    virtual void insertRefitMap(std::string weightsName, std::string layerName, nvinfer1::WeightsRole role) override
+    {
+        (*mRefitMap)[weightsName] = WeightsPair_t{layerName, role};
+    }
+    // This actually handles weights as well, but is named this way to be consistent with the tensors()
     virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) override
     {
         // TRT requires unique tensor names.
@@ -119,16 +119,20 @@ public:
 
                 LOG_VERBOSE("Registering tensor: " << uniqueName << " for ONNX tensor: " << basename);
             }
-            else if (tensor.is_weights() && tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
+            else if (tensor.is_weights())
             {
+                mInitializerNames.push_back(uniqueName);
                 const auto& weights = tensor.weights();
-                tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
-                    convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, ctx), weights.shape};
+                if (tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
+                {
+                    tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
+                        convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, ctx), weights.shape};
+                }
+                tensor.weights().setName(mInitializerNames.back().c_str());
             }
         }
-        // Overwrite previous tensors registered with the same name (this only
-        // happens when there are subgraphs, and in that case, overwriting is the
-        // desired behavior).
+        // Overwrite previous tensors registered with the same name (this only happens when there are subgraphs,
+        // and in that case, overwriting is the desired behavior).
         this->tensors()[basename] = std::move(tensor);
     }
 
@@ -138,11 +142,17 @@ public:
         if (layer)
         {
             const std::string name = basename.empty() ? layer->getName() : basename;
-            const std::string uniqueName = generateUniqueName(mLayerNames, basename);
+            const std::string uniqueName = generateUniqueName(mLayerNames, name);
 
             auto* ctx = this; // To enable logging.
-            LOG_VERBOSE("Registering layer: " << name << " for ONNX node: " << basename);
-
+            if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
+            {
+                LOG_VERBOSE("Registering constant layer: " << uniqueName << " for ONNX initializer: " << basename);
+            }
+            else
+            {
+                LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
+            }
             layer->setName(uniqueName.c_str());
         }
     }
@@ -228,7 +238,6 @@ public:
             return _opsets.at(domain);
         }
     }
-
 private:
     std::string generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
     {

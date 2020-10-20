@@ -171,12 +171,6 @@ inline bool operator!=(nvinfer1::Dims const& a, nvinfer1::Dims const& b)
     return !(a == b);
 }
 
-inline nvinfer1::DimsHW get_DimsHW_from_CHW(nvinfer1::Dims dims)
-{
-    assert(dims.nbDims == 3);
-    return nvinfer1::DimsHW(dims.d[1], dims.d[2]);
-}
-
 inline TensorOrWeights identity(IImporterContext* ctx, TensorOrWeights input)
 {
     if (input.is_weights())

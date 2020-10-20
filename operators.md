@@ -1,6 +1,6 @@
 # Supported ONNX Operators
 
-TensorRT 7.1 supports operators up to Opset 11. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 7.2 supports operators up to Opset 11. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOOL
 
@@ -101,6 +101,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | QLinearConv           | N          |
 | QLinearMatMul         | N          |
 | QuantizeLinear        | Y          | Scales and zero\-point value must be initializers                                                                                      |
+| RNN                   | N          |
 | RandomNormal          | N          |
 | RandomNormalLike      | N          |
 | RandomUniform         | Y          |

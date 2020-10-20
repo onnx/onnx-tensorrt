@@ -61,7 +61,7 @@ public:
         return _attrs.at(key);
     }
 
-    ::ONNX_NAMESPACE::AttributeProto::AttributeType type(const std::string& key) const
+    const ::ONNX_NAMESPACE::AttributeProto::AttributeType type(const std::string& key) const
     {
         return this->at(key)->type();
     }
