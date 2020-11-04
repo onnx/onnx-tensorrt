@@ -1848,4 +1848,64 @@ Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVect
     return Status(ErrorCode::kSUCCESS);
 }
 
+//! Return ShapeTensor representing x clamped to closed interval [lowerBound,upperBound].
+static ShapeTensor clamp(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& lowerBound, const ShapeTensor& upperBound)
+{
+    return min(ctx, max(ctx, x, lowerBound), upperBound);
+}
+
+//! Return ShapeTensor representing indices < 0 ? inputDims + indices : indices
+static ShapeTensor bumpIfNegative(IImporterContext* ctx, const ShapeTensor& inputDims, const ShapeTensor& indices)
+{
+    const auto signs = clamp(ctx, indices, shapeVector(-1), shapeVector(0));
+    return sub(ctx, indices, mul(ctx, signs, inputDims));
+}
+
+void decodeOnnxStartsAndEnds(IImporterContext* ctx, const ShapeTensor& inputDims, const ShapeTensor& steps, ShapeTensor& starts, ShapeTensor& ends)
+{
+    //! The ONNX specification is unreliable (https://github.com/onnx/onnx/issues/3063)
+    //! thus the logic here is designed to match that in
+    //! https://github.com/onnx/onnx/blob/master/onnx/defs/tensor/defs.cc .
+
+    // Set stepSign to step < 0 ? -1 : 0.
+    const auto stepSign = clamp(ctx, steps, shapeVector(-1), shapeVector(0));
+
+    // Update starts.
+    starts = bumpIfNegative(ctx, inputDims, starts);
+    starts = clamp(ctx, starts, shapeVector(0), add(ctx, inputDims, stepSign));
+
+    // Update ends
+    ends = bumpIfNegative(ctx, inputDims, ends);
+    ends = clamp(ctx, ends, stepSign, inputDims);
+}
+
+ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims)
+{
+    std::vector<int64_t> subscripts(nbDims);
+    std::iota(subscripts.begin(), subscripts.end(), 0);
+    for (int32_t i = 0; i < axes.size(); ++i)
+    {
+        subscripts[axes[i]] = nbDims + i;
+    }
+    return ShapeTensor(1, std::move(subscripts));
+}
+
+ShapeTensor computeSliceSizes(IImporterContext* ctx, const ShapeTensor& starts, const ShapeTensor& ends,
+    const ShapeTensor& steps, const ShapeTensor& dims)
+{
+    if (steps.isAll(1))
+    {
+        // The general formula in the else is correct,
+        // but creates much debris for this common case.
+        return sub(ctx, ends, starts);
+    }
+    else
+    {
+        // "If a negative value is passed for step, it represents slicing backward."
+        // Compute ceil((end-start)/step) using only operations available on ShapeTensor,
+        // using the identity ceil(x) = -floor(-x).
+        return sub(ctx, similar(ctx, dims, 0), floorDiv(ctx, sub(ctx, starts, ends), steps));
+    }
+}
+
 } // namespace onnx2trt
