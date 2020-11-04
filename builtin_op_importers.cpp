@@ -3060,47 +3060,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Size)
     return {{&size.tensor(ctx)}};
 }
 
-//! Return subscripts such that gather(concat(x,y),subscripts)
-//! will return x with x[subcripts[i]] replaced by y[i].
-ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims)
-{
-    std::vector<int64_t> subscripts(nbDims);
-    std::iota(subscripts.begin(), subscripts.end(), 0);
-    for (int32_t i = 0; i < axes.size(); ++i)
-    {
-        subscripts[axes[i]] = nbDims + i;
-    }
-    return ShapeTensor(1, std::move(subscripts));
-}
-
-//! Decode a start or end index according to ONNX Slice rules:
-//! "If the value passed to start or end is larger than the n (the number of
-//! elements in this dimension), it represents n....  If a negative value is
-//! passed for step, it represents slicing backward."
-ShapeTensor decodeOnnxIndices(IImporterContext* ctx, const ShapeTensor& indices, const ShapeTensor& dims)
-{
-    // Oblique calculation implements the rules using only operations available in TensorRT.
-    return sub(
-        ctx, min(ctx, max(ctx, indices, mul(ctx, shapeVector(-1), dims)), dims), mul(ctx, dims, max(ctx, shapeVector(-1), min(ctx, shapeVector(0), indices))));
-}
-
-ShapeTensor computeSizes(IImporterContext* ctx, const ShapeTensor& starts, const ShapeTensor& ends,
-    const ShapeTensor& steps, const ShapeTensor& shift, const ShapeTensor& dims)
-{
-    if (steps.isAll(1))
-    {
-        // The general formula in the else is correct,
-        // but creates much debris for this common case.
-        return sub(ctx, ends, starts);
-    }
-    else
-    {
-        // "If a negative value is passed for step, it represents slicing backward."
-        // Compute ceil((end-start)/step) + shift using only operations available in TensorRT.
-        return add(ctx, sub(ctx, similar(ctx, dims, 0), floorDiv(ctx, sub(ctx, starts, ends), steps)), shift);
-    }
-}
-
 DEFINE_BUILTIN_OP_IMPORTER(Slice)
 {
     const int nbInputs = node.input().size();
@@ -3170,43 +3129,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
     ASSERT(std::unordered_set<int64_t>(axes.begin(), axes.end()).size() == static_cast<size_t>(axes.size()),
         ErrorCode::kINVALID_NODE);
 
-    // Create a shift shapeTensor. We need to add 1 to the size for any slice that cuts across an entire
-    // axis in reverse. It is 0 for all other slices.
-    ShapeTensor shift = shapeVector(0);
-    if (ends.allValuesKnown())
-    {
-        shift = ends;
-        for (int64_t& val : shift.getValues())
-        {
-            if (val == static_cast<int64_t>(INT_MIN))
-            {
-                val = 1;
-            }
-            else
-            {
-                val = 0;
-            }
-        }
-    }
-
     if (axes.size() < dims.size() || !isIota)
     {
-        // axes specify a subset of the dimensions, or out of order.
-        // Convert starts/ends/steps/shift to complete in-order form.
+        // Axes specify a subset of the dimensions, or out of order.
+        // Convert starts/ends/steps to complete in-order form.
         const ShapeTensor subscripts{axesToInterlaceSubscripts(axes, dims.size())};
         starts = interlace(ctx, similar(ctx, dims, 0), starts, subscripts);
         ends = interlace(ctx, dims, ends, subscripts);
         steps = interlace(ctx, similar(ctx, dims, 1), steps, subscripts);
-        shift = interlace(ctx, similar(ctx, dims, 0), shift, subscripts);
     }
 
-    // "If a negative value is passed for any of the start or end indices,
-    // it represents number of elements before the end of that dimension."
-    starts = decodeOnnxIndices(ctx, starts, dims);
-    ends = decodeOnnxIndices(ctx, ends, dims);
+    // ONNX has a bunch of rules for converting out of bounds starts/ends
+    // indices into the actual indices to use.
+    decodeOnnxStartsAndEnds(ctx, dims, steps, starts, ends);
 
     // TensorRT uses sizes of the output dimensions instead of ends.
-    const ShapeTensor sizes = computeSizes(ctx, starts, ends, steps, shift, dims);
+    const ShapeTensor sizes = computeSliceSizes(ctx, starts, ends, steps, dims);
 
     nvinfer1::ISliceLayer* slice = addSlice(ctx, data, starts, sizes, steps);
 
