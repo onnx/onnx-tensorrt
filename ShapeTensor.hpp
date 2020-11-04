@@ -115,13 +115,6 @@ public:
         return mValues[k];
     }
 
-    //! Return underlying mValues
-    std::vector<int64_t>& getValues()
-    {
-        assert(mAllValuesKnown);
-        return mValues;
-    }
-
     //! Return true if x and y always have the same value.
     friend bool operator==(const ShapeTensor& x, const ShapeTensor& y);
     friend ShapeTensor shapeOf(const ShapeTensor& t);
