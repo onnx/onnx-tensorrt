@@ -95,6 +95,8 @@ static std::ostream& operator<<(std::ostream& stream, const nvinfer1::DataType& 
 namespace onnx2trt
 {
 
+class ShapeTensor;
+
 // Helper function to calculate the volume of a Dims object
 int64_t volume(const nvinfer1::Dims& dims);
 
@@ -309,5 +311,17 @@ nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
 
 // Helper function to convert a ShapedWeights object into a vector
 Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector);
+
+//! Decode in place the starts and ends indices according to ONNX Slice rules.
+void decodeOnnxStartsAndEnds(IImporterContext* ctx, const ShapeTensor& inputDims, const ShapeTensor& steps, ShapeTensor& starts, ShapeTensor& ends);
+
+//! Return ShapeTensor representing size of result of Slice.
+//! starts and ends should first be decoded by decodeOnnxStartsAndEnds.
+ShapeTensor computeSliceSizes(IImporterContext* ctx, const ShapeTensor& starts, const ShapeTensor& ends,
+    const ShapeTensor& steps, const ShapeTensor& dims);
+
+//! Return subscripts such that gather(concat(x,y),subscripts)
+//! will return x with x[subcripts[i]] replaced by y[i].
+ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 
 } // namespace onnx2trt
