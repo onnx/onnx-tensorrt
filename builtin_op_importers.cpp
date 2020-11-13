@@ -186,8 +186,9 @@ NodeImportResult batchnormFallback(
     nvinfer1::ITensor* mean = &convertToTensor(inputs.at(3), ctx);
     nvinfer1::ITensor* variance = &convertToTensor(inputs.at(4), ctx);
 
-    const bool hasCDimension = rank > 1;
-    if (hasCDimension)
+    // Reshape batchnorm weights from [C] to [N, C, ...]
+    const bool needsExpandDims = rank > 1;
+    if (needsExpandDims)
     {
         std::vector<int> axes(rank - 1);
         axes[0] = 0;
@@ -223,7 +224,7 @@ NodeImportResult batchnormFallback(
              ->getOutput(0),
         *bias, eOp::kSUM);
 
-    ctx->registerLayer(layer, node.name());
+    ctx->registerLayer(layer, getNodeName(node));
 
     RETURN_FIRST_OUTPUT(layer);
 }
@@ -254,25 +255,13 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     OnnxAttrs attrs(node, ctx);
     float eps = attrs.get<float>("epsilon", 1e-5f);
 
-    nvinfer1::Dims dims = tensorPtr->getDimensions();
-
-    bool needToExpandDims = (dims.nbDims == 3);
-    if (needToExpandDims)
-    {
-        // Expand spatial dims from 1D to 2D
-        std::vector<int> axes{3};
-        tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, axes);
-        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
-        dims = tensorPtr->getDimensions();
-    }
-
     // Number of channels is equal to the length of scale_weights.
     int nchan = scale_weights.shape.d[0];
     nvinfer1::Dims weights_shape{1, {nchan}};
-    ASSERT(scale_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
-    ASSERT(bias_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
-    ASSERT(mean_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
-    ASSERT(variance_weights.shape == weights_shape, ErrorCode::kINVALID_NODE);
+    ASSERT((scale_weights.shape == weights_shape) && "The shape of input scale must be (C)", ErrorCode::kINVALID_NODE);
+    ASSERT((bias_weights.shape == weights_shape) && "The shape of input bias must be (C)", ErrorCode::kINVALID_NODE);
+    ASSERT((mean_weights.shape == weights_shape) && "The shape of input mean must be (C)", ErrorCode::kINVALID_NODE);
+    ASSERT((variance_weights.shape == weights_shape) && "The shape of input var must be (C)", ErrorCode::kINVALID_NODE);
     auto combined_scale_weights = ctx->createTempWeights(scale_weights.type, scale_weights.shape);
     auto combined_bias_weights = ctx->createTempWeights(bias_weights.type, bias_weights.shape);
     size_t nweight = nchan;
@@ -289,23 +278,9 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
         combined_bias_ref = bias - mean * combined_scale_ref;
     }
 
-    // If dimensions were not expanded return the output of the scale operation
-    if (!needToExpandDims)
-    {
-        return scaleHelper(
-            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {}, bias_weights.getName(), scale_weights.getName());
-    }
-    else
-    {
-        auto scaledResult = scaleHelper(
-            ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights, combined_scale_weights, {}, bias_weights.getName(), scale_weights.getName());
-        // Squeeze spatial dims back to 1D
-        tensorPtr = &convertToTensor(scaledResult.value().at(0), ctx);
-        std::vector<int> axes{3};
-        tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
-        ASSERT(tensorPtr, ErrorCode::kUNSUPPORTED_NODE);
-        return {{tensorPtr}};
-    }
+    return scaleHelper(ctx, node, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combined_bias_weights,
+        combined_scale_weights, ShapedWeights::empty(scale_weights.type), bias_weights.getName(),
+        scale_weights.getName());
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Cast)

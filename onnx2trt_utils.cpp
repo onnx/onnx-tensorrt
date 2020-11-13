@@ -347,13 +347,13 @@ bool convertOnnxWeights(
             {
                 continue;
             }
-            else 
+            else
             {
                 LOG_ERROR("Key value of: " << keyName << " was not expected!");
                 return false;
             }
         }
-        
+
         // Buffer to hold the data read from the file
         std::vector<char> dataBuf;
         // Will update dataBuf and nbytes by reference.
@@ -1315,7 +1315,7 @@ nvinfer1::Dims insertDimension(const nvinfer1::Dims& dims, const int axis, const
 bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int offset, int length,
     std::vector<char>& weightsBuf, size_t& size)
 {
-    // The weight paths in the ONNX model are relative paths to the main ONNX file. 
+    // The weight paths in the ONNX model are relative paths to the main ONNX file.
 #ifdef _MSC_VER
     size_t slash = path.rfind("\\");
 #else
@@ -1486,71 +1486,47 @@ nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
     return layer->getOutput(0);
 }
 
-NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
-    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power, std::string shiftName, std::string scaleName)
+NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_,
+    nvinfer1::ScaleMode mode, const nvinfer1::Weights& shift, const nvinfer1::Weights& scale,
+    const nvinfer1::Weights& power, const char* shiftName, const char* scaleName)
 {
-    nvinfer1::ITensor* tensor_ptr = &tensor_;
-    nvinfer1::Dims dims = tensor_ptr->getDimensions();
+    nvinfer1::ITensor* tensorPtr = &tensor_;
+    const ShapeTensor origShape = shapeOf(*tensorPtr);
 
     // TensorRT scale layers support 4D(NCHW) or 5D(NCDHW) input.
-    // For input other than 4D or 5D will be expanded to 4D.
-    int expectedNbDims = 4;
-    bool needToExpandDims = (dims.nbDims != 4 && dims.nbDims != 5);
-    nvinfer1::Dims orig_shape = dims;
-    if (needToExpandDims)
+    // For input other than 4D or 5D will be expanded or squeezed to 4D.
+    bool needToReshape = (origShape.size() != 4 && origShape.size() != 5);
+    if (needToReshape)
     {
-        // Expand or squash dims to 4D
-        nvinfer1::Dims new_shape = dims;
-        while (new_shape.nbDims < expectedNbDims)
+        if (origShape.size() < 4)
         {
-            new_shape.d[new_shape.nbDims++] = 1;
+            std::vector<int> expandAxes(4 - origShape.size());
+            std::iota(expandAxes.begin(), expandAxes.end(), origShape.size());
+            tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, expandAxes);
         }
-        while (new_shape.nbDims > expectedNbDims)
+        else
         {
-            new_shape.d[3] *= new_shape.d[--new_shape.nbDims];
+            // Collapse trailing dimensions if origShape.size() > 5
+            const ShapeTensor collapsedDim = product(ctx, origShape, 3, origShape.size(), 1);
+            const ShapeTensor collapsedShape = concat(ctx, gather(ctx, origShape, iotaShapeVector(3)), collapsedDim);
+            tensorPtr = &reshape(ctx, *tensorPtr, collapsedShape);
         }
-        tensor_ptr = reshapeTensor(ctx, *tensor_ptr, new_shape);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
-        dims = tensor_ptr->getDimensions();
     }
 
-    ASSERT(dims.nbDims == 4 || dims.nbDims == 5, ErrorCode::kUNSUPPORTED_NODE);
-
-    // Fill in dtype for any unused (dummy) weights
-    nvinfer1::DataType* dtype_ptr = nullptr;
-    if (shift.count)
-    {
-        dtype_ptr = &shift.type;
-    }
-    if (scale.count)
-    {
-        ASSERT(!dtype_ptr || *dtype_ptr == scale.type, ErrorCode::kUNSUPPORTED_NODE);
-        dtype_ptr = &scale.type;
-    }
-    if (power.count)
-    {
-        ASSERT(!dtype_ptr || *dtype_ptr == power.type, ErrorCode::kUNSUPPORTED_NODE);
-        dtype_ptr = &power.type;
-    }
-    ASSERT(dtype_ptr, ErrorCode::kINTERNAL_ERROR);
-    shift.type = *dtype_ptr;
-    scale.type = *dtype_ptr;
-    power.type = *dtype_ptr;
-    auto* layer = ctx->network()->addScaleNd(*tensor_ptr, mode, shift, scale, power, 1);
-    ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
+    auto* layer = ctx->network()->addScaleNd(*tensorPtr, mode, shift, scale, power, 1);
+    ASSERT(layer && "Failed to add a Scale layer.", ErrorCode::kUNSUPPORTED_NODE);
     // Register layer name, and shift and scale weight names for the refit map.
     ctx->registerLayer(layer, getNodeName(node));
-    ctx->insertRefitMap(shiftName, getNodeName(node), nvinfer1::WeightsRole::kSHIFT);
-    ctx->insertRefitMap(scaleName, getNodeName(node), nvinfer1::WeightsRole::kSCALE);
-    tensor_ptr = layer->getOutput(0);
 
-    if (needToExpandDims)
+    tensorPtr = layer->getOutput(0);
+
+    if (needToReshape)
     {
-        tensor_ptr = reshapeTensor(ctx, *tensor_ptr, orig_shape);
-        ASSERT(tensor_ptr, ErrorCode::kUNSUPPORTED_NODE);
+        tensorPtr = &reshape(ctx, *tensorPtr, origShape);
+        ASSERT(tensorPtr && "Failed to reshape tensor.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
-    return {{tensor_ptr}};
+    return {{tensorPtr}};
 }
 
 void setAttr(
