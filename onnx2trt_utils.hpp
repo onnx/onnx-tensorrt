@@ -286,8 +286,9 @@ NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto
 nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 
 // Helper function to map attributes to a TRT scale layer
-NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode,
-    nvinfer1::Weights shift, nvinfer1::Weights scale, nvinfer1::Weights power, std::string shiftName, std::string scaleName);
+NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_,
+    nvinfer1::ScaleMode mode, const nvinfer1::Weights& shift, const nvinfer1::Weights& scale,
+    const nvinfer1::Weights& power, const char* shiftName, const char* scaleName);
 
 // Helper function to set an ONNX attribute
 void setAttr(
