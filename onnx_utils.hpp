@@ -41,6 +41,7 @@ template <typename OnnxDims>
 bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims, std::vector<NamedDimension>& namedDims)
 {
     std::vector<int32_t> onnxDimsVec;
+    onnxDimsVec.reserve(onnxDims.size());
     for (const auto& onnxDim : onnxDims)
     {
         // For empty dimensions, the ONNX specification says it's a dynamic dimension

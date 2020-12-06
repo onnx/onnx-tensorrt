@@ -119,6 +119,7 @@ std::vector<nvinfer1::DataType> OnnxAttrs::get<std::vector<nvinfer1::DataType>>(
     auto attr = this->at(key)->ints();
     auto onnx_dtypes = std::vector<int64_t>(attr.begin(), attr.end());
     std::vector<nvinfer1::DataType> dtypes{};
+    dtypes.reserve(onnx_dtypes.size());
     for (auto onnx_dtype : onnx_dtypes)
     {
         nvinfer1::DataType dtype{};
@@ -189,6 +190,7 @@ std::vector<nvinfer1::ActivationType> OnnxAttrs::get<std::vector<nvinfer1::Activ
 {
     const auto strings = this->at(key)->strings();
     std::vector<nvinfer1::ActivationType> actTypes;
+    actTypes.reserve(strings.size());
     for (const auto& str : strings)
     {
         actTypes.emplace_back(activationStringToEnum(str));
@@ -206,19 +208,19 @@ template <>
 nvinfer1::RNNOperation OnnxAttrs::get<nvinfer1::RNNOperation>(const std::string& key) const
 {
     std::string op = this->get<std::string>(key);
-    if (op == std::string("relu"))
+    if (op == "relu")
     {
         return nvinfer1::RNNOperation::kRELU;
     }
-    if (op == std::string("tanh"))
+    if (op == "tanh")
     {
         return nvinfer1::RNNOperation::kTANH;
     }
-    if (op == std::string("lstm"))
+    if (op == "lstm")
     {
         return nvinfer1::RNNOperation::kLSTM;
     }
-    if (op == std::string("gru"))
+    if (op == "gru")
     {
         return nvinfer1::RNNOperation::kGRU;
     }
@@ -229,11 +231,11 @@ template <>
 nvinfer1::RNNInputMode OnnxAttrs::get<nvinfer1::RNNInputMode>(const std::string& key) const
 {
     std::string mode = this->get<std::string>(key);
-    if (mode == std::string("skip"))
+    if (mode == "skip")
     {
         return nvinfer1::RNNInputMode::kSKIP;
     }
-    if (mode == std::string("linear"))
+    if (mode == "linear")
     {
         return nvinfer1::RNNInputMode::kLINEAR;
     }
@@ -244,11 +246,11 @@ template <>
 nvinfer1::RNNDirection OnnxAttrs::get<nvinfer1::RNNDirection>(const std::string& key) const
 {
     std::string direction = this->get<std::string>(key);
-    if (direction == std::string("unidirection"))
+    if (direction == "unidirection")
     {
         return nvinfer1::RNNDirection::kUNIDIRECTION;
     }
-    if (direction == std::string("bidirection"))
+    if (direction == "bidirection")
     {
         return nvinfer1::RNNDirection::kBIDIRECTION;
     }

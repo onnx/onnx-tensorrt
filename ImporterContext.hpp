@@ -172,7 +172,7 @@ public:
         // No layer will be added for Constant nodes in ONNX.
         if (layer)
         {
-            const std::string name = basename.empty() ? layer->getName() : basename;
+            const std::string &name = basename.empty() ? layer->getName() : basename;
             const std::string uniqueName = generateUniqueName(mLayerNames, name);
 
             auto* ctx = this; // To enable logging.
@@ -302,7 +302,7 @@ private:
 
         while (namesSet.find(candidate) != namesSet.end())
         {
-            candidate = basename + "_" + std::to_string(mSuffixCounter);
+            candidate = basename + '_' + std::to_string(mSuffixCounter);
             ++mSuffixCounter;
         }
 

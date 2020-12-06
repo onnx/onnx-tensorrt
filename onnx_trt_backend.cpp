@@ -614,6 +614,7 @@ ONNXIFI_PUBLIC ONNXIFI_CHECK_RESULT onnxStatus ONNXIFI_ABI onnxGetBackendIDs(
         {
             size_t len = (*numBackends < nDevices) ? (*numBackends) : nDevices;
             std::vector<std::unique_ptr<OnnxTensorRTBackendID>> vtmp;
+            vtmp.reserve(len);
             for (size_t i = 0; i < len; ++i)
             {
                 vtmp.emplace_back(new OnnxTensorRTBackendID(i));

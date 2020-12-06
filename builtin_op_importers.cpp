@@ -84,6 +84,7 @@ namespace
         nvinfer1::ILayer* layer_ptr = layer;                                                                           \
         ASSERT(layer_ptr && "The input layer is null.", ErrorCode::kUNSUPPORTED_NODE);                                                               \
         std::vector<TensorOrWeights> outputs;                                                                          \
+        outputs.reserve(layer_ptr->getNbOutputs());                                                                    \
         for (int i = 0; i < layer_ptr->getNbOutputs(); ++i)                                                            \
             outputs.push_back(layer_ptr->getOutput(i));                                                                \
         return {outputs};                                                                                              \
@@ -2133,6 +2134,7 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
         ErrorCode::kINVALID_NODE);
     const int32_t nbOutputs = thenGraph.output_size();
     std::vector<TensorOrWeights> graphOutputs;
+    graphOutputs.reserve(nbOutputs);
 
     // For constant conditions, parse only the selected subgraph
     if (cond.is_weights() && cond.weights().count() == 1)
@@ -4015,6 +4017,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
 
     // Add initial state inputs using recurrent layers, and scan inputs using iterators.
     std::vector<nvinfer1::IRecurrenceLayer*> stateVars{};
+    stateVars.reserve(nbStateVars);
     for (int i = 0; i < nbStateVars; ++i)
     {
         stateVars.emplace_back(loop->addRecurrence(convertToTensor(inputs.at(i + opset8Offset), ctx)));
@@ -4035,6 +4038,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
 
     // Set up recurrence outputs (first N body graph outputs).
     std::vector<TensorOrWeights> nodeOutputs{};
+    nodeOutputs.reserve(nbStateVars + nbScanOutputs);
     for (int i = 0; i < nbStateVars; ++i)
     {
         const auto& bodyOutputName = body.output(i).name();
@@ -4065,7 +4069,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
         nodeOutputs.emplace_back(trtScanOut->getOutput(0));
     }
 
-    return {nodeOutputs};
+    return {std::move(nodeOutputs)};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ScatterND)
@@ -4886,6 +4890,7 @@ DEFINE_BUILTIN_OP_IMPORTER(FallbackPluginImporter)
     ASSERT(plugin && "Could not create plugin", ErrorCode::kUNSUPPORTED_NODE);
 
     std::vector<nvinfer1::ITensor*> pluginInputs{};
+    pluginInputs.reserve(inputs.size());
     for (auto& input : inputs)
     {
         pluginInputs.emplace_back(&convertToTensor(input, ctx));

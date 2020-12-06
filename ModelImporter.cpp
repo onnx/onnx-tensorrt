@@ -120,6 +120,7 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
 
         // Assemble node inputs. These may come from outside the subgraph.
         std::vector<TensorOrWeights> nodeInputs;
+        nodeInputs.reserve(node.input().size());
         std::ostringstream ssInputs{};
         ssInputs << nodeName << " [" << node.op_type() << "] inputs: ";
         for (const auto& inputName : node.input())
@@ -134,7 +135,7 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
             {
                 LOG_VERBOSE("Searching for input: " << inputName);
                 ASSERT( (ctx->tensors().count(inputName)) && "Node input was not registered.", ErrorCode::kINVALID_GRAPH);
-                nodeInputs.push_back(ctx->tensors().at(inputName));
+                nodeInputs.emplace_back(ctx->tensors().at(inputName));
                 ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "[" << nodeInputs.back().getType() << "]" <<"], ";
             }
         }
@@ -595,7 +596,7 @@ Status ModelImporter::importModel(
         {
             LOG_WARNING("TensorRT supports ONNX graphs generated with at least opset 7. Models using older opsets are not guaranteed to work.");
         }
-        _importer_ctx.addOpset(domain, version);
+        _importer_ctx.addOpset(std::move(domain), version);
     }
     ::ONNX_NAMESPACE::GraphProto const& graph = model.graph();
     // Create a dummy tensors so that we can reserve output names. If the output names are encountered elsewhere
