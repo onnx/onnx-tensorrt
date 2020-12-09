@@ -2705,6 +2705,109 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
     RETURN_FIRST_OUTPUT(layer);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(ReverseSequence)
+{
+    OnnxAttrs attrs{node, ctx};
+    const int batch_axis = attrs.get<int>("batch_axis", 1);
+
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    int rank = input->getDimensions().nbDims;
+    // Sequence tensor: indices tensor of rank = 1 and shape = [batchsize]
+    nvinfer1::ITensor* sequences = &convertToTensor(inputs.at(1), ctx);
+    std::vector<nvinfer1::ITensor*> tensors;
+    int size = sequences->getDimensions().d[0];
+
+    for (int i = 0; i < size; i++)
+    {
+
+        /*  Slice across each element in batch_axis
+
+        For batch_axis = 1
+            Starts =  {0, i, 0, 0...}
+            Sizes =   {D0, 1, D2, D3...}
+            Strides = {1, 1, 1, ...}
+
+        For batch_axis = 0
+            Starts =  {i, 0, 0, 0...}
+            Sizes =   {1, D1, D2, D3...}
+            Strides = {1, 1, 1, ...}
+        */
+
+        ShapeTensor starts = batch_axis == 0 ? concat(ctx, shapeVector(i), shapeVector(0)) : concat(ctx, shapeVector(0), shapeVector(i));
+        ShapeTensor sizes = batch_axis == 0 ? concat(ctx, shapeVector(1), ShapeTensor(*getAxisLength(ctx, input, 1, {1, {1}}))) : concat(ctx, ShapeTensor(*getAxisLength(ctx, input, 0, {1, {1}})), shapeVector(1));
+        ShapeTensor strides = fillShapeVector(ctx, 1, shapeVector(rank));
+
+        for (int j = 2; j < rank; j++)
+        {
+            starts = concat(ctx, starts, shapeVector(0));
+            sizes = concat(ctx, sizes, ShapeTensor(*getAxisLength(ctx, input, j, {1, {1}})));
+        }
+
+        auto s1 = addSlice(ctx, *input, starts, sizes, strides);
+        nvinfer1::ITensor* data = s1->getOutput(0);
+        data = squeezeTensor(ctx, node, *data, {batch_axis});
+        // Get sequence length for the current slice
+        auto seqIndex = ctx->network()->addSlice(*sequences, {1, {i}}, {1, {1}}, {1, {1}})->getOutput(0);
+
+        // First slice = slices data[seqIndex - 1 : 0 : -1] on axis 0
+        /*
+            Starts =  {seqIndex - 1, 0, 0 ...}
+            Sizes =   {seqIndex, D1, D2, ...}
+            Strides = {-1, 1, 1, ...}
+        */
+
+        int sliceRank = data->getDimensions().nbDims;
+        starts = sub(ctx, ShapeTensor(*seqIndex), shapeVector(1));
+        ShapeTensor startsFill = fillShapeVector(ctx, 0, shapeVector(sliceRank - 1));
+        starts = concat(ctx, starts, startsFill);
+
+        sizes = ShapeTensor(*seqIndex);
+        for (int j = 1; j < sliceRank; j++)
+        {
+            sizes = concat(ctx, sizes, ShapeTensor(*getAxisLength(ctx, data, j, {1, {1}})));
+        }
+
+        strides = shapeVector(-1);
+        ShapeTensor stridesFill = fillShapeVector(ctx, 1, shapeVector(sliceRank - 1));
+        strides = concat(ctx, strides, stridesFill);
+
+        auto firstSlice = addSlice(ctx, *data, starts, sizes, strides);
+        auto slice1 = firstSlice->getOutput(0);
+
+        // Second slice = slices data[seqIndex:end:1] on axis 0
+
+        /*
+            Starts =  {seqIndex, 0, 0 ... 0}
+            Sizes =   {D0 - seqIndex, D1, D2 ...}
+            Strides = {1, 1, 1, 1 ...}
+        */
+
+        starts = ShapeTensor(*seqIndex);
+        startsFill = fillShapeVector(ctx, 0, shapeVector(sliceRank - 1));
+        starts = concat(ctx, starts, startsFill);
+
+        sizes = sub(ctx, ShapeTensor(*getAxisLength(ctx, data, 0, {1, {1}})), ShapeTensor(*seqIndex));
+        for (int j = 1; j < sliceRank; j++)
+        {
+           sizes = concat(ctx, sizes, ShapeTensor(*getAxisLength(ctx, data, j, {1, {1}})));
+        }
+
+        strides = fillShapeVector(ctx, 1, shapeVector(sliceRank));
+
+        auto secondSlice = addSlice(ctx, *data, starts, sizes, strides);
+        auto slice2 = secondSlice->getOutput(0);
+
+        // Concat the two slices together
+        std::vector<nvinfer1::ITensor*> slices {slice1, slice2};
+        auto fullSliceLayer = ctx->network()->addConcatenation(slices.data(), slices.size());
+        tensors.emplace_back(unsqueezeTensor(ctx, node, *fullSliceLayer->getOutput(0), {batch_axis}));
+    }
+
+    auto concatLayer = ctx->network()->addConcatenation(tensors.data(), tensors.size());
+    concatLayer->setAxis(batch_axis);
+    RETURN_FIRST_OUTPUT(concatLayer);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(RNN)
 {
     OnnxAttrs attrs{node, ctx};
