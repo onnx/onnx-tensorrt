@@ -29,7 +29,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | Clip                  | Y          | min and max clip values must be an initializer                                                                                         |
 | Compress              | N          |
 | Concat                | Y          |
-| ConcatFromSequence N  |
+| ConcatFromSequence    | N
 | Constant              | Y          |
 | ConstantOfShape       | Y          |
 | Conv                  | Y          | 2D or 3D convolutions only                                                                                                             |
@@ -121,7 +121,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | Relu                  | Y          |
 | Reshape               | Y          |
 | Resize                | Y          | Asymmetric coordinate transformation mode only\. Nearest or Linear resizing mode only\. "floor" mode only for resize\_mode attribute\. |
-| ReverseSequence       | N          |
+| ReverseSequence       | Y          |
 | RNN                   | Y          |
 | RoiAlign              | N          |
 | Round                 | N          |
