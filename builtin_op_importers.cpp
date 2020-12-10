@@ -402,7 +402,6 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape)
 
 DEFINE_BUILTIN_OP_IMPORTER(Conv)
 {
-    ASSERT(inputs.at(0).is_tensor(), ErrorCode::kUNSUPPORTED_NODE);
     if (inputs.at(1).is_tensor())
     {
         ASSERT(ctx->network()->hasExplicitPrecision() && "TensorRT only supports multi-input conv for explicit precision QAT networks!", ErrorCode::kUNSUPPORTED_NODE);
