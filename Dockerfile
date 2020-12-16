@@ -1,4 +1,4 @@
-FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
+FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
 
 RUN rm -f /usr/lib/x86_64-linux-gnu/libnccl_static.a \
           /usr/lib/x86_64-linux-gnu/libcudnn_static_v7.a
@@ -47,20 +47,20 @@ RUN cd /usr/local/src && \
 
 # Install TensorRT
 WORKDIR /usr/local/src
-ENV TENSORRT_VERSION 3.0
+ENV TENSORRT_VERSION 5.1
 COPY TensorRT-${TENSORRT_VERSION}.*.tar.gz .
 RUN tar -xvf TensorRT-${TENSORRT_VERSION}.*.tar.gz && \
     cd TensorRT-${TENSORRT_VERSION}.* && \
-    cp lib/* /usr/lib/x86_64-linux-gnu/ && \
+    cp -r lib/* /usr/lib/x86_64-linux-gnu/ && \
     rm /usr/lib/x86_64-linux-gnu/libnv*.a && \
-    cp include/* /usr/include/x86_64-linux-gnu/ && \
+    cp -r include/* /usr/include/x86_64-linux-gnu/ && \
     cp bin/* /usr/bin/ && \
     mkdir /usr/share/doc/tensorrt && \
     cp -r doc/* /usr/share/doc/tensorrt/ && \
     mkdir /usr/src/tensorrt && \
     cp -r samples /usr/src/tensorrt/  && \
-    pip2 install python/tensorrt-${TENSORRT_VERSION}.*-cp27-cp27mu-linux_x86_64.whl && \
-    pip3 install python/tensorrt-${TENSORRT_VERSION}.*-cp35-cp35m-linux_x86_64.whl && \
+    pip2 install python/tensorrt-${TENSORRT_VERSION}.*-cp27-*.whl && \
+    pip3 install python/tensorrt-${TENSORRT_VERSION}.*-cp36-*.whl && \
     pip2 install uff/uff-*-py2.py3-none-any.whl && \
     pip3 install uff/uff-*-py2.py3-none-any.whl && \
     cd ../ && \
@@ -72,7 +72,8 @@ ENV ONNX2TRT_VERSION 0.1.0
 
 WORKDIR /opt/onnx2trt
 COPY . .
-RUN rm -rf build/ && \
+RUN export CPATH=/usr/local/cuda/include:$CPATH && \
+    rm -rf build/ && \
     mkdir build && \
     cd build && \
     cmake .. && \
