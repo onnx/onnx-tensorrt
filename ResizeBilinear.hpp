@@ -30,13 +30,13 @@
 
 namespace
 {
-constexpr const char *RESIZE_PLUGIN_VERSION{"001"};
-constexpr const char *RESIZE_PLUGIN_NAME{"ResizeNearest"};
+constexpr const char *RESIZE_BILINEAR_PLUGIN_VERSION{"001"};
+constexpr const char *RESIZE_BILINEAR_PLUGIN_NAME{"ResizeBilinear"};
 } // namespace
 
 //==================================================================
 
-class ResizeNearestPlugin final : 
+class ResizeBilinearPlugin final : 
     public onnx2trt::PluginV2
 {
     //--------------------------------------------------------------------
@@ -85,7 +85,7 @@ class ResizeNearestPlugin final :
 
     //--------------------------------------------------------------------
 
-    ResizeNearestPlugin(
+    ResizeBilinearPlugin(
         std::vector<float> const &scale) : 
             _ndims(scale.size())
     {
@@ -95,7 +95,7 @@ class ResizeNearestPlugin final :
 
     //--------------------------------------------------------------------
 
-    ResizeNearestPlugin(
+    ResizeBilinearPlugin(
         void const *serialData, 
         size_t serialLength)
     {
@@ -110,7 +110,7 @@ class ResizeNearestPlugin final :
     const char 
     *getPluginType() const override 
     { 
-        return RESIZE_PLUGIN_NAME; 
+        return RESIZE_BILINEAR_PLUGIN_NAME; 
     }
 
     //--------------------------------------------------------------------
@@ -128,7 +128,7 @@ class ResizeNearestPlugin final :
     nvinfer1::IPluginV2 
     *clone() const override
     {
-        return new ResizeNearestPlugin{
+        return new ResizeBilinearPlugin{
             std::vector<float>(_scale, _scale + _ndims)};
     }
 
@@ -138,7 +138,7 @@ class ResizeNearestPlugin final :
     const char 
     *getPluginVersion() const override 
     { 
-        return RESIZE_PLUGIN_VERSION; 
+        return RESIZE_BILINEAR_PLUGIN_VERSION; 
     }
 
     //--------------------------------------------------------------------
@@ -194,7 +194,7 @@ class ResizeNearestPlugin final :
 
 //==================================================================
 
-class ResizeNearestPluginCreator : 
+class ResizeBilinearPluginCreator : 
     public nvinfer1::IPluginCreator
 {
   private:
@@ -206,12 +206,12 @@ class ResizeNearestPluginCreator :
   public:
     //--------------------------------------------------------------------
     
-    ResizeNearestPluginCreator()
+    ResizeBilinearPluginCreator()
     {}
 
     //--------------------------------------------------------------------
 
-    ~ResizeNearestPluginCreator()
+    ~ResizeBilinearPluginCreator()
     {}
 
     //--------------------------------------------------------------------
@@ -219,7 +219,7 @@ class ResizeNearestPluginCreator :
     const char* 
     getPluginName() const 
     {
-        return RESIZE_PLUGIN_NAME;
+        return RESIZE_BILINEAR_PLUGIN_NAME;
     }
 
     //--------------------------------------------------------------------
@@ -227,7 +227,7 @@ class ResizeNearestPluginCreator :
     const char* 
     getPluginVersion() const
     {
-        return RESIZE_PLUGIN_VERSION;
+        return RESIZE_BILINEAR_PLUGIN_VERSION;
     }
 
     //--------------------------------------------------------------------
@@ -258,7 +258,9 @@ class ResizeNearestPluginCreator :
         const void *serialData,
         size_t serialLength)
     {
-        return new ResizeNearestPlugin{serialData, serialLength};
+        return new ResizeBilinearPlugin{
+            serialData, 
+            serialLength};
     }
 
     //--------------------------------------------------------------------
@@ -283,4 +285,4 @@ class ResizeNearestPluginCreator :
 
 //==================================================================
 
-REGISTER_TENSORRT_PLUGIN(ResizeNearestPluginCreator);
+REGISTER_TENSORRT_PLUGIN(ResizeBilinearPluginCreator);

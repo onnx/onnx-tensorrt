@@ -70,6 +70,7 @@ set(ONNX2TRT_PATCH 0)
 set(PLUGIN_SOURCES
   FancyActivation.cu
   ResizeNearest.cu
+  ResizeBilinear.cu
   Split.cu
   InstanceNormalization.cpp
   plugin.cpp

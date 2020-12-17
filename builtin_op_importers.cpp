@@ -25,6 +25,7 @@
 #include "plugin.hpp"
 #include "FancyActivation.hpp"
 #include "ResizeNearest.hpp"
+#include "ResizeBilinear.hpp"
 #include "Split.hpp"
 #include "InstanceNormalization.hpp"
 
@@ -2006,9 +2007,26 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample) {
   }
   auto scale = {height_scale, width_scale};
   auto mode = attrs.get<std::string>("mode", "nearest");
-  ASSERT(mode == "nearest", ErrorCode::kUNSUPPORTED_NODE);
-  RETURN_FIRST_OUTPUT(
-      ctx->addPluginV2(new ResizeNearestPlugin(scale), {&inputs.at(0).tensor()}));
+  
+  ASSERT(
+    mode == "nearest" || mode == "linear", 
+    ErrorCode::kUNSUPPORTED_NODE);
+    
+  if (mode == "nearest"){
+    RETURN_FIRST_OUTPUT(
+        ctx->addPluginV2(
+          new ResizeNearestPlugin(scale), 
+          {&inputs.at(0).tensor()}));
+  }
+  
+  if (mode == "linear"){
+    RETURN_FIRST_OUTPUT(
+        ctx->addPluginV2(
+          new ResizeBilinearPlugin(scale), 
+          {&inputs.at(0).tensor()}));
+  }
+
+  ASSERT(false, ErrorCode::kUNSUPPORTED_NODE);
 }
 
 } // namespace
