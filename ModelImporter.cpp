@@ -654,7 +654,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
     {
         cerr << "Failed to parse ONNX model from file: " << onnxModelFile << endl;
-        return EXIT_FAILURE;
+        return false;
     }
 
     // Keep track of the absolute path to the ONNX file.
