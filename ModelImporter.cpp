@@ -649,31 +649,29 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
 {
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     ::ONNX_NAMESPACE::ModelProto onnx_model;
+    auto* ctx = &_importer_ctx;
 
     const bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
     {
-        cerr << "Failed to parse ONNX model from file: " << onnxModelFile << endl;
+        LOG_ERROR("Failed to parse ONNX model from file: " << onnxModelFile);
         return false;
     }
 
     // Keep track of the absolute path to the ONNX file.
     _importer_ctx.setOnnxFileLocation(onnxModelFile);
 
-    if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kWARNING))
-    {
-        const int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
-        cout << "----------------------------------------------------------------" << endl;
-        cout << "Input filename:   " << onnxModelFile << endl;
-        cout << "ONNX IR version:  " << onnx_ir_version_string(onnx_model.ir_version()) << endl;
-        cout << "Opset version:    " << opset_version << endl;
-        cout << "Producer name:    " << onnx_model.producer_name() << endl;
-        cout << "Producer version: " << onnx_model.producer_version() << endl;
-        cout << "Domain:           " << onnx_model.domain() << endl;
-        cout << "Model version:    " << onnx_model.model_version() << endl;
-        cout << "Doc string:       " << onnx_model.doc_string() << endl;
-        cout << "----------------------------------------------------------------" << endl;
-    }
+    const int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
+    LOG_INFO("----------------------------------------------------------------");
+    LOG_INFO("Input filename:   " << onnxModelFile);
+    LOG_INFO("ONNX IR version:  " << onnx_ir_version_string(onnx_model.ir_version()));
+    LOG_INFO("Opset version:    " << opset_version);
+    LOG_INFO("Producer name:    " << onnx_model.producer_name());
+    LOG_INFO("Producer version: " << onnx_model.producer_version());
+    LOG_INFO("Domain:           " << onnx_model.domain());
+    LOG_INFO("Model version:    " << onnx_model.model_version());
+    LOG_INFO("Doc string:       " << onnx_model.doc_string());
+    LOG_INFO("----------------------------------------------------------------");
 
     { //...Read input file, parse it
         std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
@@ -682,7 +680,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
         std::vector<char> onnx_buf(file_size);
         if (!onnx_file.read(onnx_buf.data(), onnx_buf.size()))
         {
-            cerr << "ERROR: Failed to read from file: " << onnxModelFile << endl;
+            LOG_ERROR("Failed to read from file: " << onnxModelFile);
             return false;
         }
         if (!parse(onnx_buf.data(), onnx_buf.size()))
@@ -694,28 +692,15 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
                 if (error->node() != -1)
                 {
                     ::ONNX_NAMESPACE::NodeProto const& node = onnx_model.graph().node(error->node());
-                    cerr << "While parsing node number " << error->node() << " [" << node.op_type();
-                    if (node.output().size() && verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
-                    {
-                        cerr << " -> \"" << node.output(0) << "\"";
-                    }
-                    cerr << "]:" << endl;
-                    if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
-                    {
-                        cout << "--- Begin node ---" << endl;
-                        cout << node << endl;
-                        cout << "--- End node ---" << endl;
-                    }
+                    LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \"" << node.output(0) << "\"" << "]:");
+                    LOG_ERROR("--- Begin node ---");
+                    LOG_ERROR(pretty_print_onnx_to_string(node));
+                    LOG_ERROR("--- End node ---");
                 }
-                cerr << "ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"
-                     << "[" << static_cast<int>(error->code()) << "] " << error->desc() << endl;
+                LOG_ERROR("ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"
+                     << "[" << static_cast<int>(error->code()) << "] " << error->desc());
             }
             return false;
-        }
-
-        if (verbosity >= static_cast<int32_t>(nvinfer1::ILogger::Severity::kVERBOSE))
-        {
-            cout << " ----- Parsing of ONNX model " << onnxModelFile << " is Done ---- " << endl;
         }
     } //...End Reading input file, parsing it
     return true;
