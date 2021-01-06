@@ -39,7 +39,8 @@
     do                                                                                                                 \
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
-        ss << __FILENAME__ << ":" << __LINE__ << ": " << msg;                                                          \
+        if (severity <= nvinfer1::ILogger::Severity::kWARNING) ss << __FILENAME__ << ":" << __LINE__ << ": ";          \
+        ss << msg;                                                                                                     \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
 
