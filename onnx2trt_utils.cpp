@@ -1316,10 +1316,10 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
     relPathFile.seekg(offset, std::ios::beg);
     int weightsBufSize = length == 0 ? fileSize : length;
     weightsBuf.resize(weightsBufSize);
-    LOG_VERBOSE("Reading weights from external file: " << file);
+    LOG_VERBOSE("Reading weights from external file: " << path);
     if (!relPathFile.read(weightsBuf.data(), weightsBuf.size()))
     {
-        LOG_ERROR("Failed to read weights from external file: " << file);
+        LOG_ERROR("Failed to read weights from external file: " << path);
         return false;
     }
     size = weightsBuf.size();
