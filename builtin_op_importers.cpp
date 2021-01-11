@@ -354,11 +354,17 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
 DEFINE_BUILTIN_OP_IMPORTER(Concat)
 {
     std::vector<nvinfer1::ITensor*> tensors;
+    // Cast boolean inputs to INT32
+    bool isBool = false;
     for (auto& input : inputs)
     {
-        // TRT does not support BOOL input types for this node
-        ASSERT(!input.isBool(), ErrorCode::kUNSUPPORTED_NODE);
-        tensors.push_back(&convertToTensor(input, ctx));
+        auto* tensorPtr = &convertToTensor(input, ctx);
+        if (tensorPtr->getType() == nvinfer1::DataType::kBOOL)
+        {
+            tensorPtr = castHelper(ctx, tensorPtr, nvinfer1::DataType::kINT32);
+            isBool = true;
+        }
+        tensors.push_back(tensorPtr);
     }
     OnnxAttrs attrs(node, ctx);
     int axis = attrs.get<int>("axis");
@@ -368,6 +374,12 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat)
     ctx->registerLayer(layer, node.name());
     ASSERT(layer, ErrorCode::kUNSUPPORTED_NODE);
     layer->setAxis(axis);
+
+    if (isBool)
+    {
+        return {{castHelper(ctx, layer->getOutput(0), nvinfer1::DataType::kBOOL)}};
+    }
+
     RETURN_FIRST_OUTPUT(layer);
 }
 

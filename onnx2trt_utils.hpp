@@ -154,6 +154,9 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
 // Helper function to check that linear resize can be used
 bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
 
+// Helper function to add a Cast layer in the network
+nvinfer1::ITensor* castHelper(IImporterContext* ctx, nvinfer1::ITensor* input, nvinfer1::DataType dtype);
+
 // Helper function for constantOfShape operator. Input shape must be a shape tensor
 nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape);
 
