@@ -291,7 +291,8 @@ Status deserialize_onnx_model(int fd, bool is_serialized_as_text, ::ONNX_NAMESPA
 }
 
 bool ModelImporter::supportsModel(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size, SubGraphCollection_t& sub_graph_collection)
+    void const* serialized_onnx_model, size_t serialized_onnx_model_size, SubGraphCollection_t& sub_graph_collection,
+    const char* model_path)
 {
 
     ::ONNX_NAMESPACE::ModelProto model;
@@ -303,6 +304,11 @@ bool ModelImporter::supportsModel(
     {
         _errors.push_back(status);
         return false;
+    }
+
+    if (model_path)
+    {
+        _importer_ctx.setOnnxFileLocation(model_path);
     }
 
     bool allSupported{true};
@@ -455,8 +461,12 @@ bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model
     return true;
 }
 
-bool ModelImporter::parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size)
+bool ModelImporter::parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path)
 {
+    if (model_path)
+    {
+        _importer_ctx.setOnnxFileLocation(model_path);
+    }
     return this->parseWithWeightDescriptors(serialized_onnx_model, serialized_onnx_model_size, 0, nullptr);
 }
 

@@ -56,9 +56,9 @@ public:
     }
     bool parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         uint32_t weight_count, onnxTensorDescriptorV1 const* weight_descriptors) override;
-    bool parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size) override;
+    bool parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path = nullptr) override;
     bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        SubGraphCollection_t& sub_graph_collection) override;
+        SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) override;
 
     bool supportsOperator(const char* op_name) const override;
     void destroy() override
