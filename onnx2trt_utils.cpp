@@ -1325,6 +1325,10 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
     {
         path.replace(slash + 1, path.size() - (slash + 1), file);
     }
+    else
+    {
+        path = file;
+    }
     std::ifstream relPathFile(path, std::ios::binary | std::ios::ate);
     if (!relPathFile)
     {
