@@ -132,13 +132,14 @@ public:
      *         To obtain a better diagnostic, use the parseFromFile method below.
      *
      * \param serialized_onnx_model Pointer to the serialized ONNX model
-     * \param serialized_onnx_model_size Size of the serialized ONNX model
-     *        in bytes
+     * \param serialized_onnx_model_size Size of the serialized ONNX model in bytes
+     * \param model_path Absolute path to the model file for loading external weights if required
      * \return true if the model was parsed successfully
      * \see getNbErrors() getError()
      */
     virtual bool parse(void const* serialized_onnx_model,
-                       size_t serialized_onnx_model_size)
+                       size_t serialized_onnx_model_size,
+                       const char* model_path = nullptr)
         = 0;
 
     /** \brief Parse an onnx model file, can be a binary protobuf or a text onnx model
@@ -158,11 +159,13 @@ public:
      * \param serialized_onnx_model_size Size of the serialized ONNX model
      *        in bytes
      * \param sub_graph_collection Container to hold supported subgraphs
+     * \param model_path Absolute path to the model file for loading external weights if required
      * \return true if the model is supported
      */
     virtual bool supportsModel(void const* serialized_onnx_model,
                                size_t serialized_onnx_model_size,
-                               SubGraphCollection_t& sub_graph_collection)
+                               SubGraphCollection_t& sub_graph_collection,
+                               const char* model_path = nullptr)
         = 0;
 
     /** \brief Parse a serialized ONNX model into the TensorRT network
