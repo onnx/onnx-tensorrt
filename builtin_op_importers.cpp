@@ -1703,6 +1703,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     const ::ONNX_NAMESPACE::GraphProto& body = attrs.get<const ::ONNX_NAMESPACE::GraphProto&>("body");
 
     auto loop = ctx->network()->addLoop();
+    loop->setName(getNodeName(node).c_str());
     // Trip count and condition are optional inputs.
     nvinfer1::ITensor* tripLimit{nullptr};
     if (inputs[0])
@@ -1732,7 +1733,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
         ctx->loopTensors()[body.input(i).name()] = node.input(i);
         ctx->registerTensor(TensorOrWeights{stateVars.back()->getOutput(0)}, body.input(i).name());
     }
-    ctx->registerLayer(stateVars.at(0), node.name());
 
     // Loop body
     TRT_CHECK(onnx2trt::parseGraph(ctx, body));
