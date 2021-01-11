@@ -152,6 +152,13 @@ bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors)
     return true;
 }
 
+nvinfer1::ITensor* castHelper(IImporterContext* ctx, nvinfer1::ITensor* input, nvinfer1::DataType dtype)
+{
+    nvinfer1::IIdentityLayer* cast = ctx->network()->addIdentity(*input);
+    cast->setOutputType(0, dtype);
+    return cast->getOutput(0);
+}
+
 nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape)
 {
     int rank = shape->getDimensions().d[0];
