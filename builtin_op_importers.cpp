@@ -3734,7 +3734,7 @@ std::vector<nvinfer1::PluginField> loadFields(string_map<std::vector<uint8_t>>& 
             }
             fields.emplace_back(fieldName.c_str(), data, type, size);
     }
-    return std::move(fields);
+    return fields;
 }
 
 // Any ops that are not supported will attempt to import as plugins.
