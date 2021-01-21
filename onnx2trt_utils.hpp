@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -144,6 +144,10 @@ nvinfer1::ITensor* addClip(IImporterContext* ctx, nvinfer1::ITensor* input, floa
 // Helper function to import ArgMax and ArgMin nodes into TRT
 NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op);
+
+//! If t has rank less than nbDims, reshape it to have nbDims by prepending ones to its dimensions.
+//! Assert failure if t has rank greater than nbDims.
+Status broadcastTensor(IImporterContext* ctx, nvinfer1::ITensor*& t, const int nbDims);
 
 // Helper function to broadcast two tensors to the larger one's shape
 Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,6 +30,7 @@
 #include <NvInfer.h>
 #include <functional>
 #include <onnx/onnx_pb.h>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <fstream>
@@ -37,7 +38,7 @@
 
 using WeightsPair_t = std::pair<std::string, nvinfer1::WeightsRole>;
 
-using RefitMap_t = std::unordered_map<std::string, WeightsPair_t>;
+using RefitMap_t = std::multimap<std::string, WeightsPair_t>;
 
 namespace onnx2trt
 {

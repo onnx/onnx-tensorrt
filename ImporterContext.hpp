@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -102,7 +102,7 @@ public:
     }
     virtual void insertRefitMap(std::string weightsName, std::string layerName, nvinfer1::WeightsRole role) override
     {
-        (*mRefitMap)[weightsName] = WeightsPair_t{layerName, role};
+        mRefitMap->insert({weightsName, WeightsPair_t{layerName, role}});
     }
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
     virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) override
