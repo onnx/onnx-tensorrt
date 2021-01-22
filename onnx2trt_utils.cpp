@@ -1806,6 +1806,20 @@ int64_t volume(const nvinfer1::Dims& dims)
     return std::accumulate(dims.d, dims.d + dims.nbDims, 1, std::multiplies<int64_t>{});
 }
 
+bool validateInputs(std::vector<TensorOrWeights>& inputs)
+{
+    nvinfer1::DataType type = nvinfer1::DataType::kFLOAT;
+    bool valid = true;
+    for (auto& input : inputs)
+    {
+        if (input.is_weights())
+        {
+            valid = valid && convertDtype(input.weights().type, &type);
+        }
+    }
+    return valid;
+}
+
 Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector)
 {
     ASSERT(weights.is_weights(), ErrorCode::kUNSUPPORTED_NODE);

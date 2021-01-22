@@ -3073,6 +3073,7 @@ ShapeTensor computeSizes(IImporterContext* ctx, const ShapeTensor& starts, const
 
 DEFINE_BUILTIN_OP_IMPORTER(Slice)
 {
+    ASSERT(validateInputs(inputs), ErrorCode::kUNSUPPORTED_NODE);
     const int nbInputs = node.input().size();
     // "...it uses this information to slice the input data tensor."
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
