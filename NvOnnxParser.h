@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -132,7 +132,8 @@ public:
      *         To obtain a better diagnostic, use the parseFromFile method below.
      *
      * \param serialized_onnx_model Pointer to the serialized ONNX model
-     * \param serialized_onnx_model_size Size of the serialized ONNX model in bytes
+     * \param serialized_onnx_model_size Size of the serialized ONNX model
+     *        in bytes
      * \param model_path Absolute path to the model file for loading external weights if required
      * \return true if the model was parsed successfully
      * \see getNbErrors() getError()

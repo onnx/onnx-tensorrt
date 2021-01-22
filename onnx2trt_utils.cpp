@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -96,7 +96,7 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
 
 //! If t has rank less than nbDims, reshape it to have nbDims by prepending ones to its dimensions.
 //! Assert failure if t has rank greater than nbDims.
-static Status broadcastTensor(IImporterContext* ctx, nvinfer1::ITensor*& t, const int nbDims)
+Status broadcastTensor(IImporterContext* ctx, nvinfer1::ITensor*& t, const int nbDims)
 {
     ASSERT(ctx->getOpsetVersion() >= 7 && "Pre-opset 7 broadcasting is unsupported in this version of the ONNX parser", ErrorCode::kUNSUPPORTED_NODE);
     const auto inputDims = shapeOf(*t);
@@ -158,6 +158,7 @@ nvinfer1::ITensor* castHelper(IImporterContext* ctx, nvinfer1::ITensor* input, n
     cast->setOutputType(0, dtype);
     return cast->getOutput(0);
 }
+
 
 nvinfer1::ITensor* constantOfShape(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* constant, nvinfer1::ITensor* shape)
 {
@@ -669,7 +670,6 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
     std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op)
 {
     ASSERT(!inputs.empty(), ErrorCode::kINVALID_NODE);
-    ASSERT(elementwiseCheck(inputs, binary_op), ErrorCode::kUNSUPPORTED_NODE);
     std::vector<nvinfer1::ITensor*> inputTensors;
     int maxNbDims = -1;
     for (auto input : inputs)
@@ -687,6 +687,9 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
             ErrorCode::kUNSUPPORTED_NODE);
         inputTensors.push_back(tensor_ptr);
     }
+
+    ASSERT(elementwiseCheck(inputs, binary_op) && "Elementwise layer does not support the given inputs and operator.",
+        ErrorCode::kUNSUPPORTED_NODE);
 
     // Use the first tensor input as the base for the elementwise operation
     nvinfer1::ITensor* combined = inputTensors.at(0);

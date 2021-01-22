@@ -26,6 +26,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | BitShift              | N          |
 | Cast                  | Y          | Cast is only supported for TRT types                                                                                                   |
 | Ceil                  | Y          |
+| Celu                  | Y          |
 | Clip                  | Y          | min and max clip values must be an initializer                                                                                         |
 | Compress              | N          |
 | Concat                | Y          |
@@ -37,7 +38,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | ConvTranspose         | Y          | 2D or 3D deconvolutions only\. Weights must be an initializer                                                                          |
 | Cos                   | Y          |
 | Cosh                  | Y          |
-| CumSum                | N          |
+| CumSum                | Y          | Axis must be an initializer
 | DepthToSpace          | Y          |
 | DequantizeLinear      | Y          | Scales and zero\-point value must be initializers                                                                                      |
 | Det                   | N          |
@@ -56,9 +57,10 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | GatherND              | N          |
 | Gemm                  | Y          |
 | GlobalAveragePool     | Y          |
-| GlobalLpPool          | N          |
+| GlobalLpPool          | Y          |
 | GlobalMaxPool         | Y          |
 | Greater               | Y          |
+| GreaterOrEqual        | Y          |
 | GRU                   | Y          |
 | HardSigmoid           | Y          |
 | Hardmax               | N          |
@@ -70,13 +72,14 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | IsNaN                 | N          |
 | LeakyRelu             | Y          |
 | Less                  | Y          |
+| LessOrEqual           | Y          |
 | Log                   | Y          |
 | LogSoftmax            | Y          |
 | Loop                  | Y          |
 | LRN                   | Y          |
 | LSTM                  | Y          |
-| LpNormalization       | N          |
-| LpPool                | N          |
+| LpNormalization       | Y          |
+| LpPool                | Y          |
 | MatMul                | Y          |
 | MatMulInteger         | N          |
 | Max                   | Y          |

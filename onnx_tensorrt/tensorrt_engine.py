@@ -1,4 +1,4 @@
- # Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
+ # Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a
  # copy of this software and associated documentation files (the "Software"),
@@ -23,11 +23,7 @@ import pycuda.driver
 import pycuda.gpuarray
 import pycuda.autoinit
 import numpy as np
-from .config import Config
 from six import string_types
-
-
-_config = Config()
 
 class Binding(object):
     def __init__(self, engine, idx_or_name):
