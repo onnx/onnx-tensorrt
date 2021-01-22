@@ -304,6 +304,9 @@ NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::Node
 // Helper function to unsqueeze tensors on a given set of axes
 nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor, const std::vector<int>& axes, bool regLayer = false);
 
+// Helper function to validate inputs and receive type information
+bool validateInputs(std::vector<TensorOrWeights>& inputs);
+
 // Helper function to convert a ShapedWeights object into a vector
 Status weightsToVector(TensorOrWeights weights, std::vector<int64_t>* weightVector);
 
