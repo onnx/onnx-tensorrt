@@ -4,11 +4,13 @@ Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/te
 
 See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
 
-For the list of recent changes, see the [changelog](Changelog.md).
+For the list of recent changes, see the [changelog](docs/Changelog.md).
+
+For a list of commonly seen issues and questions, see the [FAQ](docs/faq.md).
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 7.2.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 7.2.2](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -33,15 +35,15 @@ For examples of usage of these APIs see:
 
 ## Supported Operators
 
-Current supported ONNX operators are found in the [operator support matrix](operators.md).
+Current supported ONNX operators are found in the [operator support matrix](docs/operators.md).
 
 # Installation
 
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 7.2.1](https://developer.nvidia.com/tensorrt)
- - [TensorRT 7.2.1 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 7.2.2](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 7.2.2 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -84,7 +86,7 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-7.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 7.2.1 supports ONNX release 1.6.0. Install it with:
+TensorRT 7.2.2 supports ONNX release 1.6.0. Install it with:
 
     python3 -m pip install onnx==1.6.0
 
