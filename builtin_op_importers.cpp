@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -304,6 +304,99 @@ DEFINE_BUILTIN_OP_IMPORTER(Ceil)
 {
     return unaryHelper(ctx, node, inputs.at(0), nvinfer1::UnaryOperation::kCEIL);
 }
+
+DEFINE_BUILTIN_OP_IMPORTER(Celu)
+{
+
+    using eOp = nvinfer1::ElementWiseOperation;
+    using uOp = nvinfer1::UnaryOperation;
+    using eOpInstuctor = std::tuple<int, int, const nvinfer1::ElementWiseOperation>;
+
+    ASSERT( (!inputs.empty()) && "Inputs vector is empty.", ErrorCode::kINVALID_NODE);
+    OnnxAttrs attrs(node, ctx);
+    TensorOrWeights input = inputs.at(0);
+    float alpha = attrs.get<float>("alpha", 1.0);
+
+    TensorOrWeights weightsOfZero = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0,{}});
+    ShapedWeights weightsOfOnes = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0,{}});
+    std::vector<float> ones{1};
+    std::memcpy(weightsOfOnes.values, ones.data(), weightsOfOnes.count() * sizeof(float));
+    ShapedWeights weightsOfAlpha = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0,{}});
+    std::vector<float> alphas{alpha};
+    std::memcpy(weightsOfAlpha.values, alphas.data(), weightsOfAlpha.count() * sizeof(float));
+
+    // Variable name -> index in inputTensors
+    // x -> 0
+    // 0 -> 1
+    // 1 -> 2
+    // alpha -> 3
+    std::vector<TensorOrWeights> newInputs {input, weightsOfZero, weightsOfOnes, weightsOfAlpha};
+
+    std::vector<nvinfer1::ITensor*> inputTensors;
+    int maxNbDims = -1;
+    for (auto input : newInputs)
+    {
+        maxNbDims = std::max(maxNbDims, input.shape().nbDims);
+    }
+
+    for (auto input : newInputs)
+    {
+        auto* tensor_ptr = &convertToTensor(input, ctx);
+
+        // Broadcast all input tensors to size of maxNbDims
+        broadcastTensor(ctx, tensor_ptr, maxNbDims);
+        ASSERT(tensor_ptr->getDimensions().nbDims == maxNbDims && "Failed to broadcast tensors elementwise!",
+            ErrorCode::kUNSUPPORTED_NODE);
+        inputTensors.push_back(tensor_ptr);
+    }
+
+    // Calculate (x/alpha)
+    std::vector<TensorOrWeights> tempInputs{newInputs[0], newInputs[3]};
+    ASSERT(elementwiseCheck(tempInputs, eOp::kDIV) && "Elementwise layer does not support the given inputs and operator.", ErrorCode::kUNSUPPORTED_NODE);
+    nvinfer1::ITensor* combined = inputTensors.at(0);
+    auto* layer = ctx->network()->addElementWise(*combined, *inputTensors.at(3), eOp::kDIV);
+    ctx->registerLayer(layer, getNodeName(node));
+    ASSERT(layer && "Failed to register layer.", ErrorCode::kUNSUPPORTED_NODE);
+    combined = layer->getOutput(0);
+
+    // Calculate exp(x/alpha) -> 4
+    nvinfer1::IUnaryLayer* uLayer = ctx->network()->addUnary(*combined, uOp::kEXP);
+    ctx->registerLayer(uLayer, getNodeName(node));
+    combined = uLayer->getOutput(0);
+    inputTensors.push_back(combined);
+
+
+    std::vector<eOpInstuctor> operations {
+        // max(0,x) -> 5
+        eOpInstuctor(0, 1, eOp::kMAX),
+        // (exp(x/alpha)-1)) -> 6
+        eOpInstuctor(4, 2, eOp::kSUB),
+        // alpha*(exp(x/alpha)-1) -> 7
+        eOpInstuctor(3, 6, eOp::kPOW),
+        // min(0,alpha*(exp(x/alpha)-1)) -> 8
+        eOpInstuctor(1, 7, eOp::kMIN),
+        // max(0,x) + min(0,alpha*(exp(x/alpha)-1)) -> 9
+        eOpInstuctor(5, 8, eOp::kSUM),
+    };
+
+
+
+    for (auto it : operations)
+    {
+        nvinfer1::ITensor* firstTensor = inputTensors.at(std::get<0>(it));
+        nvinfer1::ITensor* secondTensor = inputTensors.at(std::get<1>(it));
+        const eOp op = std::get<2>(it);
+        tempInputs = {firstTensor, secondTensor};
+        ASSERT( (elementwiseCheck(tempInputs, op)) && "Elementwise layer does not support the given inputs and operator.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT( (firstTensor->getDimensions().nbDims == secondTensor->getDimensions().nbDims) && "The number of dimensions should remain the same adding inputs.", ErrorCode::kUNSUPPORTED_NODE);
+        auto* layer = ctx->network()->addElementWise(*firstTensor, *secondTensor, op);
+        ctx->registerLayer(layer, getNodeName(node));
+        ASSERT(layer && "Failed to register layer.", ErrorCode::kUNSUPPORTED_NODE);
+        inputTensors.push_back(layer->getOutput(0));
+    }
+    return {{inputTensors.back()}};
+}
+
 
 DEFINE_BUILTIN_OP_IMPORTER(Clip)
 {
@@ -743,6 +836,82 @@ DEFINE_BUILTIN_OP_IMPORTER(Cos)
 DEFINE_BUILTIN_OP_IMPORTER(Cosh)
 {
     return unaryHelper(ctx, node, inputs.at(0), nvinfer1::UnaryOperation::kCOSH);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(CumSum)
+{
+    OnnxAttrs attrs(node, ctx);
+    const int32_t exclusive = attrs.get<int32_t>("exclusive", 0);
+    const int32_t reverse = attrs.get<int32_t>("reverse", 0);
+
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    auto dims = input->getDimensions();
+
+    ASSERT(inputs.at(1).is_weights() && "Axis input for CumSum must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
+    ShapedWeights axisWeights = inputs.at(1).weights();
+    int32_t axis = static_cast<int32_t*>(axisWeights.values)[0];
+    TRT_CHECK(convertAxis(axis, dims.nbDims));
+
+    /* For exclusive CumSums, it is equivalent as a non-exclusive CumSum on a modified input tensor
+
+        Forward summations:
+            concat(0, data[0:length-1:1])
+
+        Reverse summations:
+            concat(data[1:length:1], 0)
+
+    */
+    if (exclusive)
+    {
+        auto tempDims = dims;
+        tempDims.d[axis] = 1;
+        auto zero = addConstant(ctx, std::vector<float>{0.f}, ::ONNX_NAMESPACE::TensorProto::FLOAT, tempDims)->getOutput(0);
+
+        std::vector<nvinfer1::ITensor*> concatTensors = reverse == 1 ? std::vector<nvinfer1::ITensor*>{input, zero} : std::vector<nvinfer1::ITensor*>{zero, input};
+
+        auto concat = ctx->network()->addConcatenation(concatTensors.data(), concatTensors.size());
+        concat->setAxis(axis);
+        input = concat->getOutput(0);
+
+        if (reverse == 0)
+        {
+            const ShapeTensor subscripts{axesToInterlaceSubscripts(shapeVector(axis), dims.nbDims)};
+            ShapeTensor starts = fillShapeVector(ctx, 0, shapeVector(dims.nbDims));
+            ShapeTensor sizes = interlace(ctx, shapeOf(*input), sub(ctx, gather(ctx, shapeOf(*input), shapeVector(axis)), shapeVector(1)), subscripts);
+            ShapeTensor strides = fillShapeVector(ctx, 1, shapeVector(dims.nbDims));
+            input = addSlice(ctx, *input, starts, sizes, strides)->getOutput(0);
+        }
+        else
+        {
+            const ShapeTensor subscripts{axesToInterlaceSubscripts(shapeVector(axis), dims.nbDims)};
+            ShapeTensor starts = interlace(ctx, fillShapeVector(ctx, 0, shapeVector(dims.nbDims)), shapeVector(1), subscripts);
+            ShapeTensor sizes = interlace(ctx, shapeOf(*input), sub(ctx, gather(ctx, shapeOf(*input), shapeVector(axis)), shapeVector(1)), subscripts);
+            ShapeTensor strides = fillShapeVector(ctx, 1, shapeVector(dims.nbDims));
+            input = addSlice(ctx, *input, starts, sizes, strides)->getOutput(0);
+        }
+    }
+
+    // Scan through each slice across summation axis and add it to the running sum
+    auto loop = ctx->network()->addLoop();
+    nvinfer1::ITensor* tripLimit = getAxisLength(ctx, input, axis);
+    loop->addTripLimit(*tripLimit, nvinfer1::TripLimit::kCOUNT);
+
+    auto iterator = loop->addIterator(*input, axis, reverse);
+    auto data = iterator->getOutput(0);
+    auto newDims = data->getDimensions();
+
+    auto zeroTensor = addConstant(ctx, std::vector<float>(volume(newDims),0.f), ::ONNX_NAMESPACE::TensorProto::FLOAT, newDims)->getOutput(0);
+    auto runningSum = loop->addRecurrence(*zeroTensor);
+    auto runningSumTensor = runningSum->getOutput(0);
+
+    auto curSum = ctx->network()->addElementWise(*data, *runningSumTensor, nvinfer1::ElementWiseOperation::kSUM);
+    runningSum->setInput(1, *curSum->getOutput(0));
+
+    auto reverseFlag = reverse == 1 ? nvinfer1::LoopOutput::kREVERSE : nvinfer1::LoopOutput::kCONCATENATE;
+    nvinfer1::ILoopOutputLayer* loopOut = loop->addLoopOutput(*curSum->getOutput(0), reverseFlag, axis);
+    loopOut->setInput(1, *tripLimit);
+
+    RETURN_FIRST_OUTPUT(loopOut);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
@@ -1185,6 +1354,14 @@ DEFINE_BUILTIN_OP_IMPORTER(GlobalMaxPool)
 DEFINE_BUILTIN_OP_IMPORTER(Greater)
 {
     return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kGREATER);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(GreaterOrEqual)
+{
+    TensorOrWeights greaterResult = &elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kGREATER).value().at(0).tensor();
+    TensorOrWeights equalResult   = &elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kEQUAL).value().at(0).tensor();
+    std::vector<TensorOrWeights> newInputs {greaterResult, equalResult};
+    return elementwiseHelper(ctx, node, newInputs, nvinfer1::ElementWiseOperation::kOR);
 }
 
 // singlePassShape is the shape of the output from a single pass.
@@ -1666,6 +1843,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Less)
     return elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kLESS);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(LessOrEqual)
+{
+    TensorOrWeights lessResult = elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kLESS).value().at(0);
+    TensorOrWeights equalResult = elementwiseHelper(ctx, node, inputs, nvinfer1::ElementWiseOperation::kEQUAL).value().at(0);
+    std::vector<TensorOrWeights> newInputs {lessResult, equalResult};
+    return elementwiseHelper(ctx, node, newInputs, nvinfer1::ElementWiseOperation::kOR);
+}
+
+
 DEFINE_BUILTIN_OP_IMPORTER(Log)
 {
     return unaryHelper(ctx, node, inputs.at(0), nvinfer1::UnaryOperation::kLOG);
@@ -1855,6 +2041,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].
     // So reshape such that we can perform a reduction to add Wb and Rb.
     nvinfer1::ITensor* combinedBias{nullptr};
+
     if (inputs.size() > 3 && inputs.at(3))
     {
         nvinfer1::ITensor* bias = &convertToTensor(inputs.at(3), ctx);
@@ -2087,6 +2274,149 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     outputs.emplace_back(loop->addLoopOutput(*Ct1->getOutput(0), nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0));
 
     return {{outputs}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(LpNormalization)
+{
+    using eOp = nvinfer1::ElementWiseOperation;
+    using uOp = nvinfer1::UnaryOperation;
+    using rOp = nvinfer1::ReduceOperation;
+
+    OnnxAttrs attrs(node, ctx);
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    int axis = attrs.get<int>("axis", -1);
+    int p = attrs.get<int>("p", 2);
+    int nbDims = input->getDimensions().nbDims;
+    nvinfer1::DataType dt = input->getType();
+    ASSERT((dt != nvinfer1::DataType::kBOOL
+            && dt !=  nvinfer1::DataType::kINT8
+            && dt !=  nvinfer1::DataType::kINT32) && "Only float inputs/outputs supported in LpNormalization.", ErrorCode::kINVALID_NODE);
+
+    TRT_CHECK(convertAxis(axis, nbDims));
+
+    ASSERT((p == 1 || p == 2) && "Only L1 and L2 normalization are supported.", ErrorCode::kINVALID_NODE);
+    nvinfer1::ITensor* norm;
+    TensorOrWeights zeros = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0,{}});
+    nvinfer1::ITensor* zerosTensor = &convertToTensor(zeros, ctx);
+    broadcastTensor(ctx, zerosTensor, nbDims);
+
+    if (p == 1) {
+        // abs(x)
+        nvinfer1::IUnaryLayer* absLayer = ctx->network()->addUnary(*input, uOp::kABS);
+        ctx->registerLayer(absLayer, getNodeName(node));
+        norm = absLayer->getOutput(0);
+
+        // norm coeff = sum(abs(x)) along axis dimension
+        nvinfer1::IReduceLayer* reduceLayer = ctx->network()->addReduce(*norm, rOp::kSUM, 1 << axis, true);
+        ctx->registerLayer(reduceLayer, getNodeName(node));
+        norm = reduceLayer->getOutput(0);
+
+    } else if (p == 2) {
+        // x^2
+        auto* sqrLayer = ctx->network()->addElementWise(*input, *input, eOp::kPROD);
+        ctx->registerLayer(sqrLayer, getNodeName(node));
+        norm = sqrLayer->getOutput(0);
+
+        // sum(x^2) along axis dimension
+        nvinfer1::IReduceLayer* reduceLayer = ctx->network()->addReduce(*norm, rOp::kSUM, 1 << axis, true);
+        ctx->registerLayer(reduceLayer, getNodeName(node));
+        norm = reduceLayer->getOutput(0);
+
+        // norm coeff = sqrt(sum(x^2))
+        nvinfer1::IUnaryLayer* sqrtLayer = ctx->network()->addUnary(*norm, uOp::kSQRT);
+        ctx->registerLayer(sqrtLayer, getNodeName(node));
+        norm = sqrtLayer->getOutput(0);
+    }
+
+    // norm coeff |= 1 (change 0s to 1s, leave all other values same)
+    nvinfer1::IElementWiseLayer* maskLayer = ctx->network()->addElementWise(*norm, *zerosTensor, eOp::kEQUAL);
+    ctx->registerLayer(maskLayer, getNodeName(node));
+    nvinfer1::ITensor* mask = maskLayer->getOutput(0);
+    mask = castHelper(ctx, mask, dt);
+    auto* combinedLayer = ctx->network()->addElementWise(*norm, *mask, eOp::kSUM);
+    ctx->registerLayer(combinedLayer, getNodeName(node));
+    norm = combinedLayer->getOutput(0);
+
+    // x/(norm coeff)
+    // norm tensor is broadcast along axis dimension to match shape of input
+    auto *layer = ctx->network()->addElementWise(
+        *input, *norm, eOp::kDIV);
+    ctx->registerLayer(layer, getNodeName(node));
+    ASSERT(layer && "Failed to register layer.", ErrorCode::kUNSUPPORTED_NODE);
+
+    RETURN_FIRST_OUTPUT(layer);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(LpPool)
+{
+    using eOp = nvinfer1::ElementWiseOperation;
+    using uOp = nvinfer1::UnaryOperation;
+    using pType = nvinfer1::PoolingType;
+
+    OnnxAttrs attrs(node, ctx);
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    int p = attrs.get<int>("p", 2);
+    int nbDims = input->getDimensions().nbDims;
+    int nbSpatialDims = attrs.get<nvinfer1::Dims>("kernel_shape").nbDims;
+
+    nvinfer1::DataType dt = input->getType();
+    ASSERT((dt != nvinfer1::DataType::kBOOL && dt != nvinfer1::DataType::kINT8 && dt != nvinfer1::DataType::kINT32)
+            && "Only float inputs/outputs supported in LpPool.",
+        ErrorCode::kINVALID_NODE);
+    ASSERT((p == 1 || p == 2) && "Only L1 and L2 normalization are supported.", ErrorCode::kINVALID_NODE);
+
+    nvinfer1::Dims kernelShape = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
+    nvinfer1::Dims begPadding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims endPadding = makeDims(nbSpatialDims, 0);
+    nvinfer1::PaddingMode paddingMode;
+    bool exclude_padding(false);
+    getKernelParams(ctx, node, &kernelShape, &strides, &begPadding, &endPadding, paddingMode, exclude_padding);
+
+    nvinfer1::Dims scalarDims = makeDims(nbDims, 1);
+    float kernelSz{1.0f};
+    for (int i = 0; i < kernelShape.nbDims; i++) {
+        kernelSz *= kernelShape.d[i];
+    }
+    nvinfer1::ITensor* kernelSzTensor
+        = addConstantScalar(ctx, kernelSz, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarDims)->getOutput(0);
+
+    nvinfer1::ITensor* output;
+    if (p == 1) {
+        // x' = abs(x)
+        nvinfer1::IUnaryLayer* absLayer = ctx->network()->addUnary(*input, uOp::kABS);
+        ctx->registerLayer(absLayer, getNodeName(node));
+        output = absLayer->getOutput(0);
+    } else if (p == 2) {
+        // x' = x^2
+        auto* sqrLayer = ctx->network()->addElementWise(*input, *input, eOp::kPROD);
+        ctx->registerLayer(sqrLayer, getNodeName(node));
+        output = sqrLayer->getOutput(0);
+    }
+
+    // pool_avg(x')
+    nvinfer1::IPoolingLayer* poolLayer = ctx->network()->addPoolingNd(*output, pType::kAVERAGE, kernelShape);
+    poolLayer->setPaddingMode(paddingMode);
+    poolLayer->setPrePadding(begPadding);
+    poolLayer->setPostPadding(endPadding);
+    poolLayer->setStrideNd(strides);
+    poolLayer->setAverageCountExcludesPadding(exclude_padding);
+    ctx->registerLayer(poolLayer, getNodeName(node));
+    output = poolLayer->getOutput(0);
+
+    // pool_sum = pool_avg(x')*kernel_size
+    auto* correctedSumLayer = ctx->network()->addElementWise(*output, *kernelSzTensor, eOp::kPROD);
+    ctx->registerLayer(correctedSumLayer, getNodeName(node));
+    output = correctedSumLayer->getOutput(0);
+
+    // if p == 1, output = pool_sum
+    // if p == 2, output = sqrt(pool_sum)
+    if (p == 2) {
+        nvinfer1::IUnaryLayer* sqrtLayer = ctx->network()->addUnary(*output, uOp::kSQRT);
+        ctx->registerLayer(sqrtLayer, getNodeName(node));
+        output = sqrtLayer->getOutput(0);
+    }
+    return {{output}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(MatMul)
@@ -3666,14 +3996,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Where)
     RETURN_FIRST_OUTPUT(layer);
 }
 
-// Copies the given field into the fieldData map, returns data and size of the vector into which the data were copied.
+// Copies the given field into the fieldData map, returns data and number of T elements in the vector in which the data was copied into.
 template <typename T>
 std::tuple<const void*, size_t> copyField(const T& field, const std::string& fieldName, string_map<std::vector<uint8_t>>& fieldData)
 {
     constexpr size_t nbBytes{sizeof(T)};
     fieldData[fieldName].resize(nbBytes);
     std::memcpy(fieldData[fieldName].data(), &field, nbBytes);
-    return std::make_tuple(fieldData[fieldName].data(), fieldData[fieldName].size());
+    return std::make_tuple(fieldData[fieldName].data(), fieldData[fieldName].size() / nbBytes);
 }
 
 template <typename T>
@@ -3682,7 +4012,7 @@ std::tuple<const void*, size_t> copyField(const std::vector<T>& repeatedField, c
     const size_t nbBytes{sizeof(T) * repeatedField.size()};
     fieldData[fieldName].resize(nbBytes);
     std::memcpy(fieldData[fieldName].data(), repeatedField.data(), nbBytes);
-    return std::make_tuple(fieldData[fieldName].data(), fieldData[fieldName].size());
+    return std::make_tuple(fieldData[fieldName].data(), fieldData[fieldName].size() / sizeof(T));
 }
 
 std::tuple<const void*, size_t> copyField(const std::string& field, const std::string& fieldName, string_map<std::vector<uint8_t>>& fieldData)
@@ -3706,7 +4036,7 @@ std::tuple<const void*, size_t> copyField(
     const ShapedWeights& field, const std::string& fieldName, string_map<std::vector<uint8_t>>& fieldData)
 {
     // Weights do not require a copy
-    return std::make_tuple(field.values, field.size_bytes());
+    return std::make_tuple(field.values, field.count());
 }
 
 // Load plugin fields from an ONNX node, using fieldData for temporary allocations.
@@ -3719,39 +4049,38 @@ std::vector<nvinfer1::PluginField> loadFields(string_map<std::vector<uint8_t>>& 
         // Name must be retrieved from the map so that it is alive for long enough.
         const std::string& fieldName = fieldData.emplace(fieldNames->fields[i].name, std::vector<uint8_t>{}).first->first;
         const void* data{nullptr};
-        int32_t size{0};
+        int32_t length{0};
         nvinfer1::PluginFieldType type{};
         switch (attrs.type(fieldName))
         {
             case ::ONNX_NAMESPACE::AttributeProto::FLOAT:
-                std::tie(data, size) = copyField(attrs.get<float>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<float>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kFLOAT32;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::INT:
-                std::tie(data, size) = copyField(attrs.get<int>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<int>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kINT32;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::STRING:
-                std::tie(data, size) = copyField(attrs.get<std::string>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<std::string>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kCHAR;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::FLOATS:
-                std::tie(data, size) = copyField(attrs.get<std::vector<float>>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<std::vector<float>>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kFLOAT32;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::INTS:
-                std::tie(data, size) = copyField(attrs.get<std::vector<int>>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<std::vector<int>>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kINT32;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::STRINGS:
-                std::tie(data, size) = copyField(attrs.get<std::vector<std::string>>(fieldName), fieldName, fieldData);
+                std::tie(data, length) = copyField(attrs.get<std::vector<std::string>>(fieldName), fieldName, fieldData);
                 type = nvinfer1::PluginFieldType::kCHAR;
                 break;
             case ::ONNX_NAMESPACE::AttributeProto::TENSOR:
             {
                 ShapedWeights tensor{attrs.get<ShapedWeights>(fieldName)};
-                std::tie(data, size) = copyField(tensor, fieldName, fieldData);
-                size /= getDtypeSize(tensor.type); // size is in bytes
+                std::tie(data, length) = copyField(tensor, fieldName, fieldData);
                 switch (tensor.type)
                 {
                 case ::ONNX_NAMESPACE::TensorProto::FLOAT: type = nvinfer1::PluginFieldType::kFLOAT32; break;
@@ -3789,7 +4118,7 @@ std::vector<nvinfer1::PluginField> loadFields(string_map<std::vector<uint8_t>>& 
                         + " are unsupported",
                     ErrorCode::kUNSUPPORTED_NODE);
             }
-            fields.emplace_back(fieldName.c_str(), data, type, size);
+            fields.emplace_back(fieldName.c_str(), data, type, length);
     }
     return fields;
 }
