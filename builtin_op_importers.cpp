@@ -1908,12 +1908,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     {
         tripLimit = convertToScalar(ctx, &convertToTensor(inputs[0], ctx));
         ASSERT(tripLimit, ErrorCode::kINVALID_NODE);
-        ctx->loopTensors()[body.input(0).name() + " tripLimit"] = node.input(0);
+        ctx->loopTensors()[body.input(0).name()] = node.input(0);
         loop->addTripLimit(*tripLimit, nvinfer1::TripLimit::kCOUNT);
         // First graph input is iteration_num, so create a loop counter
         auto counter = addLoopCounter(ctx, loop, 0);
         ctx->registerTensor(counter, body.input(0).name());
-        ctx->registerTensor(tripLimit, body.input(0).name() + " tripLimit");
     }
     if (inputs[1])
     {
