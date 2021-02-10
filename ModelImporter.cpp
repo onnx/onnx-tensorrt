@@ -497,9 +497,9 @@ void removeShapeTensorCasts(IImporterContext* ctx)
             auto reduceOp = type == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
             if (!supportsShapeTensor(type, elementwiseOp, reduceOp))
             {
-                auto name = layer->getOutput(0)->getName();
+                auto name = layer->getName();
                 ctx->unsupportedShapeTensors().insert(name);
-                LOG_ERROR("Found " << name << " as a shape tensor output from a layer that does not support it!");
+                LOG_ERROR("Found unsupported shape tensor producing layer: " << name);
             }
         }
     }
