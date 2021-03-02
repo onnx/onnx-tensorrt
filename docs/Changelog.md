@@ -3,6 +3,7 @@
 ## 21.03 Container Release - 2021-03-01
 ### Added
 - Added opset13 support for `SoftMax`, `LogSoftmax`, `Squeeze`, and `Unsqueeze`
+- Added support for the `EyeLike` operator
 
 ### Fixes
 ### Removed

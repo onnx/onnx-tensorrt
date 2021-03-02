@@ -51,7 +51,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | Erf                       | Y          |
 | Exp                       | Y          |
 | Expand                    | Y          |
-| EyeLike                   | N          |
+| EyeLike                   | Y          |
 | Flatten                   | Y          |
 | Floor                     | Y          |
 | Gather                    | Y          |

@@ -1119,6 +1119,54 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand)
     RETURN_FIRST_OUTPUT(sliceLayer);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(EyeLike)
+{
+    // Get input node.
+    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
+    OnnxAttrs attrs(node, ctx);
+    int k = attrs.get("k", 0);
+
+    // "Only 2D tensors are supported, i.e. input T1 must be of rank 2..."
+    nvinfer1::Dims dims = tensor.getDimensions();
+    ASSERT(dims.nbDims == 2 && "Only 2D tensors are supported. Input must be of rank 2.", ErrorCode::kUNSUPPORTED_NODE);
+
+    // The data type can be specified by the 'dtype' argument
+    nvinfer1::DataType dtype = tensor.getType();
+    if (attrs.count("dtype"))
+    {
+        auto onnxType = attrs.get<int32_t>("dtype");
+        ASSERT(convertDtype(onnxType, &dtype) && "Unsupported cast!", ErrorCode::kINVALID_NODE);
+        LOG_VERBOSE("Casting to type: " << dtype);
+    }
+
+    // Create weights and constant layer
+    ASSERT(!isDynamic(dims) && "Eyelike does not work for dynamically shaped tensors.", ErrorCode::kUNSUPPORTED_NODE);
+    int totalWeights = dims.d[0]*dims.d[1];
+    std::vector<int> values(totalWeights);
+    for (int r = 0; r < dims.d[0]; ++r)
+    {
+        for (int c = 0; c < dims.d[1]; ++c)
+        {
+            values[r*dims.d[1] + c] = 0;
+            if (c - r == k)
+            {
+                values[r*dims.d[1] + c] = 1;
+            }
+        }
+    }
+
+    ShapedWeights tempWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, dims);
+    std::memcpy(tempWeights.values, values.data(), values.size() * sizeof(int));
+    auto* layer = ctx->network()->addConstant(dims, tempWeights);
+    layer->setOutputType(0, nvinfer1::DataType::kINT32);
+    ctx->registerLayer(layer, node.name());
+    
+    if (dtype != nvinfer1::DataType::kINT32) {
+        return {{castHelper(ctx, layer->getOutput(0), dtype)}};
+    }
+    return {{layer->getOutput(0)}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Flatten)
 {
     OnnxAttrs attrs(node, ctx);
