@@ -55,7 +55,7 @@ TensorRT supports the following ONNX data types: FLOAT32, FLOAT16, INT8, and BOO
 | Flatten                   | Y          |
 | Floor                     | Y          |
 | Gather                    | Y          |
-| GatherElements            | N          |
+| GatherElements            | Y          | Only positive indices (>=0) are supported
 | GatherND                  | N          |
 | Gemm                      | Y          |
 | GlobalAveragePool         | Y          |

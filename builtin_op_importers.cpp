@@ -1204,6 +1204,92 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     RETURN_FIRST_OUTPUT(layer);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
+{
+    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& index = convertToTensor(inputs.at(1), ctx);
+
+    const nvinfer1::Dims& idxDims = index.getDimensions();
+    const nvinfer1::Dims& dataDims = data.getDimensions();
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t axis = attrs.get<int32_t>("axis", 0);
+    int32_t dataNbDims = dataDims.nbDims;
+
+    TRT_CHECK(convertAxis(axis, dataNbDims));
+    LOG_VERBOSE("Using Gather axis: " << axis);
+
+    // Calculate how many indices
+    int64_t nIndx = volume(idxDims);
+
+    // Calculate pitches of input tensor
+    int32_t nDataElements = volume(dataDims), pitch = 1;
+    int32_t pitches[nvinfer1::Dims::MAX_DIMS] = {0};
+    pitches[dataDims.nbDims-1] = pitch;
+    for (int32_t i = dataDims.nbDims-2; i >= 0 ; i--)
+    {
+        pitch *= dataDims.d[i];
+        pitches[i] = pitch;
+    }
+
+    // Generate constants based on axis
+    std::vector<int32_t> sCoeff(nIndx, pitches[axis]);
+    std::vector<int32_t> aCoeff;
+
+    // Transform a 1-d index back to the nDims
+    for (int32_t i = 0; i < nIndx; i++)
+    {
+        std::vector<int32_t> nDimsIdx; //this can be an array
+        int32_t currI = i;
+
+        for (int32_t j = 0; j < dataDims.nbDims; j++)
+        {
+            int32_t currIdxVal = currI / pitches[j];
+            nDimsIdx.push_back(currIdxVal);
+            currI = currI % pitches[j];
+        }
+
+        int32_t bias = 0;
+        //calculate the aCoeff
+        for (size_t j = 0; j < nDimsIdx.size(); j++)
+        {
+
+            if (j == (size_t)axis)
+            {
+                continue;
+            }
+            bias += nDimsIdx[j] * pitches[j];
+        }
+        aCoeff.push_back(bias);
+    }
+
+    auto* sCoeffLayer = addConstant(ctx, sCoeff, ::ONNX_NAMESPACE::TensorProto::INT32, idxDims);
+    auto* aCoeffLayer = addConstant(ctx, aCoeff, ::ONNX_NAMESPACE::TensorProto::INT32, idxDims);
+
+    nvinfer1::ITensor* sCoeffTensor = sCoeffLayer->getOutput(0);
+    nvinfer1::ITensor* aCoeffTensor = aCoeffLayer->getOutput(0);
+    auto* mul = ctx->network()->addElementWise(index, *sCoeffTensor, nvinfer1::ElementWiseOperation::kPROD);
+
+    nvinfer1::ITensor* mulTensor = mul->getOutput(0);
+    auto* add = ctx->network()->addElementWise(*mulTensor, *aCoeffTensor, nvinfer1::ElementWiseOperation::kSUM);
+
+    nvinfer1::ITensor* addTensor = add->getOutput(0);
+
+    nvinfer1::Dims flattenDataDims{1};
+
+    flattenDataDims.nbDims = 1;
+    flattenDataDims.d[0] = nDataElements;
+    auto* reshape = ctx->network()->addShuffle(data);
+    reshape->setReshapeDimensions(flattenDataDims);
+    reshape->setZeroIsPlaceholder(false);
+
+    nvinfer1::ITensor* flattenData = reshape->getOutput(0);
+    auto* layer = ctx->network()->addGather(*flattenData, *addTensor, 0);
+    ctx->registerLayer(layer, getNodeName(node));
+    RETURN_FIRST_OUTPUT(layer);
+}
+
+
 DEFINE_BUILTIN_OP_IMPORTER(Gemm)
 {
     OnnxAttrs attrs(node, ctx);

@@ -4,6 +4,7 @@
 ### Added
 - Added opset13 support for `SoftMax`, `LogSoftmax`, `Squeeze`, and `Unsqueeze`
 - Added support for the `EyeLike` operator
+- Added support for the `GatherElements` operator
 
 ### Fixes
 ### Removed
