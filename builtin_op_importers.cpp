@@ -1859,30 +1859,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Log)
 
 DEFINE_BUILTIN_OP_IMPORTER(LogSoftmax)
 {
+    auto& input = convertToTensor(inputs.at(0), ctx);
     // Don't use softmax converter since it adds a shuffle layer
     // which prevents the builder to fuse softmax and log operations.
-
-    OnnxAttrs attrs(node, ctx);
-    // "input : T"
-    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
-    const auto dims = shapeOf(input);
-    // "axis : int (default is 1)"
-    int axis = attrs.get("axis", 1);
-
-    // "Negative value means counting dimensions from the back.
-    // Accepted range is [-r, r-1] where r = rank(input)."
-    TRT_CHECK(convertAxis(axis, dims.size()));
-
-    // "The input does not need to explicitly be a 2D vector; rather, it will be coerced into one."
-    auto* flattened = flattenTensor(ctx, node, input, axis);
-    auto* softMax = ctx->network()->addSoftMax(*flattened);
-    ctx->registerLayer(softMax, node.name());
-    // ONNX softmax is always on second dimension.
-    softMax->setAxes(1 << 1);
-
+    auto* softmax = addSoftmax(ctx, node, input);
+    nvinfer1::IUnaryLayer* unaryLayer = ctx->network()->addUnary(*softmax, nvinfer1::UnaryOperation::kLOG);
     // Reshape back to original shape
-    nvinfer1::IUnaryLayer* unaryLayer = ctx->network()->addUnary(*softMax->getOutput(0), nvinfer1::UnaryOperation::kLOG);
-    auto *reshapeLayer = addShuffle(ctx, *unaryLayer->getOutput(0), dims);
+    auto* reshapeLayer = addShuffle(ctx, *unaryLayer->getOutput(0), shapeOf(input));
     RETURN_FIRST_OUTPUT(reshapeLayer);
 }
 
@@ -3573,27 +3556,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
 
 DEFINE_BUILTIN_OP_IMPORTER(Softmax)
 {
-    OnnxAttrs attrs(node, ctx);
-    // "input : T"
-    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
-    const auto dims = shapeOf(input);
-
-    // "axis : int (default is 1)"
-    int axis = attrs.get("axis", 1);
-
-    // "Negative value means counting dimensions from the back.
-    // Accepted range is [-r, r-1] where r = rank(input)."
-    TRT_CHECK(convertAxis(axis, dims.size()));
-
-    // "The input does not need to explicitly be a 2D vector; rather, it will be coerced into one."
-    auto* flattened = flattenTensor(ctx, node, input, axis);
-    auto* softMax = ctx->network()->addSoftMax(*flattened);
-    ctx->registerLayer(softMax, node.name());
-    // ONNX softmax is always on second dimension.
-    softMax->setAxes(1 << 1);
-
+    auto& input = convertToTensor(inputs.at(0), ctx);
+    auto* softmax = addSoftmax(ctx, node, input);
     // Reshape back to original shape
-    auto* reshapeLayer = addShuffle(ctx, *softMax->getOutput(0), dims);
+    auto* reshapeLayer = addShuffle(ctx, *softmax, shapeOf(input));
     RETURN_FIRST_OUTPUT(reshapeLayer);
 }
 
@@ -3684,11 +3650,26 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
     std::vector<int> splitList;
     ShapeTensor sizes;
     ShapeTensor sizeSliceAxis;
-    const bool hasSplitList = attrs.count("split");
+    const bool hasSplitList = (ctx->getOpsetVersion() >= 13) ? (inputs.size() == 2) : attrs.count("split");
     if (hasSplitList)
     {
         // "Lengths of the parts can be specified using argument split."
-        splitList = attrs.get<std::vector<int>>("split");
+        // In opset >= 13, split lengths are an optional input
+        if (ctx->getOpsetVersion() >= 13)
+        {
+            ASSERT(inputs.at(1).is_weights() && "Split input 'split', if specified, must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
+            auto splitWeights = inputs.at(1).weights();
+            int32_t* splitValues = static_cast<int32_t*>(splitWeights.values);
+            for (size_t i = 0; i < splitWeights.count(); i++)
+            {
+                splitList.push_back(splitValues[i]);
+            }
+        }
+        // Pre-opset 13 split lengths are provided as an attribute
+        else
+        {
+            splitList = attrs.get<std::vector<int>>("split");
+        }
         ASSERT(static_cast<int>(splitList.size()) == numOutputs, ErrorCode::kINVALID_NODE);
     }
     else
@@ -3737,9 +3718,45 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
     // "data : T
     // Tensor with at least max(dims) dimensions."
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    std::vector<int> axes;
+    // In opset >= 13, axes are an optional input
+    if (ctx->getOpsetVersion() >= 13)
+    {
+        if (inputs.size() == 2)
+        {
+            ASSERT(inputs.at(1).is_weights() && "Squeeze axes input must an initializer!", ErrorCode::kUNSUPPORTED_NODE);
+            // Map weights value to axes
+            auto axesWeights = inputs.at(1).weights();
+            int32_t* axesValues = static_cast<int32_t*>(axesWeights.values);
+            for (size_t i = 0; i < axesWeights.count(); i++)
+            {
+                axes.push_back(axesValues[i]);
+            }
+        }
+    }
+    // Pre-opset 13 axes are provided as an attribute
+    else
+    {
+        OnnxAttrs attrs(node, ctx);
+        if (attrs.count("axes"))
+        {
+            axes = attrs.get<std::vector<int>>("axes");
+        }
+    }
 
-    OnnxAttrs attrs(node, ctx);
-    auto axes = attrs.get<std::vector<int>>("axes");
+    // If axes are ommitted, squeeze all dimensions with values 1
+    if (axes.size() == 0)
+    {
+        const auto shape = data.getDimensions();
+        ASSERT(!isDynamic(shape) && "Cannot infer squeeze dimensions from a dynamic shape! Please re-export your model with the Squeeze axes input set.", ErrorCode::kUNSUPPORTED_NODE);
+        for (int i = 0; i < shape.nbDims; i++)
+        {
+            if (shape.d[i] == 1)
+            {
+                axes.push_back(i);
+            }
+        }
+    }
 
     int rank = data.getDimensions().nbDims;
     for (auto& axis : axes)
@@ -3750,7 +3767,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
     // "squeezed : T
     // Reshaped tensor with same data as input."
     auto* squeezed = squeezeTensor(ctx, node, data, axes, true);
-
     ASSERT(squeezed && "Failed to squeeze tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
     return {{squeezed}};
@@ -3893,11 +3909,25 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
     // "data : T
     // Original tensor"
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
-    OnnxAttrs attrs(node, ctx);
+    std::vector<int> axes;
 
-    // "axes : list of ints (required)
-    // List of integers indicating the dimensions to be inserted."
-    auto axes = attrs.get<std::vector<int>>("axes");
+    if (ctx->getOpsetVersion() >= 13)
+    {
+        const ShapeTensor axesInput{inputs.at(1)};
+        ASSERT(axesInput.allValuesKnown() && "Axes input for unsqueeze operation should be a constant tensor.",
+            ErrorCode::kUNSUPPORTED_NODE);
+        for (auto& a : axesInput)
+        {
+            axes.push_back(a);
+        }
+    }
+    else
+    {
+        OnnxAttrs attrs(node, ctx);
+        // "axes : list of ints (required)
+        // List of integers indicating the dimensions to be inserted."
+        axes = attrs.get<std::vector<int>>("axes");
+    }
 
     // "Negative value means counting dimensions from the back."
     const int newSize = data.getDimensions().nbDims + axes.size();
@@ -3909,7 +3939,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
     // "expanded : T
     // Reshaped tensor with same data as input."
     auto* expanded = unsqueezeTensor(ctx, node, data, axes, true);
-
     ASSERT(expanded && "Failed to unsqueeze tensor!", ErrorCode::kUNSUPPORTED_NODE);
 
     return {{expanded}};

@@ -333,4 +333,7 @@ ShapeTensor computeSliceSizes(IImporterContext* ctx, const ShapeTensor& starts, 
 //! will return x with x[subcripts[i]] replaced by y[i].
 ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 
+//! Helper function to add SoftMax layer.
+nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input);
+
 } // namespace onnx2trt
