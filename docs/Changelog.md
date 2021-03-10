@@ -1,6 +1,15 @@
 # ONNX-TensorRT Changelog
 
-## 21.02 Container Release - 2021-01-22
+## 21.03 Container Release - 2021-03-09
+### Added
+- Added opset13 support for `SoftMax`, `LogSoftmax`, `Squeeze`, and `Unsqueeze`
+- Added support for the `EyeLike` operator
+- Added support for the `GatherElements` operator
+
+### Fixes
+### Removed
+
+## 21.02 Container Release - 2021-01-18
 ### Added
  - Added support for the `ReverseSequence` operator [#590] - https://github.com/onnx/onnx-tensorrt/pull/590
  - Updated `parse()` and `supportsModel()` API calls with an optional `model_path` parameter to support models with external weights [#621](https://github.com/onnx/onnx-tensorrt/pull/621)
