@@ -196,6 +196,10 @@ class TensorRTBackendRep(BackendRep):
                     casted_output = np.array(outputs[i], dtype=np.int64)
                     if np.equal(outputs[i], casted_output).all():
                         outputs[i] = np.array(outputs[i], dtype=np.int64)
+                if self._output_dtype[name] == onnx.TensorProto.DOUBLE and array.dtype == np.float32:
+                    casted_output = np.array(outputs[i], dtype=np.double)
+                    if np.equal(outputs[i], casted_output).all():
+                        outputs[i] = np.array(outputs[i], dtype=np.double)
 
         outputs_tuple = namedtupledict('Outputs', output_names)(*outputs)
         return namedtupledict('Outputs', output_names)(*outputs)
@@ -211,6 +215,8 @@ def np2onnx_dtype(np_dtype):
         return onnx.TensorProto.INT32
     elif np_dtype == np.dtype('int8'):
         return onnx.TensorProto.INT8
+    elif np_dtype == np.dtype('double'):
+        return onnx.TensorProto.DOUBLE
     else:
         raise TypeError("Unsupported data type:", np_dtype)
 

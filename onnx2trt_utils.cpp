@@ -201,6 +201,7 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
 {
     switch (onnx_dtype)
     {
+    case ::ONNX_NAMESPACE::TensorProto::DOUBLE: *trt_dtype = nvinfer1::DataType::kFLOAT; break;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT: *trt_dtype = nvinfer1::DataType::kFLOAT; break;
     case ::ONNX_NAMESPACE::TensorProto::INT8: *trt_dtype = nvinfer1::DataType::kINT8; break;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF; break;
@@ -1896,6 +1897,39 @@ ShapeTensor computeSliceSizes(IImporterContext* ctx, const ShapeTensor& starts, 
         // using the identity ceil(x) = -floor(-x).
         return sub(ctx, similar(ctx, dims, 0), floorDiv(ctx, sub(ctx, starts, ends), steps));
     }
+}
+
+nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input)
+{
+    OnnxAttrs attrs(node, ctx);
+    // "axis : int (default is opset specific)"
+    const int defaultAxis = (ctx->getOpsetVersion() >= 13) ? -1 : 1;
+    int axis = attrs.get("axis", defaultAxis);
+
+    // "Negative value means counting dimensions from the back.
+    // Accepted range is [-r, r-1] where r = rank(input)."
+    const auto rank = shapeOf(input).size();
+    if (convertAxis(axis, rank).is_error())
+    {
+        return nullptr;
+    }
+
+    nvinfer1::ISoftMaxLayer* softMax{nullptr};
+    if (ctx->getOpsetVersion() >= 13)
+    {
+        softMax = ctx->network()->addSoftMax(input);
+        softMax->setAxes(1 << axis);
+    }
+    else
+    {
+        // "The input does not need to explicitly be a 2D vector; rather, it will be coerced into one."
+        auto* flattened = flattenTensor(ctx, node, input, axis);
+        softMax = ctx->network()->addSoftMax(*flattened);
+        // ONNX softmax is always on second dimension.
+        softMax->setAxes(1 << 1);
+    }
+    ctx->registerLayer(softMax, node.name());
+    return softMax->getOutput(0);
 }
 
 } // namespace onnx2trt
