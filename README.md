@@ -1,3 +1,5 @@
+<!--- SPDX-License-Identifier: Apache-2.0 -->
+
 # TensorRT Backend For ONNX
 
 Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/tensorrt).

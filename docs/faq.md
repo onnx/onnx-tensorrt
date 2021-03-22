@@ -1,3 +1,5 @@
+<!--- SPDX-License-Identifier: Apache-2.0 -->
+
 # ONNX-TensorRT FAQ
 
 For all uses we recommend installing the following tools:
@@ -38,7 +40,7 @@ This is an error stating that onnx-tensorrt does not have an import function def
 
 ## Custom Layer Support
 
-Custom layer support in onnx-tensorrt is done through TensorRT plugins. Any custom plugins must be registered with TensorRT’s plugin registry in order for it to be visible to the onnx-tensorrt parser. 
+Custom layer support in onnx-tensorrt is done through TensorRT plugins. Any custom plugins must be registered with TensorRT’s plugin registry in order for it to be visible to the onnx-tensorrt parser.
 
 For writing a plugin for a custom ONNX operator, the quickest way to do so without modifying the parser code is by utilizing the `fallbackPluginImporter` function. As long as the inputs, outputs, and attributes of your custom operator are consistent with those of your plugin, the ONNX-TensorRT parser will do the mapping for you. You can refer to [this blog post](https://developer.nvidia.com/blog/estimating-depth-beyond-2d-using-custom-layers-on-tensorrt-and-onnx-models/) on how to write a plugin for a custom ONNX operator.
 
