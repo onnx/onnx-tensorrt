@@ -57,6 +57,8 @@ Once you have cloned the repository, you can build the parser libraries and exec
     // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
+For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command.
+
 ## Executable Usage
 
 ONNX models can be converted to serialized TensorRT engines using the `onnx2trt` executable:
