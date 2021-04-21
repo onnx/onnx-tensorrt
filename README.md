@@ -8,6 +8,10 @@ For the list of recent changes, see the [changelog](docs/Changelog.md).
 
 For a list of commonly seen issues and questions, see the [FAQ](docs/faq.md).
 
+For business inquiries, please contact researchinquiries@nvidia.com
+
+For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.com
+
 ## Supported TensorRT Versions
 
 Development on the Master branch is for the latest version of [TensorRT 7.2.2](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
