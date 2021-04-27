@@ -32,6 +32,7 @@
 
 #include <cstring> // For std::memcpy
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <sstream>
 

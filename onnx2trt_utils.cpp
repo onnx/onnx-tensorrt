@@ -258,6 +258,46 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
     return int32Weights;
 }
 
+float* convertDouble(const double* weightValues, nvinfer1::Dims shape, IImporterContext* ctx)
+{
+    static bool logged = false;
+    if (!logged)
+    {
+        LOG_WARNING(
+            "Your ONNX model has been generated with double-typed weights, while TensorRT does not natively support "
+            "double. "
+            "Attempting to cast down to float.");
+        logged = true;
+    }
+    const size_t nbWeights = volume(shape);
+    float* floatWeights{
+        reinterpret_cast<float*>(ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape).values)};
+
+    bool outOfBounds{false};
+    const double floatMax = static_cast<double>(std::numeric_limits<float>::max());
+    const double floatMin = static_cast<double>(std::numeric_limits<float>::lowest());
+    for (size_t i = 0; i < nbWeights; i++)
+    {
+        if (weightValues[i] > floatMax || weightValues[i] < floatMin)
+        {
+            floatWeights[i] = static_cast<float>(std::max(std::min(weightValues[i], floatMax), floatMin));
+            LOG_WARNING("Weight at index " << i << ": " << weightValues[i]
+                                           << " is out of range. Clamping to: " << floatWeights[i]);
+            outOfBounds = true;
+        }
+        else
+        {
+            floatWeights[i] = static_cast<float>(weightValues[i]);
+        }
+    }
+    if (outOfBounds)
+    {
+        LOG_WARNING("One or more weights outside the range of FLOAT was clamped");
+    }
+
+    return floatWeights;
+}
+
 bool convertOnnxPadding(const std::vector<int64_t>& onnxPadding, nvinfer1::Dims2* begPadding, nvinfer1::Dims2* endPadding)
 {
     const size_t size = onnxPadding.size();
@@ -376,13 +416,22 @@ bool convertOnnxWeights(
         // For weights parsed from external files, createTempWeights is necessary to keep them in scope
         ShapedWeights externalWeights;
 
-        // Downcast INT64 weights to INT32 weights before copying the values to externalWeights
+        //  // Cast non-native TRT types to their corresponding proxy types
         if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64)
         {
             dataPtr = dataBuf.data();
             dataPtr = convertINT64(reinterpret_cast<const int64_t*>(dataPtr), shape, ctx);
             nbytes = nbytes / 2;
             onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
+            externalWeights = ctx->createTempWeights(onnxDtype, shape);
+            std::memcpy(externalWeights.values, dataPtr, nbytes);
+        }        
+        else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
+        {
+            dataPtr = dataBuf.data();
+            dataPtr = convertDouble(reinterpret_cast<const double*>(dataPtr), shape, ctx);
+            nbytes = nbytes / (sizeof(double) / sizeof(float));
+            onnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
             externalWeights = ctx->createTempWeights(onnxDtype, shape);
             std::memcpy(externalWeights.values, dataPtr, nbytes);
         }
@@ -424,6 +473,20 @@ bool convertOnnxWeights(
                 nbytes = onnxTensor.int64_data().size() * sizeof(int32_t);
             }
             onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
+        }
+        else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
+        {
+            if (onnxTensor.raw_data().size() > 0)
+            {
+                dataPtr = convertDouble(reinterpret_cast<const double*>(onnxTensor.raw_data().data()), shape, ctx);
+                nbytes = onnxTensor.raw_data().size() / (sizeof(double) / sizeof(float));
+            }
+            else if (onnxTensor.double_data().size() > 0)
+            {
+                dataPtr = convertDouble(onnxTensor.double_data().data(), shape, ctx);
+                nbytes = onnxTensor.double_data().size() * sizeof(float);
+            }
+            onnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
         }
 
         // Check for supported types that can be found in the int32_data field in the TensorProto
