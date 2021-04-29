@@ -136,6 +136,68 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
     return Status::success();
 }
 
+// Helper functions for calculateBias:
+int32_t getBias(const std::vector<int32_t>& dimension_count, const std::vector<int32_t>& pitches, int32_t axis)
+{
+    int32_t result{0};
+    for (int32_t i = 0; i < static_cast<int32_t>(dimension_count.size()); i++)
+    {
+        if (i != axis)
+        {
+            result += dimension_count[i] * pitches[i];
+        }
+    }
+    return result;
+}
+
+void incrementOuterDimension(std::vector<int32_t>& dimensionCount, nvinfer1::Dims idxDims)
+{
+    // Start at [x,x,0]. Increment starting from the outer dimension.
+    int32_t rank = dimensionCount.size();
+
+    for (int32_t i = rank - 1; i >= 0; i--)
+    {
+        int dimLimit = idxDims.d[i];
+        // If we're not at the limit, increment current axis and return
+        if (++dimensionCount[i] != dimLimit)
+        {
+            break;
+        }
+        // Else, we increment on the next dimension and reset current one
+        dimensionCount[i] = 0;
+    }
+}
+
+std::vector<int32_t> calculateBias(
+    const nvinfer1::Dims& daDims, const nvinfer1::Dims& idxDims, const std::vector<int32_t>& pitches, int32_t axis)
+{
+    std::vector<int32_t> biasVector;
+    std::vector<int32_t> dimensionCount(daDims.nbDims, 0);
+    int64_t total = volume(idxDims);
+
+    for (int64_t i = 0; i < total; i++)
+    {
+        int32_t bias = getBias(dimensionCount, pitches, axis);
+        biasVector.push_back(bias);
+        incrementOuterDimension(dimensionCount, idxDims);
+    }
+    return biasVector;
+}
+
+std::vector<int32_t> calculatePitches(const nvinfer1::Dims& inputDims)
+{
+    int32_t pitch = 1;
+    int32_t nbDims = inputDims.nbDims;
+    std::vector<int32_t> pitches(nbDims);
+    pitches[nbDims - 1] = pitch;
+    for (int32_t i = nbDims - 2; i >= 0; i--)
+    {
+        pitch *= inputDims.d[i + 1];
+        pitches[i] = pitch;
+    }
+    return pitches;
+}
+
 bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors)
 {
     // Linear resize supports up to 3D resize on the outermost dimensions.
