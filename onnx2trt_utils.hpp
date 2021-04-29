@@ -156,6 +156,13 @@ Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1:
 // Helper function to broadcast three tensors to the largest one's shape
 Status broadcastTensors(IImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2, nvinfer1::ITensor*& t3);
 
+// Helper function to calculate the bias tensor for GatherElements.
+std::vector<int32_t> calculateBias(
+    const nvinfer1::Dims& daDims, const nvinfer1::Dims& idxDims, const std::vector<int32_t>& pitches, int32_t axis);
+
+// Helper function to calculate and return a vector representation of the pitches of a given shape
+std::vector<int32_t> calculatePitches(const nvinfer1::Dims& inputDims);
+
 // Helper function to check that linear resize can be used
 bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
 
