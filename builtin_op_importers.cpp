@@ -4191,11 +4191,19 @@ std::tuple<const void*, size_t> copyField(
 
 // Load plugin fields from an ONNX node, using fieldData for temporary allocations.
 std::vector<nvinfer1::PluginField> loadFields(string_map<std::vector<uint8_t>>& fieldData, const OnnxAttrs& attrs,
-    const nvinfer1::PluginFieldCollection* fieldNames)
+    const nvinfer1::PluginFieldCollection* fieldNames, IImporterContext* ctx)
 {
     std::vector<nvinfer1::PluginField> fields{};
     for (int i = 0; i < fieldNames->nbFields; ++i)
     {
+        // Some plugins may have default values for fields that map to optional attributes in an ONNX graph.
+        if (!attrs.count(fieldNames->fields[i].name))
+        {
+            LOG_WARNING("Attribute " << fieldNames->fields[i].name
+                                     << " not found in plugin node! Ensure that the plugin creator has a default value "
+                                        "defined or the engine may fail to build.");
+            continue;
+        }
         // Name must be retrieved from the map so that it is alive for long enough.
         const std::string& fieldName = fieldData.emplace(fieldNames->fields[i].name, std::vector<uint8_t>{}).first->first;
         const void* data{nullptr};
@@ -4288,7 +4296,7 @@ DEFINE_BUILTIN_OP_IMPORTER(FallbackPluginImporter)
     const nvinfer1::PluginFieldCollection* fieldNames = creator->getFieldNames();
     // Field data needs to be type erased, we use fieldData for temporary allocations.
     string_map<std::vector<uint8_t>> fieldData{};
-    std::vector<nvinfer1::PluginField> fields = loadFields(fieldData, attrs, fieldNames);
+    std::vector<nvinfer1::PluginField> fields = loadFields(fieldData, attrs, fieldNames, ctx);
 
     nvinfer1::IPluginV2* plugin = createPlugin(node.name(), creator, fields);
     ASSERT(plugin && "Could not create plugin", ErrorCode::kUNSUPPORTED_NODE);
