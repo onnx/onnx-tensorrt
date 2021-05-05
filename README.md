@@ -53,7 +53,9 @@ To build only the ONNX-TensorRT parser, follow the following steps:
     // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
-## Executable usage
+For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command.
+
+## Executable Usage
 
 ONNX models can be converted to serialized TensorRT engines using the `onnx2trt` executable:
 

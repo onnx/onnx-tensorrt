@@ -74,14 +74,16 @@ if(BUILD_ONNXIFI)
   set(ONNXIFI_SOURCES onnx_trt_backend.cpp)
 endif()
 
-set(EXECUTABLE_SOURCES
-  main.cpp
-)
-
-set(API_TESTS_SOURCES
-  getSupportedAPITest.cpp
-  ModelImporter.cpp
-)
+# Build executables if BUILD_LIBRARY_ONLY flag is not set
+if (NOT DEFINED BUILD_LIBRARY_ONLY)
+  set(EXECUTABLE_SOURCES
+    main.cpp
+  )
+  set(API_TESTS_SOURCES
+    getSupportedAPITest.cpp
+    ModelImporter.cpp
+  )
+endif()
 
 set(HEADERS
   NvOnnxParser.h
@@ -158,25 +160,27 @@ endif()
 # --------------------------------
 # Converter executable
 # --------------------------------
-add_executable(onnx2trt ${EXECUTABLE_SOURCES})
-target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS})
-target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} onnx nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
+if (NOT DEFINED BUILD_LIBRARY_ONLY)
+  add_executable(onnx2trt ${EXECUTABLE_SOURCES})
+  target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS})
+  target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} onnx nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES}
+endif()
 
 # --------------------------------
 # API Tests
 # --------------------------------
-add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
-target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
-target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
+if (NOT DEFINED BUILD_LIBRARY_ONLY)
+  add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
+  target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
+  target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES} 
+endif()
 
 # --------------------------------
 # Installation
 # --------------------------------
 install(TARGETS
-                onnx2trt
                 nvonnxparser
                 nvonnxparser_static
-        RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
 )
@@ -184,6 +188,13 @@ install(TARGETS
 install(FILES ${HEADERS}
   DESTINATION include
 )
+
+if (NOT DEFINED BUILD_LIBRARY_ONLY)
+  install(TARGETS
+          onnx2trt
+          RUNTIME DESTINATION bin
+  )
+endif()
 
 SET(CPACK_GENERATOR "DEB")
 SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Mike Houston") #required
