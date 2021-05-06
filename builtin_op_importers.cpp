@@ -1190,17 +1190,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Floor)
 
 DEFINE_BUILTIN_OP_IMPORTER(Gather)
 {
-    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* data = &convertToTensor(inputs.at(0), ctx);
     // TRT does not support BOOL input types for this node
-    ASSERT(data.getType() != nvinfer1::DataType::kBOOL, ErrorCode::kUNSUPPORTED_NODE);
-    nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
+    ASSERT( (data->getType() != nvinfer1::DataType::kBOOL) && "This version of TensorRT does not support BOOL input type for the Gather operator.", ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::ITensor* indices = &convertToTensor(inputs.at(1), ctx);
     OnnxAttrs attrs(node, ctx);
-    int axis = attrs.get<int>("axis", 0);
-    int nbDims = inputs.at(0).shape().nbDims;
+    int32_t axis = attrs.get<int32_t>("axis", 0);
+    int32_t nbDims = inputs.at(0).shape().nbDims;
     TRT_CHECK(convertAxis(axis, nbDims));
     LOG_VERBOSE("Using Gather axis: " << axis);
-    auto* layer = ctx->network()->addGather(data, indices, axis);
-    ctx->registerLayer(layer, node.name());
+
+    // Convert any negative indices to positive ones
+    indices = convertGatherIndices(ctx, data, indices, axis);
+
+    auto* layer = ctx->network()->addGather(*data, *indices, axis);
+    ctx->registerLayer(layer, getNodeName(node));
     RETURN_FIRST_OUTPUT(layer);
 }
 
@@ -1231,11 +1236,11 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
     */
     // clang-format on
 
-    nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
-    nvinfer1::ITensor& index = convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor* data = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* index = &convertToTensor(inputs.at(1), ctx);
 
-    const nvinfer1::Dims& idxDims = index.getDimensions();
-    const nvinfer1::Dims& daDims = data.getDimensions();
+    const nvinfer1::Dims& idxDims = index->getDimensions();
+    const nvinfer1::Dims& daDims = data->getDimensions();
 
     // Note the above tranformation requires dimensions to be known at parse time, so check for dynamic shapes
     ASSERT(!isDynamic(daDims) && !isDynamic(idxDims)
@@ -1245,6 +1250,9 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
     OnnxAttrs attrs(node, ctx);
     int32_t axis = attrs.get<int32_t>("axis", 0);
     int32_t dataNbDims = daDims.nbDims;
+
+    // Convert any negative indices to positive ones
+    index = convertGatherIndices(ctx, data, index, axis);
 
     TRT_CHECK(convertAxis(axis, dataNbDims));
     LOG_VERBOSE("Using Gather axis: " << axis);
@@ -1262,12 +1270,12 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
     auto* biasTensor = addConstant(ctx, biasVector, ::ONNX_NAMESPACE::TensorProto::INT32, idxDims)->getOutput(0);
 
     auto* mul
-        = ctx->network()->addElementWise(index, *axisPitchTensor, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
+        = ctx->network()->addElementWise(*index, *axisPitchTensor, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
     auto* newIndices
         = ctx->network()->addElementWise(*mul, *biasTensor, nvinfer1::ElementWiseOperation::kSUM)->getOutput(0);
 
     nvinfer1::Dims flattenDataDims{1, {static_cast<int32_t>(volume(daDims))}};
-    auto* reshape = ctx->network()->addShuffle(data);
+    auto* reshape = ctx->network()->addShuffle(*data);
     reshape->setReshapeDimensions(flattenDataDims);
     reshape->setZeroIsPlaceholder(false);
 
@@ -1276,7 +1284,6 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
     ctx->registerLayer(layer, getNodeName(node));
     RETURN_FIRST_OUTPUT(layer);
 }
-
 
 DEFINE_BUILTIN_OP_IMPORTER(Gemm)
 {
