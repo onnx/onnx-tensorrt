@@ -405,6 +405,37 @@ onnx2trt::ShapedWeights createZeroShifts(const onnx2trt::ShapedWeights& shiftInt
     return shift;
 }
 
+nvinfer1::ITensor* createZeroTensor(IImporterContext* ctx, nvinfer1::ITensor* data)
+{
+    nvinfer1::ITensor* zero;
+    if (data->getType() == nvinfer1::DataType::kFLOAT)
+    {
+        zero
+            = addConstant(ctx, std::vector<float>{0.f}, ::ONNX_NAMESPACE::TensorProto::FLOAT, {0, {1}})->getOutput(0);
+    }
+    else
+    {
+        zero
+            = addConstant(ctx, std::vector<int>{0}, ::ONNX_NAMESPACE::TensorProto::INT32, {0, {1}})->getOutput(0);
+    }
+    broadcastTensors(ctx, zero, data);
+    zero = ctx->network()->addElementWise(*data, *zero, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
+    return zero;
+}
+
+nvinfer1::ITensor* convertGatherIndices(IImporterContext* ctx, nvinfer1::ITensor* data, nvinfer1::ITensor* indices, int32_t axis)
+{
+    // Create a condition tensor that is 1 for the elements in indices that are < 0 or 0 otherwise
+    auto condition = ctx->network()->addElementWise(*indices, *createZeroTensor(ctx, indices), nvinfer1::ElementWiseOperation::kLESS)->getOutput(0);
+    auto axisLength = getAxisLength(ctx, data, axis);
+    broadcastTensors(ctx, axisLength, indices);
+    // Create a shifted tensor that is indices + axisLength
+    auto shifted = ctx->network()->addElementWise(*indices, *axisLength, nvinfer1::ElementWiseOperation::kSUM)->getOutput(0);
+    // Select between the shifted and original data based on condition
+    auto select = ctx->network()->addSelect(*condition, *shifted, *indices);
+    return select->getOutput(0);
+}
+
 template <typename DataType>
 DataType* convertINT32Data(const int32_t* weightValues, nvinfer1::Dims shape, int32_t onnxdtype, IImporterContext* ctx)
 {
