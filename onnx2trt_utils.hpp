@@ -181,12 +181,18 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype);
 // Helper function to convert INT64 weight values into INT32
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
 
+// Helper function to convert negative gather indices into positive ones
+nvinfer1::ITensor* convertGatherIndices(IImporterContext* ctx, nvinfer1::ITensor* data, nvinfer1::ITensor* indices, int32_t axis);
+
 // Helper function to convert ONNX padding into TRT padding
 bool convertOnnxPadding(
     const std::vector<int64_t>& onnxPadding, nvinfer1::Dims2* begPadding, nvinfer1::Dims2* endPadding);
 
 // Helper function to create zero shifts for QuantizeLinear/DequantizeLinear ops
 onnx2trt::ShapedWeights createZeroShifts(const onnx2trt::ShapedWeights& shiftInt8, int32_t type, IImporterContext* ctx);
+
+// Helper function to create a tensor of all zeros with the same shape as a data tensor
+nvinfer1::ITensor* createZeroTensor(IImporterContext* ctx, nvinfer1::ITensor* data);
 
 // Helper function to convert an ONNX weight into a ShapedWeights object
 bool convertOnnxWeights(
