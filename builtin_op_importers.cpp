@@ -1201,8 +1201,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Gather)
     TRT_CHECK(convertAxis(axis, nbDims));
     LOG_VERBOSE("Using Gather axis: " << axis);
 
-    // Convert any negative indices to positive ones
+    // Support for negative indices can be enabled through adding -DSUPPORT_NEGATIVE_GATHER=1 in the CMake build command.
+    // This will unnecessarily reduce performance of networks that use only non-negative Gather indices.
+#if SUPPORT_NEGATIVE_GATHER
     indices = convertGatherIndices(ctx, data, indices, axis);
+#endif // SUPPORT_NEGATIVE_GATHER
 
     auto* layer = ctx->network()->addGather(*data, *indices, axis);
     ctx->registerLayer(layer, getNodeName(node));
@@ -1251,8 +1254,11 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
     int32_t axis = attrs.get<int32_t>("axis", 0);
     int32_t dataNbDims = daDims.nbDims;
 
-    // Convert any negative indices to positive ones
+    // Support for negative indices can be enabled through adding -DSUPPORT_NEGATIVE_GATHER=1 in the CMake build command.
+    // This will unnecessarily reduce performance of networks that use only non-negative Gather indices.
+#if SUPPORT_NEGATIVE_GATHER
     index = convertGatherIndices(ctx, data, index, axis);
+#endif // SUPPORT_NEGATIVE_GATHER
 
     TRT_CHECK(convertAxis(axis, dataNbDims));
     LOG_VERBOSE("Using Gather axis: " << axis);
