@@ -425,15 +425,21 @@ nvinfer1::ITensor* createZeroTensor(IImporterContext* ctx, nvinfer1::ITensor* da
 
 nvinfer1::ITensor* convertGatherIndices(IImporterContext* ctx, nvinfer1::ITensor* data, nvinfer1::ITensor* indices, int32_t axis)
 {
-    // Create a condition tensor that is 1 for the elements in indices that are < 0 or 0 otherwise
-    auto condition = ctx->network()->addElementWise(*indices, *createZeroTensor(ctx, indices), nvinfer1::ElementWiseOperation::kLESS)->getOutput(0);
+    const int32_t n = indices->getDimensions().nbDims;
     auto axisLength = getAxisLength(ctx, data, axis);
-    broadcastTensors(ctx, axisLength, indices);
-    // Create a shifted tensor that is indices + axisLength
-    auto shifted = ctx->network()->addElementWise(*indices, *axisLength, nvinfer1::ElementWiseOperation::kSUM)->getOutput(0);
-    // Select between the shifted and original data based on condition
-    auto select = ctx->network()->addSelect(*condition, *shifted, *indices);
-    return select->getOutput(0);
+    broadcastTensor(ctx, axisLength, n);
+
+    // The formula here implements "indices < 0 ? indices + axisLength : indices"
+    // via the formula "indices - axisLength * max(-1, min(0, indices))".
+    // Think of the "max(-1, min(0, indices))" as extracting the sign bit from the indices.
+    const nvinfer1::Dims d = makeDims(n, 1);
+    auto zero = addConstantScalar(ctx, 0, ::ONNX_NAMESPACE::TensorProto::INT32, d)->getOutput(0);
+    auto minusOne = addConstantScalar(ctx, -1, ::ONNX_NAMESPACE::TensorProto::INT32, d)->getOutput(0);
+    auto min = ctx->network()->addElementWise(*zero, *indices, nvinfer1::ElementWiseOperation::kMIN)->getOutput(0);
+    auto max = ctx->network()->addElementWise(*minusOne, *min, nvinfer1::ElementWiseOperation::kMAX)->getOutput(0);
+    auto prod = ctx->network()->addElementWise(*max, *axisLength, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
+    auto sub = ctx->network()->addElementWise(*indices, *prod, nvinfer1::ElementWiseOperation::kSUB)->getOutput(0);
+    return sub;
 }
 
 template <typename DataType>
