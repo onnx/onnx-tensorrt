@@ -74,6 +74,11 @@ if(BUILD_ONNXIFI)
   set(ONNXIFI_SOURCES onnx_trt_backend.cpp)
 endif()
 
+# Build with negative indices support for Gather:
+if (DEFINED SUPPORT_NEGATIVE_GATHER)
+  add_definitions("-DSUPPORT_NEGATIVE_GATHER=1")
+endif()
+
 # Build executables if BUILD_LIBRARY_ONLY flag is not set
 if (NOT DEFINED BUILD_LIBRARY_ONLY)
   set(EXECUTABLE_SOURCES

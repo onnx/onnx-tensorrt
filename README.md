@@ -61,7 +61,7 @@ Once you have cloned the repository, you can build the parser libraries and exec
     // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
-For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command.
+For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command. If your model has Gather or GatherElements operations with negative indices, add `-DSUPPORT_NEGATIVE_GATHER` to the build command. Note that enabling negative-indices gather will have a performance impact on gathers with non-negative indices.
 
 ## Executable Usage
 
