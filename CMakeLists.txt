@@ -129,6 +129,10 @@ else()
     HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
 endif()
+if(NOT "${TENSORRT_LIBRARY_MYELIN}")
+  message(STATUS "Cannot find myelin. Expected since TensorRT 8 and ignored.")
+  set(TENSORRT_LIBRARY_MYELIN "")
+endif()
 set(TENSORRT_LIBRARY ${TENSORRT_LIBRARY_INFER} ${TENSORRT_LIBRARY_INFER_PLUGIN} ${TENSORRT_LIBRARY_MYELIN})
 MESSAGE(STATUS "Find TensorRT libs at ${TENSORRT_LIBRARY}")
 find_package_handle_standard_args(
