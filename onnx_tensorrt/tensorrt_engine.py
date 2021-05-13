@@ -1,22 +1,4 @@
- # Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
- #
- # Permission is hereby granted, free of charge, to any person obtaining a
- # copy of this software and associated documentation files (the "Software"),
- # to deal in the Software without restriction, including without limitation
- # the rights to use, copy, modify, merge, publish, distribute, sublicense,
- # and/or sell copies of the Software, and to permit persons to whom the
- # Software is furnished to do so, subject to the following conditions:
- #
- # The above copyright notice and this permission notice shall be included in
- # all copies or substantial portions of the Software.
- #
- # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- # DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: Apache-2.0
 
 import tensorrt as trt
 import pycuda.driver
@@ -121,7 +103,7 @@ class Engine(object):
         self.binding_addrs = [b.device_buffer.ptr for b in bindings]
         self.inputs  = [b for b in bindings if     b.is_input]
         self.outputs = [b for b in bindings if not b.is_input]
-        
+
         for binding in self.inputs + self.outputs:
             _ = binding.device_buffer # Force buffer allocation
         for binding in self.outputs:
@@ -141,7 +123,7 @@ class Engine(object):
                              (len(self.inputs), len(inputs)))
         if isinstance(inputs, dict):
             inputs = [inputs[b.name] for b in self.inputs]
-        
+
 
         for i, (input_array, input_binding) in enumerate(zip(inputs, self.inputs)):
             input_array = check_input_validity(i, input_array, input_binding)
