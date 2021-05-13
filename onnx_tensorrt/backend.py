@@ -1,22 +1,4 @@
- # Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
- #
- # Permission is hereby granted, free of charge, to any person obtaining a
- # copy of this software and associated documentation files (the "Software"),
- # to deal in the Software without restriction, including without limitation
- # the rights to use, copy, modify, merge, publish, distribute, sublicense,
- # and/or sell copies of the Software, and to permit persons to whom the
- # Software is furnished to do so, subject to the following conditions:
- #
- # The above copyright notice and this permission notice shall be included in
- # all copies or substantial portions of the Software.
- #
- # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- # THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- # DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: Apache-2.0
 
 from __future__ import print_function
 from .tensorrt_engine import Engine
@@ -76,7 +58,7 @@ class TensorRTBackendRep(BackendRep):
         if not trt.init_libnvinfer_plugins(TRT_LOGGER, ""):
             msg = "Failed to initialize TensorRT's plugin library."
             raise RuntimeError(msg)
-        
+
         if not self.parser.parse(model_str):
             error = self.parser.get_error(0)
             msg = "While parsing node number %i:\n" % error.node()
@@ -95,13 +77,13 @@ class TensorRTBackendRep(BackendRep):
             if inp_tensor.is_shape_tensor or -1 in inp_tensor.shape:
                 self.dynamic = True
                 break
-        
+
         if self.verbose:
             for layer in self.network:
                 print(layer)
 
             print(f'Output shape: {self.network[-1].get_output(0).shape}')
-        
+
         if self.dynamic:
             if self.verbose:
                 print("Found dynamic inputs! Deferring engine build to run stage")
@@ -114,7 +96,7 @@ class TensorRTBackendRep(BackendRep):
             output_shape = tuple([dim.dim_value for dim in dims])
             self._output_shapes[output.name] = output_shape
             self._output_dtype[output.name] = output.type.tensor_type.elem_type
-    
+
     def _build_engine(self, inputs=None):
         """
         Builds a TensorRT engine with a builder config.
@@ -122,7 +104,7 @@ class TensorRTBackendRep(BackendRep):
                        because we need to register optimization profiles for some inputs
         :type inputs: List of np.ndarray
         """
-        
+
         if inputs:
             opt_profile = self.builder.create_optimization_profile()
             # Set optimization profiles for the input bindings that need them
@@ -143,7 +125,7 @@ class TensorRTBackendRep(BackendRep):
             self.config.add_optimization_profile(opt_profile)
 
         trt_engine = self.builder.build_engine(self.network, self.config)
-        
+
         if trt_engine is None:
             raise RuntimeError("Failed to build TensorRT engine from network")
         if self.serialize_engine:
@@ -154,7 +136,7 @@ class TensorRTBackendRep(BackendRep):
         self.device = device
         assert(device.type == DeviceType.CUDA)
         cudaSetDevice(device.device_id)
-    
+
     def _serialize_deserialize(self, trt_engine):
         self.runtime = trt.Runtime(TRT_LOGGER)
         serialized_engine = trt_engine.serialize()
@@ -162,14 +144,14 @@ class TensorRTBackendRep(BackendRep):
         trt_engine = self.runtime.deserialize_cuda_engine(
                 serialized_engine)
         return trt_engine
-    
+
     def run(self, inputs, **kwargs):
         """Execute the prepared engine and return the outputs as a named tuple.
         inputs -- Input tensor(s) as a Numpy array or list of Numpy arrays.
         """
         if isinstance(inputs, np.ndarray):
             inputs = [inputs]
-        
+
         if self.dynamic:
             self._build_engine(inputs)
 
