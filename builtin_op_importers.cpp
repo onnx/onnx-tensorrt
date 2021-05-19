@@ -1922,13 +1922,15 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     ASSERT(inputs.at(2).is_weights(), ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
     int nbDims = tensorPtr->getDimensions().nbDims;
-    ASSERT(nbDims >= 3 && nbDims <= 4 && "TensorRT only supports InstanceNormalization on 3D or 4D tensors!",
+    ASSERT(nbDims >= 3 && nbDims <= 5 && "TensorRT only supports InstanceNormalization on 3D, 4D, or 5D tensors!",
         ErrorCode::kUNSUPPORTED_NODE);
     auto scale_weights = inputs.at(1).weights();
     auto bias_weights = inputs.at(2).weights();
     OnnxAttrs attrs(node, ctx);
     float epsilon = attrs.get("epsilon", 1e-5f);
-
+    const int32_t relu {0}; // the ONNX instance norm op does not use the relu parameter
+    const float alpha {0.f}; // the ONNX instance norm op does not use the alpha parameter
+    
     // Populate instanceNormalization plugin properties.
     const std::string pluginName = "InstanceNormalization_TRT";
     const std::string pluginVersion = "1";
@@ -1936,9 +1938,11 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     f.emplace_back("epsilon", &epsilon, nvinfer1::PluginFieldType::kFLOAT32, 1);
     f.emplace_back("scales", scale_weights.values, nvinfer1::PluginFieldType::kFLOAT32, scale_weights.count());
     f.emplace_back("bias", bias_weights.values, nvinfer1::PluginFieldType::kFLOAT32, bias_weights.count());
+    f.emplace_back("relu", &relu, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("alpha", &alpha, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
     // Create plugin from registry
-    nvinfer1::IPluginV2* plugin = createPlugin(node.name(), importPluginCreator(pluginName, pluginVersion), f);
+    const auto plugin = createPlugin(node.name(), importPluginCreator(pluginName, pluginVersion), f);
 
     ASSERT(plugin != nullptr && "InstanceNormalization plugin was not found in the plugin registry!",
         ErrorCode::kUNSUPPORTED_NODE);
