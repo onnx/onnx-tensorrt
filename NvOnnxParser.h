@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+
 #ifndef NV_ONNX_PARSER_H
 #define NV_ONNX_PARSER_H
 
@@ -26,16 +27,15 @@ static const int NV_ONNX_PARSER_VERSION = ((NV_ONNX_PARSER_MAJOR * 10000) + (NV_
 //! \brief The data structure containing the parsing capability of
 //! a set of nodes in an ONNX graph.
 //!
-using SubGraph_t = std::pair<std::vector<size_t>, bool>;
+typedef std::pair<std::vector<size_t>, bool> SubGraph_t;
 
 //! \typedef SubGraphCollection_t
 //!
 //! \brief The data structure containing all SubGraph_t partitioned
 //! out of an ONNX graph.
 //!
-using SubGraphCollection_t = std::vector<SubGraph_t>;
+typedef std::vector<SubGraph_t> SubGraphCollection_t;
 
-class onnxTensorDescriptorV1;
 //!
 //! \namespace nvonnxparser
 //!
@@ -157,15 +157,11 @@ public:
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
      *        in bytes
-     * \param weight_count number of user provided weights
-     * \param weight_descriptors pointer to user provided weight array
      * \return true if the model was parsed successfully
      * \see getNbErrors() getError()
      */
     virtual bool parseWithWeightDescriptors(
-        void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        uint32_t weight_count,
-        onnxTensorDescriptorV1 const* weight_descriptors)
+        void const* serialized_onnx_model, size_t serialized_onnx_model_size)
         = 0;
 
     /** \brief Returns whether the specified operator may be supported by the
@@ -178,8 +174,10 @@ public:
      */
     virtual bool supportsOperator(const char* op_name) const = 0;
     /** \brief destroy this object
+     *
+     * \warning deprecated and planned on being removed in TensorRT 10.0
      */
-    virtual void destroy() = 0;
+    TRT_DEPRECATED virtual void destroy() = 0;
     /** \brief Get the number of errors that occurred during prior calls to
      *         \p parse
      *
@@ -197,25 +195,7 @@ public:
      */
     virtual void clearErrors() = 0;
 
-    /** \brief Get description of all ONNX weights that can be refitted.
-     *
-     * \param weightsNames Where to write the weight names to
-     * \param layerNames Where to write the layer names to
-     * \param roles Where to write the roles to
-     *
-     * \return The number of weights from the ONNX model that can be refitted
-     *
-     * If weightNames or layerNames != nullptr, each written pointer points to a string owned by
-     * the parser, and becomes invalid when the parser is destroyed
-     *
-     * If the same weight is used in multiple TRT layers it will be represented as a new
-     * entry in weightNames with name <weightName>_x, with x being the number of times the weight
-     * has been used before the current layer
-     */
-    virtual int getRefitMap(const char** weightNames, const char** layerNames, nvinfer1::WeightsRole* roles) = 0;
-
-protected:
-    virtual ~IParser() {}
+    virtual ~IParser() noexcept = default;
 };
 
 } // namespace nvonnxparser
@@ -225,15 +205,6 @@ extern "C" TENSORRTAPI int getNvOnnxParserVersion();
 
 namespace nvonnxparser
 {
-
-#ifdef SWIG
-inline IParser* createParser(nvinfer1::INetworkDefinition* network,
-                             nvinfer1::ILogger* logger)
-{
-    return static_cast<IParser*>(
-        createNvOnnxParser_INTERNAL(network, logger, NV_ONNX_PARSER_VERSION));
-}
-#endif // SWIG
 
 namespace
 {
@@ -245,16 +216,9 @@ namespace
  * \return a new parser object or NULL if an error occurred
  * \see IParser
  */
-#ifdef _MSC_VER
-TENSORRTAPI IParser* createParser(nvinfer1::INetworkDefinition& network,
-                                  nvinfer1::ILogger& logger)
-#else
-inline IParser* createParser(nvinfer1::INetworkDefinition& network,
-                             nvinfer1::ILogger& logger)
-#endif
+inline IParser* createParser(nvinfer1::INetworkDefinition& network, nvinfer1::ILogger& logger)
 {
-    return static_cast<IParser*>(
-        createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
+    return static_cast<IParser*>(createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
 }
 
 } // namespace

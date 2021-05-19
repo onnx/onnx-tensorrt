@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 7.2 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 8.0 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, INT8, and BOOL
 
@@ -129,7 +129,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, INT8,
 | Relu                      | Y          |
 | Reshape                   | Y          |
 | Resize                    | Y          | Asymmetric coordinate transformation mode only\. Nearest or Linear resizing mode only\. "floor" mode only for resize\_mode attribute\.   |
-| ReverseSequence           | Y          |
+| ReverseSequence           | Y          | Dynamic input shapes are unsupported
 | RNN                       | Y          |
 | RoiAlign                  | N          |
 | Round                     | N          |

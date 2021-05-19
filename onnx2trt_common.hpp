@@ -22,21 +22,29 @@ enum class PluginFormat : uint8_t
 class IPluginExt : public IPlugin
 {
 public:
-    virtual int getTensorRTVersion() const
+    virtual int getTensorRTVersion() const noexcept
     {
         return NV_TENSORRT_VERSION;
     }
-    virtual bool supportsFormat(DataType type, PluginFormat format) const = 0;
+    virtual bool supportsFormat(DataType type, PluginFormat format) const noexcept = 0;
     virtual void configureWithFormat(const Dims* inputDims, int nbInputs, const Dims* outputDims, int nbOutputs,
-        DataType type, PluginFormat format, int maxBatchSize)
+        DataType type, PluginFormat format, int maxBatchSize) noexcept
         = 0;
 
 protected:
-    void configure(const Dims* inputDims, int nbInputs, const Dims* outputDims, int nbOutputs, int maxBatchSize) final
+    void configure(
+        const Dims* inputDims, int nbInputs, const Dims* outputDims, int nbOutputs, int maxBatchSize) noexcept final
     {
-        DataType type = nvinfer1::DataType::kFLOAT;
-        PluginFormat format = nvinfer1::PluginFormat::kNCHW;
-        return this->configureWithFormat(inputDims, nbInputs, outputDims, nbOutputs, type, format, maxBatchSize);
+        try
+        {
+            DataType type = nvinfer1::DataType::kFLOAT;
+            PluginFormat format = nvinfer1::PluginFormat::kLINEAR;
+            return this->configureWithFormat(inputDims, nbInputs, outputDims, nbOutputs, type, format, maxBatchSize);
+        }
+        catch (const std::exception& e)
+        {
+            nvinfer1::getLogger()->log(nvinfer1::ILogger::Severity::kERROR, e.what().c_str());
+        }
     }
     virtual ~IPluginExt()
     {

@@ -9,7 +9,7 @@
 #include <cassert>
 #include <string>
 
-// Used to strip out Eris build path information from debug prints
+// Used to strip out build path information from debug prints
 #if defined(SOURCE_LENGTH)
 #define __FILENAME__ (__FILE__ + SOURCE_LENGTH)
 #else
@@ -61,7 +61,7 @@
         }                                                                                                              \
     } while (0)
 
-#define TRT_CHECK(call)                                                                                                \
+#define CHECK(call)                                                                                                    \
     do                                                                                                                 \
     {                                                                                                                  \
         Status status = call;                                                                                          \

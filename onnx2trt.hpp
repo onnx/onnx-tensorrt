@@ -12,15 +12,10 @@
 #include <NvInfer.h>
 #include <functional>
 #include <onnx/onnx_pb.h>
-#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <fstream>
 #include <vector>
-
-using WeightsPair_t = std::pair<std::string, nvinfer1::WeightsRole>;
-
-using RefitMap_t = std::multimap<std::string, WeightsPair_t>;
 
 namespace onnx2trt
 {
@@ -54,10 +49,11 @@ public:
     virtual std::string getOnnxFileLocation() = 0;
     virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) = 0;
     virtual void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) = 0;
-    virtual ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape) = 0;
+    virtual ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, uint8_t value = 0) = 0;
     virtual int64_t getOpsetVersion(const char* domain = "") const = 0;
     virtual nvinfer1::ILogger& logger() = 0;
-    virtual void insertRefitMap(std::string weightsName, std::string layerName, nvinfer1::WeightsRole role) = 0;
+    virtual bool hasError() const = 0;
+    virtual nvinfer1::IErrorRecorder* getErrorRecorder() const = 0;
 
 protected:
     virtual ~IImporterContext()

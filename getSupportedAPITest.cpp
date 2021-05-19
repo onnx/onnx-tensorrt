@@ -87,7 +87,6 @@ int main(int argc, char* argv[]) {
     common::TRT_Logger trt_logger((nvinfer1::ILogger::Severity)verbosity);
 
     auto trt_builder = common::infer_object(nvinfer1::createInferBuilder(trt_logger));
-
     auto trt_network = common::infer_object(trt_builder->createNetworkV2(1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)));
     auto trt_parser  = common::infer_object(nvonnxparser::createParser(*trt_network, trt_logger));
 
@@ -129,14 +128,15 @@ int main(int argc, char* argv[]) {
     // Note we do not call trt_parser->parse() here since it's already done above in parser->supportsModel()
     if( !engine_filename.empty() ) {
         trt_builder->setMaxBatchSize(max_batch_size);
-        trt_builder->setMaxWorkspaceSize(max_workspace_size);
+        auto builder_config = common::infer_object(trt_builder->createBuilderConfig());
+        builder_config->setMaxWorkspaceSize(max_workspace_size);
 
         cout << "input name: " << trt_network->getInput(0)->getName() << endl;
         cout << "output name: " << trt_network->getOutput(0)->getName() << endl;
         cout << "num layers: " << trt_network->getNbLayers() << endl;
         cout << "outputs: " << trt_network->getNbOutputs() << endl;
 
-        auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
+        auto trt_engine = common::infer_object(trt_builder->buildEngineWithConfig(*trt_network.get(), *builder_config.get()));
 
         if( verbosity >= (int)nvinfer1::ILogger::Severity::kWARNING ) {
             cout << "Writing TensorRT engine to " << engine_filename << endl;

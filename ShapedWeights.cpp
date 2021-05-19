@@ -50,16 +50,6 @@ size_t ShapedWeights::size_bytes() const
     return this->count() * getDtypeSize(this->type);
 }
 
-const char* ShapedWeights::getName() const
-{
-    return this->name;
-}
-
-void ShapedWeights::setName(const char* name)
-{
-    this->name = name;
-}
-
 ShapedWeights::operator bool() const
 {
     return (bool) this->values;
@@ -76,6 +66,16 @@ ShapedWeights::operator nvinfer1::Weights() const
     return w;
 }
 
+const char* ShapedWeights::getName() const
+{
+    return this->name;
+}
+
+void ShapedWeights::setName(const char* name)
+{
+    this->name = name;
+}
+
 template <typename DType>
 void transpose4DWeights(ShapedWeights const& weights, nvinfer1::Permutation const perm, ShapedWeights* result)
 {
@@ -88,7 +88,7 @@ void transpose4DWeights(ShapedWeights const& weights, nvinfer1::Permutation cons
     nvinfer1::Dims expanded_original_shape{4, {1, 1, 1, 1}};
     nvinfer1::Dims expanded_new_shape{4, {1, 1, 1, 1}};
     nvinfer1::Permutation expanded_perm{0, 1, 2, 3};
-
+    
     int pad = 4 - nbDims;
     for (int i = 0; i < nbDims; ++i)
     {
@@ -97,14 +97,15 @@ void transpose4DWeights(ShapedWeights const& weights, nvinfer1::Permutation cons
         expanded_perm.order[pad + i] = perm.order[i] + pad;
     }
 
+
     int src_strides[4] = {1, 1, 1, 1};
     int dst_strides[4] = {1, 1, 1, 1};
-
+    
     for (int i = 2; i >= 0; --i)
     {
         src_strides[i] = expanded_original_shape.d[i + 1] * src_strides[i + 1];
         dst_strides[i] = expanded_new_shape.d[i + 1] * dst_strides[i + 1];
-    }
+    } 
 
     for (int n = 0; n < expanded_original_shape.d[0]; ++n)
     {

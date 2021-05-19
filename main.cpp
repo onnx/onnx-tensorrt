@@ -34,7 +34,6 @@ void print_usage() {
        << "                [-O passes] (optimize onnx model. Argument is a semicolon-separated list of passes)" << "\n"
        << "                [-p] (list available optimization passes and exit)" << "\n"
        << "                [-l] (list layers and their shapes)" << "\n"
-       << "                [-g] (debug mode)" << "\n"
        << "                [-F] (optimize onnx model in fixed mode)" << "\n"
        << "                [-v] (increase verbosity)" << "\n"
        << "                [-q] (decrease verbosity)" << "\n"
@@ -58,7 +57,6 @@ int main(int argc, char* argv[]) {
   bool optimize_model_fixed = false;
   bool print_optimization_passes_info = false;
   bool print_layer_info = false;
-  bool debug_builder = false;
 
   int arg = 0;
   while( (arg = ::getopt(argc, argv, "o:b:w:t:T:m:d:O:plgFvqVh")) != -1 ) {
@@ -90,7 +88,6 @@ int main(int argc, char* argv[]) {
       else { cerr << "ERROR: -O flag requires argument" << endl; return -1; }
     case 'p': print_optimization_passes_info = true; break;
     case 'l': print_layer_info = true; break;
-    case 'g': debug_builder = true; break;
     case 'F': optimize_model_fixed = true; optimize_model = true; break;
     case 'v': ++verbosity; break;
     case 'q': --verbosity; break;
@@ -273,18 +270,17 @@ int main(int argc, char* argv[]) {
       cout << "    Max batch size:     " << max_batch_size << endl;
       cout << "    Max workspace size: " << max_workspace_size / (1024. * 1024) << " MiB" << endl;
     }
-    trt_builder->setMaxBatchSize(max_batch_size);
-    trt_builder->setMaxWorkspaceSize(max_workspace_size);
+    auto builder_config = common::infer_object(trt_builder->createBuilderConfig());
+    builder_config->setMaxWorkspaceSize(max_workspace_size);
     if( fp16 && model_dtype == nvinfer1::DataType::kHALF) {
-      trt_builder->setHalf2Mode(true);
+      builder_config->setFlag(nvinfer1::BuilderFlag::kFP16);
     } else if( model_dtype == nvinfer1::DataType::kINT8 ) {
       // TODO: Int8 support
       //trt_builder->setInt8Mode(true);
       cerr << "ERROR: Int8 mode not yet supported" << endl;
       return -5;
     }
-    trt_builder->setDebugSync(debug_builder);
-    auto trt_engine = common::infer_object(trt_builder->buildCudaEngine(*trt_network.get()));
+    auto trt_engine = common::infer_object(trt_builder->buildEngineWithConfig(*trt_network.get(), *builder_config.get()));
 
     auto engine_plan = common::infer_object(trt_engine->serialize());
     std::ofstream engine_file(engine_filename.c_str());
