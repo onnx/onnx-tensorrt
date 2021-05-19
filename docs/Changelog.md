@@ -2,6 +2,21 @@
 
 # ONNX-TensorRT Changelog
 
+## 21.05 Container Release - 2021-05-19
+### Added
+- Added support for InstanceNormalization on 5D tensors
+- Added library only build target [#659](https://github.com/onnx/onnx-tensorrt/pull/659)
+- Added support for negative gather indices [#681](https://github.com/onnx/onnx-tensorrt/pull/681)
+- Added support for `DOUBLE`-typed inputs and weights through downcast to float [#674](https://github.com/onnx/onnx-tensorrt/pull/674)
+- Added support for optional plugin fields in FallbackPlugin path [#676](https://github.com/onnx/onnx-tensorrt/pull/676)
+
+### Updated
+- Updated license [#657](https://github.com/onnx/onnx-tensorrt/pull/657)
+
+### Fixes
+- Fixed index offset calculation in GatherElements [#675](https://github.com/onnx/onnx-tensorrt/pull/675)
+- Clarified dynamic shape support for ReverseSequence
+
 ## 21.03 Container Release - 2021-03-09
 ### Added
 - Added opset13 support for `SoftMax`, `LogSoftmax`, `Squeeze`, and `Unsqueeze`
@@ -13,7 +28,7 @@
 
 ## 21.02 Container Release - 2021-01-18
 ### Added
- - Added support for the `ReverseSequence` operator [#590] - https://github.com/onnx/onnx-tensorrt/pull/590
+ - Added support for the `ReverseSequence` operator [#590](https://github.com/onnx/onnx-tensorrt/pull/590)
  - Updated `parse()` and `supportsModel()` API calls with an optional `model_path` parameter to support models with external weights [#621](https://github.com/onnx/onnx-tensorrt/pull/621)
  - Added support for the `Celu` operator
  - Added support for the `CumSum` operator
