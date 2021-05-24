@@ -91,7 +91,9 @@ public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
         , mLogger(logger)
-        , mErrorWrapper(ONNX_NAMESPACE::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
+        // Disable ErrorRecorder for now due to incompatibilities with ONNXRT.
+        // , mErrorWrapper(ONNX_NAMESPACE::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
+        , mErrorWrapper(nullptr)
     {
     }
     nvinfer1::INetworkDefinition* network() override
