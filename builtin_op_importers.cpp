@@ -828,7 +828,7 @@ DEFINE_BUILTIN_OP_IMPORTER(CumSum)
 
     nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
     auto dims = input->getDimensions();
-
+    ASSERT(!isDynamic(dims) && "This version of TensorRT does not support dynamic CumSum!", ErrorCode::kUNSUPPORTED_NODE);
     ASSERT(inputs.at(1).is_weights() && "Axis input for CumSum must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights axisWeights = inputs.at(1).weights();
     int32_t axis = static_cast<int32_t*>(axisWeights.values)[0];
