@@ -1174,9 +1174,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Dropout)
         std::vector<TensorOrWeights> outputs;
         outputs.push_back(inputs.at(0));
 
-        // Add mask tensor, which is the same shape as the input tensor but contains all 1s of type BOOL
+        // Add mask tensor, which is the same shape as the input tensor
         auto& inputTensor = inputs.at(0).tensor();
-        auto* maskTensor = ctx->network()->addElementWise(inputTensor, inputTensor, nvinfer1::ElementWiseOperation::kEQUAL)->getOutput(0);
+        nvinfer1::ITensor* maskTensor{nullptr};
+        // Post opset 12 the mask tensor contains all 1s. Prior to opset 12 the mask tensor contains all 0s.
+        if (ctx->getOpsetVersion() >= 12)
+        {
+            maskTensor = ctx->network()->addElementWise(inputTensor, inputTensor, nvinfer1::ElementWiseOperation::kEQUAL)->getOutput(0);
+        }
+        else
+        {
+            maskTensor = ctx->network()->addElementWise(inputTensor, inputTensor, nvinfer1::ElementWiseOperation::kLESS)->getOutput(0);
+        }
         outputs.push_back(TensorOrWeights(maskTensor));
         return outputs;
     }
@@ -1361,6 +1370,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
 
     nvinfer1::ITensor* data = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* index = &convertToTensor(inputs.at(1), ctx);
+    ASSERT((data->getType() != nvinfer1::DataType::kBOOL) && "This version of TensorRT does not support BOOL input type for the GatherElements operator.", ErrorCode::kUNSUPPORTED_NODE);
 
     const nvinfer1::Dims& idxDims = index->getDimensions();
     const nvinfer1::Dims& daDims = data->getDimensions();
@@ -2046,8 +2056,11 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
         CHECK(onnx2trt::parseGraph(ctx, elseGraph));
         for (auto i = 0; i < nbOutputs; i++)
         {
-            auto* thenTensor = &convertToTensor(ctx->tensors().at(thenGraph.output(i).name()), ctx);
-            auto* elseTensor = &convertToTensor(ctx->tensors().at(elseGraph.output(i).name()), ctx);
+            const auto thenName = thenGraph.output(i).name();
+            const auto elseName = elseGraph.output(i).name();
+            ASSERT(thenName != elseName && "TensorRT requires conditional subgraphs to have different output tensor names!", ErrorCode::kUNSUPPORTED_NODE);
+            auto* thenTensor = &convertToTensor(ctx->tensors().at(thenName), ctx);
+            auto* elseTensor = &convertToTensor(ctx->tensors().at(elseName), ctx);
             auto* condTensor = &convertToTensor(cond, ctx);
             // While the number and datatypes of the outputs of each branch are equal, the shapes may be different
             // TRT only supports dynamic branch selection if the output shapes are equal and if their shapes are broadcastable
@@ -3239,7 +3252,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
         else
         {
             ASSERT(
-                "TensorRT only supports half_pixel, pytorch_half_pixel, tf_half_pixel_for_nn, asymmetric and "
+                !"TensorRT only supports half_pixel, pytorch_half_pixel, tf_half_pixel_for_nn, asymmetric and "
                 "align_corners transofmration modes!",
                 ErrorCode::kUNSUPPORTED_NODE);
         }

@@ -396,6 +396,14 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
 bool convertOnnxPadding(std::vector<int64_t>& onnxPadding, nvinfer1::Dims2& begPadding, nvinfer1::Dims2& endPadding,
     nvinfer1::Permutation& firstPerm, nvinfer1::Permutation& secondPerm)
 {
+    
+    // Input tensor may have been unsqueezed to 4D. Insert no-op pads for all unsqueezed dimensions
+    const size_t minimumSize = 8;
+    while (onnxPadding.size() < minimumSize)
+    {
+        onnxPadding.insert(onnxPadding.begin() + onnxPadding.size() / 2, 0);
+        onnxPadding.insert(onnxPadding.begin(), 0);
+    }
     const auto size = onnxPadding.size();
     const auto half = size / 2;
     std::set<size_t> pads;
