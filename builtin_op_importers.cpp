@@ -1370,7 +1370,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GatherElements)
 
     nvinfer1::ITensor* data = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* index = &convertToTensor(inputs.at(1), ctx);
-    ASSERT((data.getType() != nvinfer1::DataType::kBOOL) && "This version of TensorRT does not support BOOL input type for the GatherElements operator.", ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT((data->getType() != nvinfer1::DataType::kBOOL) && "This version of TensorRT does not support BOOL input type for the GatherElements operator.", ErrorCode::kUNSUPPORTED_NODE);
 
     const nvinfer1::Dims& idxDims = index->getDimensions();
     const nvinfer1::Dims& daDims = data->getDimensions();
