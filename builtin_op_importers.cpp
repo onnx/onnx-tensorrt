@@ -3048,7 +3048,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
         //    alignCorners = 1: ASYMMETRIC
         // Linear:
         //    alignCorners = 0: HALF_PIXEL
-        //    alignCorners = 1: ASYMMETRIC
+        //    alignCorners = 1: ALIGN_CORNERS
         else
         {
             if (mode == "nearest")
@@ -3057,8 +3057,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
             }
             else if (mode == "linear")
             {
-                ASSERT((transformationMode == "asymmetric" || transformationMode == "pytorch_half_pixel" || transformationMode == "half_pixel") && "TensorRT only supports half pixel, pytorch half_pixel, and asymmetric tranformation mode for linear resizes when scales are provided!", ErrorCode::kUNSUPPORTED_NODE);
-                if (transformationMode == "asymmetric")
+                ASSERT((transformationMode == "align_corners" || transformationMode == "pytorch_half_pixel" || transformationMode == "half_pixel") && "TensorRT only supports half pixel, pytorch half_pixel, and asymmetric tranformation mode for linear resizes when scales are provided!", ErrorCode::kUNSUPPORTED_NODE);
+                if (transformationMode == "align_corners")
                 {
                     layer->setAlignCorners(true);
                 }
