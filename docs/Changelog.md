@@ -2,9 +2,25 @@
 
 # ONNX-TensorRT Changelog
 
-## 21.05 Container Release - 2021-05-19
+## TensorRT 8.0 Release - 2021-07-02
 ### Added
-- Added support for InstanceNormalization on 5D tensors
+ - Rehauled resize operator, now fully supporting the following modes:
+    - Coordinate Transformation modes: `half_pixel`, `pytorch_half_pixel`, `tf_half_pixel_for_nn`, `asymmetric`, and `align_corners`
+    - Modes: `nearest`, `linear`
+    - Nearest Modes: `floor`, `ceil`, `round_prefer_floor`, `round_prefer_ceil`
+ - QuantizeLinear/DequantizeLinear updates:
+   - Added support for tensor scales
+   - Added support for per-axis quantization
+ - Added support for multi-input ConvTranpose
+ - Added support for generic 2D padding
+ - Added experimental support for `NonMaxSuppression`
+
+### Updated
+ - Moved `RefitMap` API to core TensorRT.
+ - Added Datatype column to [operators.md](https://github.com/onnx/onnx-tensorrt/blob/master/docs/operators.md)
+
+## 21.05 Container Release - 2021-05-17
+### Added
 - Added library only build target [#659](https://github.com/onnx/onnx-tensorrt/pull/659)
 - Added support for negative gather indices [#681](https://github.com/onnx/onnx-tensorrt/pull/681)
 - Added support for `DOUBLE`-typed inputs and weights through downcast to float [#674](https://github.com/onnx/onnx-tensorrt/pull/674)

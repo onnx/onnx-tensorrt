@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 7.2.3.4](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 8.0.1.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,12 +48,12 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 7.2.3.4](https://developer.nvidia.com/tensorrt)
- - [TensorRT 7.2.3.4 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.0.1.6](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.0.1.6 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
-For building within docker, we recommend using and setting up the docker containers as instructed in the main (TensorRT repository)[https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment] to build the onnx-tensorrt library.
+For building within docker, we recommend using and setting up the docker containers as instructed in the main [TensorRT repository](https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment) to build the onnx-tensorrt library.
 
 Once you have cloned the repository, you can build the parser libraries and executables by running:
 
@@ -64,6 +64,11 @@ Once you have cloned the repository, you can build the parser libraries and exec
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
 For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command. If your model has Gather or GatherElements operations with negative indices, add `-DSUPPORT_NEGATIVE_GATHER` to the build command. Note that enabling negative-indices gather will have a performance impact on gathers with non-negative indices.
+
+### Experimental Ops
+All experimental operators will be considered unsupported by the ONNX-TRT's `supportsModel()` function.
+
+`NonMaxSuppression` is available as an experimental operator in TensorRT 8. It has the limitation that the output shape is always padded to length [`max_output_boxes_per_class`, 3], therefore some post processing is required to extract the valid indices.
 
 ## Executable Usage
 
@@ -92,9 +97,9 @@ See more usage information by running:
 
 Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. Install them with
 
-    python3 -m pip install <tensorrt_install_dir>/python/tensorrt-7.x.x.x-cp<python_ver>-none-linux_x86_64.whl
+    python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 7.2.3.4 supports ONNX release 1.6.0. Install it with:
+TensorRT 8.0.1.6 supports ONNX release 1.6.0. Install it with:
 
     python3 -m pip install onnx==1.6.0
 

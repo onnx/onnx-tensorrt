@@ -26,7 +26,7 @@ public:
     ShapeTensor(int rank_, std::vector<int64_t>&& values_);
 
     //! Create ShapeTensor representing value of TensorOrWeights.
-    ShapeTensor(TensorOrWeights& t);
+    ShapeTensor(IImporterContext* ctx, TensorOrWeights& t);
 
     //! Construct ShapeTensor equivalent to applying IShapeLayer depth times.
     //! The depth may be in [0,3].
@@ -133,7 +133,7 @@ private:
     //! When mAllValuesKnown==true, all the values in mValues are correct
     //! and mValues.size() == mSize.
     //! When mAllValuesKnown==false, only the non-negative values in mValues
-    //! are guranteed to be correct, and only so if mValues.size() == mSize.
+    //! are guaranteed to be correct, and only so if mValues.size() == mSize.
     std::vector<int64_t> mValues;
 };
 

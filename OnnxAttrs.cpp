@@ -303,14 +303,72 @@ nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(const std::s
 template <>
 nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(const std::string& key) const
 {
-    std::string mode = this->get<std::string>(key);
-    if (mode == std::string("nearest"))
+    const auto& mode = this->get<std::string>(key);
+    if (mode == "nearest")
     {
         return nvinfer1::ResizeMode::kNEAREST;
     }
-    if (mode == std::string("linear"))
+    if (mode == "linear")
     {
         return nvinfer1::ResizeMode::kLINEAR;
     }
     throw std::runtime_error("Unknown ResizeMode: " + mode);
+}
+
+template <>
+nvinfer1::ResizeCoordinateTransformation OnnxAttrs::get<nvinfer1::ResizeCoordinateTransformation>(
+    const std::string& key) const
+{
+    const auto& transformation = this->get<std::string>(key);
+    if (transformation == "align_corners")
+    {
+        return nvinfer1::ResizeCoordinateTransformation::kALIGN_CORNERS;
+    }
+    if (transformation == "asymmetric")
+    {
+        return nvinfer1::ResizeCoordinateTransformation::kASYMMETRIC;
+    }
+    if (transformation == "half_pixel")
+    {
+        return nvinfer1::ResizeCoordinateTransformation::kHALF_PIXEL;
+    }
+    throw std::runtime_error("Unknown ResizeCoordinateTransformation: " + transformation);
+}
+
+template <>
+nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(const std::string& key) const
+{
+    const auto& selector = this->get<std::string>(key);
+    if (selector == "formula")
+    {
+        return nvinfer1::ResizeSelector::kFORMULA;
+    }
+    if (selector == "upper")
+    {
+        return nvinfer1::ResizeSelector::kUPPER;
+    }
+    throw std::runtime_error("Unknown ResizeSelector: " + selector);
+}
+
+template <>
+nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(const std::string& key) const
+{
+    const auto& roundMode = this->get<std::string>(key);
+    if (roundMode == "half_up")
+    {
+        return nvinfer1::ResizeRoundMode::kHALF_UP;
+    }
+    if (roundMode == "half_down")
+    {
+        return nvinfer1::ResizeRoundMode::kHALF_DOWN;
+    }
+    if (roundMode == "floor")
+    {
+        return nvinfer1::ResizeRoundMode::kFLOOR;
+    }
+    if (roundMode == "ceil")
+    {
+        return nvinfer1::ResizeRoundMode::kCEIL;
+    }
+    throw std::runtime_error("Unknown ResizeRoundMode: " + roundMode);
 }
