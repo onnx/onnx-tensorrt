@@ -8,7 +8,6 @@
 #include "NvInferPlugin.h"
 #include "NvOnnxParser.h"
 #include "builtin_op_importers.hpp"
-#include "onnx_utils.hpp"
 #include "utils.hpp"
 
 namespace onnx2trt
@@ -20,12 +19,10 @@ class ModelImporter : public nvonnxparser::IParser
 {
 protected:
     string_map<NodeImporter> _op_importers;
-    virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model, uint32_t weight_count,
-        onnxTensorDescriptorV1 const* weight_descriptors);
+    virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model);
 
 private:
     ImporterContext _importer_ctx;
-    RefitMap_t mRefitMap;
     std::list<::ONNX_NAMESPACE::ModelProto> _onnx_models; // Needed for ownership of weights
     int _current_node;
     std::vector<Status> _errors;
@@ -33,11 +30,10 @@ private:
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : _op_importers(getBuiltinOpImporterMap())
-        , _importer_ctx(network, logger, &mRefitMap)
+        , _importer_ctx(network, logger)
     {
     }
-    bool parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        uint32_t weight_count, onnxTensorDescriptorV1 const* weight_descriptors) override;
+    bool parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size) override;
     bool parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path = nullptr) override;
     bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) override;
@@ -68,27 +64,7 @@ public:
     {
         _errors.clear();
     }
-    virtual int getRefitMap(const char** weightNames, const char** layerNames, nvinfer1::WeightsRole* roles) override
-    {
-        int count = 0;
-        for (const auto& entry: mRefitMap)
-        {
-            if (weightNames != nullptr)
-            {
-                weightNames[count] = entry.first.c_str();
-            }
-            if (layerNames != nullptr)
-            {
-                layerNames[count] = entry.second.first.c_str();
-            }
-            if (roles != nullptr)
-            {
-                roles[count] = entry.second.second;
-            }
-            ++count;
-        }
-        return mRefitMap.size();
-    }
+
     //...LG: Move the implementation to .cpp
     bool parseFromFile(const char* onnxModelFile, int verbosity) override;
 };
