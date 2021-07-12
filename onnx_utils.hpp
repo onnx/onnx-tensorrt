@@ -18,15 +18,23 @@ namespace
 template <typename OnnxDims>
 bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims)
 {
-    std::vector<int> onnxDims_vector;
+    std::vector<int32_t> onnxDimsVec;
     for (const auto& onnxDim : onnxDims)
     {
-        const int dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() >= 0 ? onnxDim.dim_value() : -1) : -1;
-        onnxDims_vector.emplace_back(dim);
+        // For empty dimensions, the ONNX specification says it's a dynamic dimension
+        if (!onnxDim.has_dim_value() && !onnxDim.has_dim_param())
+        {
+            onnxDimsVec.emplace_back(-1);
+        }
+        else
+        {
+            const int32_t dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() >= 0 ? onnxDim.dim_value() : -1) : -1;
+            onnxDimsVec.emplace_back(dim);
+        }
     }
-    trtDims.nbDims = onnxDims_vector.size();
+    trtDims.nbDims = onnxDimsVec.size();
     assert(trtDims.nbDims <= nvinfer1::Dims::MAX_DIMS);
-    std::copy(onnxDims_vector.begin(), onnxDims_vector.end(), trtDims.d);
+    std::copy(onnxDimsVec.begin(), onnxDimsVec.end(), trtDims.d);
     return true;
 }
 
