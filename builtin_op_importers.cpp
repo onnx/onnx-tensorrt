@@ -4263,6 +4263,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Tile)
     // "input : T
     // Input tensor of any shape."
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    ASSERT((input.getType() != nvinfer1::DataType::kBOOL) && "This version of TensorRT does not support BOOL input for the Tile operator." , ErrorCode::kUNSUPPORTED_NODE);
     const auto inputDims = shapeOf(input);
 
     // "repeats : T1
