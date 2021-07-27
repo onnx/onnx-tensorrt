@@ -376,8 +376,93 @@ DEFINE_BUILTIN_OP_IMPORTER(Celu)
     return {{inputTensors.back()}};
 }
 
+// Helper function to perform clip through elementwise operations
+template <typename ScalarType>
+NodeImportResult elementwiseClipHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::vector<TensorOrWeights>& inputs, size_t numInputs, int32_t onnxType)
+{
+    OnnxAttrs attrs(node, ctx);
+    auto* input = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* alphaT{nullptr};
+    nvinfer1::ITensor* betaT{nullptr};
+    ScalarType alpha = std::numeric_limits<ScalarType>::lowest();
+    ScalarType beta = std::numeric_limits<ScalarType>::max();
+    if (ctx->getOpsetVersion() >= 11)
+    {
+        if (numInputs == 1)
+        {
+            alphaT = addConstantScalar(ctx, alpha, onnxType)->getOutput(0);
+            betaT = addConstantScalar(ctx, beta, onnxType)->getOutput(0);
+        }
+        else if (numInputs == 2)
+        {
+            alphaT = &convertToTensor(inputs.at(1), ctx);
+            betaT = addConstantScalar(ctx, beta, onnxType)->getOutput(0);
+        }
+        else if (numInputs == 3)
+        {
+            // "min" can be optional if "max" is specified. Check for this case here
+            if (!inputs.at(1).isNullTensor())
+            {
+                alphaT = &convertToTensor(inputs.at(1), ctx);
+            }
+            else
+            {
+                alphaT = addConstantScalar(ctx, alpha, onnxType)->getOutput(0);
+            }
+            if (!inputs.at(2).isNullTensor())
+            {
+                betaT = &convertToTensor(inputs.at(2), ctx);
+            }
+            else
+            {
+                betaT = addConstantScalar(ctx, beta, onnxType)->getOutput(0);
+            }
+        }
+    }
+    else
+    {
+        alpha = static_cast<ScalarType>(attrs.get("min", alpha));
+        alphaT = addConstantScalar(ctx, alpha, onnxType)->getOutput(0);
+        beta = static_cast<ScalarType>(attrs.get("max", beta));
+        betaT = addConstantScalar(ctx, beta, onnxType)->getOutput(0);
+    }
+
+    // Now that we have alphaT and betaT, do the elementwise calculation
+    using eOp = nvinfer1::ElementWiseOperation;
+    CHECK(broadcastTensors(ctx, input, alphaT));
+    CHECK(broadcastTensors(ctx, input, betaT));
+    auto lowerClip = ctx->network()->addElementWise(*input, *alphaT, eOp::kMAX)->getOutput(0);
+    auto upperClip = ctx->network()->addElementWise(*lowerClip, *betaT, eOp::kMIN)->getOutput(0);
+    return {{upperClip}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Clip)
 {
+    // For INT32 and multi-input clips, use elementwise operators instead.
+    size_t numInputs = inputs.size();
+    bool elementwiseClip = inputs.at(0).isInt32();
+    for (size_t i = 1; i < numInputs; i++)
+    {
+        elementwiseClip |= inputs.at(i).is_tensor();
+    }
+    if (elementwiseClip)
+    {
+        auto type = convertToTensor(inputs.at(0), ctx).getType();
+        ASSERT((type == nvinfer1::DataType::kFLOAT || type == nvinfer1::DataType::kINT32)
+                && "This version of TensorRT only supports FLOAT or INT32 inputs for Clip!",
+            ErrorCode::kUNSUPPORTED_NODE);
+        if (type == nvinfer1::DataType::kFLOAT)
+        {
+            return elementwiseClipHelper<float>(ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::FLOAT);
+        }
+        else
+        {
+            return elementwiseClipHelper<int32_t>(ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::INT32);
+        }
+    }
+
+    // Activation path only supports float initializers
     OnnxAttrs attrs(node, ctx);
     // beta is the upper bound
     float alpha = std::numeric_limits<float>::lowest();
