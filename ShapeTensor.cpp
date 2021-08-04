@@ -369,7 +369,7 @@ ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)
     assert(tensor.size() == 1);
     if (tensor.valueKnown(0))
     {
-        return shapeScalar(tensor[0]);
+        return shapeVector(tensor[0]);
     }
     return ShapeTensor(*addShuffle(ctx, tensor.tensor(ctx), shapeVector(1))->getOutput(0));
 }
