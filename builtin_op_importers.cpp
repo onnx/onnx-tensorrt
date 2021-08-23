@@ -3487,18 +3487,14 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
             RETURN_FIRST_OUTPUT(layer);
         }
     }
-    // For opset 10 resize, the only supported mode is asymmetric resize with scales.
+    // For opset 10 resize, the only supported mode is asymmetric resize with scales. Nearest resizes use floor rounding.
     else
     {
+        transformationMode = "asymmetric";
+        layer->setCoordinateTransformation(nvinfer1::ResizeCoordinateTransformation::kASYMMETRIC);
         if (mode == "nearest")
         {
-            transformationMode = "align_corners";
-            layer->setCoordinateTransformation(nvinfer1::ResizeCoordinateTransformation::kALIGN_CORNERS);
-        }
-        else
-        {
-            transformationMode = "asymmetric";
-            layer->setCoordinateTransformation(nvinfer1::ResizeCoordinateTransformation::kASYMMETRIC);
+            layer->setNearestRounding(nvinfer1::ResizeRoundMode::kFLOOR);
         }
     }
 
