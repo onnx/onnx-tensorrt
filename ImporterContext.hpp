@@ -40,9 +40,9 @@ public:
     {
         if (mNetwork && mOnnxErrorRecorder)
         {
-            mNetwork->setErrorRecorder(mUserErrorRecorder);
             if (mUserErrorRecorder)
             {
+                mNetwork->setErrorRecorder(mUserErrorRecorder);
                 mUserErrorRecorder->decRefCount();
             }
             ONNXParserErrorRecorder::destroy(mOnnxErrorRecorder);
@@ -91,9 +91,7 @@ public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
         , mLogger(logger)
-        // Disable ErrorRecorder for now due to incompatibilities with ONNXRT.
-        // , mErrorWrapper(ONNX_NAMESPACE::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
-        , mErrorWrapper(nullptr)
+        , mErrorWrapper(ONNX_NAMESPACE::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
     {
     }
     nvinfer1::INetworkDefinition* network() override

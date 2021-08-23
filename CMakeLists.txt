@@ -26,6 +26,7 @@ set(PARSER_LINKER_SCRIPT  ${ONNX2TRT_ROOT}/libnvonnxparser.version)
 set(ONNX2TRT_MAJOR 8)
 set(ONNX2TRT_MINOR 0)
 set(ONNX2TRT_PATCH 1)
+set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------
 # Build configurations, global to all projects
@@ -114,7 +115,7 @@ add_library(nvonnxparser SHARED ${IMPORTER_SOURCES})
 target_include_directories(nvonnxparser PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
 target_link_libraries(nvonnxparser PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
 set_target_properties(nvonnxparser PROPERTIES
-  VERSION   ${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}
+  VERSION   ${ONNX2TRT_VERSION}
   SOVERSION ${ONNX2TRT_MAJOR}
   LINK_DEPENDS ${PARSER_LINKER_SCRIPT}
   LINK_FLAGS "-Wl,--version-script=${PARSER_LINKER_SCRIPT}"

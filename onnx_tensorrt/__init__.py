@@ -4,4 +4,4 @@ from __future__ import absolute_import
 
 from . import backend
 
-__version__ = "7.2.2.3.0"
+__version__ = "8.0.1"

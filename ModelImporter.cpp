@@ -370,28 +370,6 @@ bool ModelImporter::supportsModel(
         return false;
     };
 
-    auto checkShapeTensorType = [&ctx](::ONNX_NAMESPACE::NodeProto const& node){
-        for (int i = 0; i < ctx->network()->getNbInputs(); i++)
-        {
-            auto input = ctx->network()->getInput(i);
-            if (input->isShapeTensor())
-            {
-                if (input->getType() == nvinfer1::DataType::kFLOAT || node.op_type() == "Loop" || node.op_type() == "Scan")
-                {
-                    auto name = input->getName();
-                    for (auto input : node.input())
-                    {
-                        if (input == name)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    };
-
     bool newSubGraph(true);
     // Sort and partition supported subgraphs
     std::vector<size_t> topological_order;
@@ -407,15 +385,13 @@ bool ModelImporter::supportsModel(
         // Add the node to the subgraph if:
         //     1. There is an importer function registered for the operator type
         //     2. It is not directly connected to an unsupported input
-        //     3. It is not directly connected to an unsupported shape tensor input
-        //     4. It did not illegally produce a shape tensor output
-        //     5. The importer function did not throw an assertion
+        //     3. It did not illegally produce a shape tensor output
+        //     4. The importer function did not throw an assertion
         bool registered = supportsOperator(node.op_type().c_str());
         bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
-        bool unsupportedShapeType = checkShapeTensorType(node);
         bool unsupportedShapeTensor = ctx->unsupportedShapeTensors().count(node.name()) > 0 ? true : false;
         bool unsuccessfulParse = node_idx == error_node;
-        if (registered && !unsupportedInput && !unsupportedShapeType && !unsupportedShapeTensor && !unsuccessfulParse)
+        if (registered && !unsupportedInput && !unsupportedShapeTensor && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
