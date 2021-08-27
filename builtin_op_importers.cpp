@@ -2408,12 +2408,10 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     std::vector<trtAct> activations = attrs.get<std::vector<trtAct>>("activations", defaultActs);
 
     std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    std::transform(activations.begin() + activationAlphas.size(), activations.end(),
-        std::back_inserter(activationAlphas), &getActivationDefaultAlpha);
+    activationAlphas = parseLSTMActivationValues(activations, activationAlphas, true);
 
     std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    std::transform(activations.begin() + activationBetas.size(), activations.end(), std::back_inserter(activationBetas),
-        &getActivationDefaultBeta);
+    activationBetas = parseLSTMActivationValues(activations, activationBetas, false);
 
     // TODO: Support cases where in bidirectional LSTMs, activations of reverse iteration do not match forward pass.
     // TODO: This will require splitting the input tensor in the loop when applying activations.
@@ -2422,9 +2420,9 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
         ASSERT(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
         ASSERT(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+            && "The parser does not currently support cases where activation alphas for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
         ASSERT(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
-            && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
+            && "The parser does not currently support cases where activation betas for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].

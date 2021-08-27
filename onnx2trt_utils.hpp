@@ -277,6 +277,10 @@ NodeImportResult lstmLegacyImporter(
 // Helper function to create and fill a Dims object with defined values
 nvinfer1::Dims makeDims(int nbDims, int val);
 
+// Helper function to parse activation values for LSTM nodes
+std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::ActivationType>& activationTypes,
+    const std::vector<float>& activationValues, bool isAlpha);
+
 // Helper function to read weights from an external file
 bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int64_t offset, int64_t length,
     std::vector<char>& weightsBuf, size_t& size);
