@@ -1589,6 +1589,26 @@ nvinfer1::Dims insertDimension(const nvinfer1::Dims& dims, const int axis, const
     return newDims;
 }
 
+std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::ActivationType>& activationTypes, const std::vector<float>& activationValues, bool isAlpha)
+{
+    size_t actIndex{0};
+    std::vector<float> tmpActs{};
+    for (size_t i = 0; i < activationTypes.size(); ++i)
+    {
+        float defaultVal = isAlpha ? getActivationDefaultAlpha(activationTypes[i]) : getActivationDefaultBeta(activationTypes[i]);
+        if (defaultVal == 0.f || actIndex == activationValues.size())
+        {
+            tmpActs.push_back(defaultVal);
+        }
+        else
+        {
+            tmpActs.push_back(activationValues[actIndex]);
+            actIndex++;
+        }
+    }
+    return tmpActs;
+}
+
 bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int64_t offset, int64_t length,
     std::vector<char>& weightsBuf, size_t& size)
 {
