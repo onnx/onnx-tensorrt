@@ -1178,7 +1178,7 @@ NodeImportResult QuantDequantLinearHelper(
     else
     {
         // Per-Tensor Quantization.
-        ASSERT(axis == INVALID_AXIS && "Quantization axis attribute is not valid with a single quantization scale", nvonnxparser::ErrorCode::kINVALID_NODE);
+        ASSERT((axis == 1 || axis == INVALID_AXIS) && "Found quantization axis not compatible with a single quantization scale", nvonnxparser::ErrorCode::kINVALID_NODE);
         // Currently this is ignored by TRT, but it is required by addScaleNd (for computing nbSpatialDims).
         axis = 1;
     }
