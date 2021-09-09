@@ -67,7 +67,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | GlobalMaxPool             | Y          | FP32, FP16, INT8 |
 | Greater                   | Y          | FP32, FP16, INT32 |
 | GreaterOrEqual            | Y          | FP32, FP16, INT32 |
-| GRU                       | Y          | FP32, FP16 |
+| GRU                       | Y          | FP32, FP16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
 | HardSigmoid               | Y          | FP32, FP16, INT8 |
 | Hardmax                   | N          |
 | Identity                  | Y          | FP32, FP16, INT32, INT8, BOOL |
@@ -83,7 +83,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | LogSoftmax                | Y          | FP32, FP16 |
 | Loop                      | Y          | FP32, FP16, INT32, BOOL |
 | LRN                       | Y          | FP32, FP16 |
-| LSTM                      | Y          | FP32, FP16 |
+| LSTM                      | Y          | FP32, FP16 | For bidirectional LSTMs, activation functions must be the same for both the forward and reverse pass
 | LpNormalization           | Y          | FP32, FP16 |
 | LpPool                    | Y          | FP32, FP16, INT8 |
 | MatMul                    | Y          | FP32, FP16 |
@@ -132,7 +132,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Reshape                   | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Resize                    | Y          | FP32, FP16 | Supported resize transformation modes: `half_pixel`, `pytorch_half_pixel`, `tf_half_pixel_for_nn`, `asymmetric`, and `align_corners`.<br />Supported resize modes: `nearest`, `linear`.<br />Supported nearest modes: `floor`, `ceil`, `round_prefer_floor`, `round_prefer_ceil`   |
 | ReverseSequence           | Y          | FP32, FP16 | Dynamic input shapes are unsupported
-| RNN                       | Y          | FP32, FP16 |
+| RNN                       | Y          | FP32, FP16 | For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | N          |
 | Round                     | N          |
 | ScaledTanh                | Y          | FP32, FP16, INT8 |
