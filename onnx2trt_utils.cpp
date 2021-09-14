@@ -2124,73 +2124,76 @@ NodeImportResult unaryHelper(
 NodeImportResult convDeconvMultiInput(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, bool isConv)
 {
-    nvinfer1::ITensor* input_tensor_ptr = &convertToTensor(inputs.at(0), ctx);
-    nvinfer1::ITensor* kernel_tensor_ptr = &convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor* inputTensor = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* weightsTensor = &convertToTensor(inputs.at(1), ctx);
 
-    nvinfer1::Dims dims = input_tensor_ptr->getDimensions();
-    LOG_VERBOSE("Convolution input dimensions: " << dims);
+    nvinfer1::Dims inputDims = inputTensor->getDimensions();
+    nvinfer1::Dims weightsDims = weightsTensor->getDimensions();
+    const std::string layerType = isConv ? "Convolution " : "Deconvolution";
+    LOG_VERBOSE(layerType << " input dimensions: " << inputDims);
+    LOG_VERBOSE(layerType << " kernel dimensions: " << weightsDims);
 
-    bool needToExpandDims = (dims.nbDims == 3);
+    bool needToExpandDims = (inputDims.nbDims == 3);
     if (needToExpandDims)
     {
         // Expand spatial dims from 1D to 2D
-        const std::vector<int> axes{3};
-        input_tensor_ptr = unsqueezeTensor(ctx, node, *input_tensor_ptr, axes);
-        ASSERT(input_tensor_ptr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
-        dims = input_tensor_ptr->getDimensions();
+        const std::vector<int32_t> axes{3};
+        inputTensor = unsqueezeTensor(ctx, node, *inputTensor, axes);
+        ASSERT(inputTensor && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        inputDims = inputTensor->getDimensions();
     }
 
-    if (kernel_tensor_ptr->getDimensions().nbDims == 3)
+    if (weightsDims.nbDims == 3)
     {
         // Expand spatial dims from 1D to 2D
-        const std::vector<int> axes{3};
-        kernel_tensor_ptr = unsqueezeTensor(ctx, node, *kernel_tensor_ptr, axes);
-        ASSERT(kernel_tensor_ptr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        const std::vector<int32_t> axes{3};
+        weightsTensor = unsqueezeTensor(ctx, node, *weightsTensor, axes);
+        ASSERT(weightsTensor && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        weightsDims = weightsTensor->getDimensions();
     }
-    nvinfer1::Dims kernel_size = inputs.at(1).shape();
 
-    auto kernel_weights = nvinfer1::Weights{nvinfer1::DataType::kFLOAT, nullptr, 0};
-    auto bias_weights = nvinfer1::Weights{nvinfer1::DataType::kFLOAT, nullptr, 0};
+    auto kernelWeights = nvinfer1::Weights{nvinfer1::DataType::kFLOAT, nullptr, 0};
+    auto biasWeights = nvinfer1::Weights{nvinfer1::DataType::kFLOAT, nullptr, 0};
 
-    nvinfer1::Dims input_dims = input_tensor_ptr->getDimensions();
-    const int nbSpatialDims = input_dims.nbDims - 2;
+    const int32_t nbSpatialDims = inputDims.nbDims - 2;
     // Check that the number of spatial dimensions and the kernel shape matches up.
-    ASSERT((nbSpatialDims == kernel_tensor_ptr->getDimensions().nbDims - 2)
+    ASSERT((nbSpatialDims == weightsDims.nbDims - 2)
             && "The input tensor shape misaligns with the input kernel shape.",
         ErrorCode::kUNSUPPORTED_NODE);
 
-    nvinfer1::Dims filter_dim;
-    filter_dim.nbDims = nbSpatialDims;
+    nvinfer1::Dims filterDims;
+    filterDims.nbDims = nbSpatialDims;
     nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
-    nvinfer1::Dims beg_padding = makeDims(nbSpatialDims, 0);
-    nvinfer1::Dims end_padding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims begPadding = makeDims(nbSpatialDims, 0);
+    nvinfer1::Dims endPadding = makeDims(nbSpatialDims, 0);
     nvinfer1::Dims dilations = makeDims(nbSpatialDims, 1);
     nvinfer1::PaddingMode paddingMode;
     bool exclude_padding;
     getKernelParams(
-        ctx, node, &filter_dim, &strides, &beg_padding, &end_padding, paddingMode, exclude_padding, &dilations);
+        ctx, node, &filterDims, &strides, &begPadding, &endPadding, paddingMode, exclude_padding, &dilations);
 
-    for (int i = 1; i <= nbSpatialDims; ++i)
+    for (int32_t i = 1; i <= nbSpatialDims; ++i)
     {
-        ASSERT((filter_dim.d[nbSpatialDims - i]
-                   == kernel_tensor_ptr->getDimensions().d[kernel_tensor_ptr->getDimensions().nbDims - i])
+        ASSERT((filterDims.d[nbSpatialDims - i]
+                   == weightsDims.d[weightsDims.nbDims - i])
                 && "The attribute kernel_shape misalgins with the shape of the input kernel.",
             ErrorCode::kUNSUPPORTED_NODE);
     }
+    OnnxAttrs attrs(node, ctx);
+    int32_t numGroups = attrs.get("group", 1);
+    int32_t nChannel = inputDims.d[1];
 
-    int nChannel = input_dims.d[1];
-    int K = kernel_size.d[0];
-    int C = kernel_size.d[1];
+    // Conv weights shape is provided as [M,C/G,H1,H2], while deconv weights shape is provied as [C,M/G,H1,H2]
+    int32_t M = isConv ? weightsDims.d[0] : weightsDims.d[1] * numGroups;
+    int32_t C = isConv ? weightsDims.d[1] * numGroups : weightsDims.d[0];
 
     if (inputs.size() == 3)
     {
         // TRT-9875 - fix how bias tensor is handled
-        bias_weights = inputs.at(2).weights();
+        biasWeights = inputs.at(2).weights();
     }
 
-    OnnxAttrs attrs(node, ctx);
-    int ngroup = attrs.get("group", 1);
-    ASSERT((nChannel == -1 || C * ngroup == nChannel)
+    ASSERT((nChannel == -1 || C == nChannel)
             && "The attribute group and the kernel shape misalign with the channel size of the input tensor. ",
         ErrorCode::kINVALID_NODE);
 
@@ -2198,46 +2201,46 @@ NodeImportResult convDeconvMultiInput(
     if (isConv)
     {
         nvinfer1::IConvolutionLayer* convLayer
-            = ctx->network()->addConvolutionNd(*input_tensor_ptr, K, filter_dim, kernel_weights, bias_weights);
+            = ctx->network()->addConvolutionNd(*inputTensor, M, filterDims, kernelWeights, biasWeights);
         layer = convLayer;
         ASSERT(convLayer && "Failed to add the Convolution layer.", ErrorCode::kUNSUPPORTED_NODE);
 
         convLayer->setStrideNd(strides);
         convLayer->setPaddingMode(paddingMode);
-        convLayer->setPrePadding(beg_padding);
-        convLayer->setPostPadding(end_padding);
+        convLayer->setPrePadding(begPadding);
+        convLayer->setPostPadding(endPadding);
         convLayer->setDilationNd(dilations);
-        convLayer->setNbGroups(ngroup);
+        convLayer->setNbGroups(numGroups);
     }
     else
     {
         nvinfer1::IDeconvolutionLayer* deconvLayer
-            = ctx->network()->addDeconvolutionNd(*input_tensor_ptr, K, filter_dim, kernel_weights, bias_weights);
+            = ctx->network()->addDeconvolutionNd(*inputTensor, M, filterDims, kernelWeights, biasWeights);
         layer = deconvLayer;
         ASSERT(deconvLayer && "Failed to add the Deconvolution layer.", ErrorCode::kUNSUPPORTED_NODE);
 
         deconvLayer->setStrideNd(strides);
         deconvLayer->setPaddingMode(paddingMode);
-        deconvLayer->setPrePadding(beg_padding);
-        deconvLayer->setPostPadding(end_padding);
+        deconvLayer->setPrePadding(begPadding);
+        deconvLayer->setPostPadding(endPadding);
         deconvLayer->setDilationNd(dilations);
-        deconvLayer->setNbGroups(ngroup);
+        deconvLayer->setNbGroups(numGroups);
     }
 
     // Set kernel weights tensor as second convolution input.
-    layer->setInput(1, *kernel_tensor_ptr);
+    layer->setInput(1, *weightsTensor);
     ctx->registerLayer(layer, getNodeName(node));
 
-    nvinfer1::ITensor* output_tensor_ptr = layer->getOutput(0);
+    nvinfer1::ITensor* outputTensor = layer->getOutput(0);
     if (needToExpandDims)
     {
         // Un-expand spatial dims back to 1D
-        const std::vector<int> axes{3};
-        output_tensor_ptr = squeezeTensor(ctx, node, *output_tensor_ptr, axes);
-        ASSERT(output_tensor_ptr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        const std::vector<int32_t> axes{3};
+        outputTensor = squeezeTensor(ctx, node, *outputTensor, axes);
+        ASSERT(outputTensor && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
-    return {{output_tensor_ptr}};
+    return {{outputTensor}};
 }
 
 nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
