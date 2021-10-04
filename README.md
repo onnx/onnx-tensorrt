@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 8.0.1.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 8.2.0.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,12 +48,12 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.0.1.6](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.0.1.6 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.2.0.6](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.2.0.6 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
-For building within docker, we recommend using and setting up the docker containers as instructed in the main [TensorRT repository](https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment) to build the onnx-tensorrt library.
+For building within docker, we recommend using and setting up the docker containers as instructed in the main (TensorRT repository)[https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment] to build the onnx-tensorrt library.
 
 Once you have cloned the repository, you can build the parser libraries and executables by running:
 
@@ -63,7 +63,9 @@ Once you have cloned the repository, you can build the parser libraries and exec
     // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
-For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command. If your model has Gather or GatherElements operations with negative indices, add `-DSUPPORT_NEGATIVE_GATHER` to the build command. Note that enabling negative-indices gather will have a performance impact on gathers with non-negative indices.
+Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
+
+For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command.
 
 ### Experimental Ops
 All experimental operators will be considered unsupported by the ONNX-TRT's `supportsModel()` function.
@@ -99,7 +101,7 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.0.1.6 supports ONNX release 1.6.0. Install it with:
+TensorRT 8.2.0.6 supports ONNX release 1.6.0. Install it with:
 
     python3 -m pip install onnx==1.6.0
 

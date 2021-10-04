@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 8.0 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 8.2 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, INT8, and BOOL
 
@@ -49,7 +49,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Div                       | Y          | FP32, FP16, INT32 |
 | Dropout                   | Y          | FP32, FP16 |
 | DynamicQuantizeLinear     | N          |
-| Einsum                    | N          |
+| Einsum                    | Y          | FP32, FP16 | Ellipsis and diagonal operations are not supported.
 | Elu                       | Y          | FP32, FP16, INT8 |
 | Equal                     | Y          | FP32, FP16, INT32 |
 | Erf                       | Y          | FP32, FP16 |
@@ -58,9 +58,9 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | EyeLike                   | Y          | FP32, FP16, INT32, BOOL |
 | Flatten                   | Y          | FP32, FP16, INT32, BOOL |
 | Floor                     | Y          | FP32, FP16 |
-| Gather                    | Y          | FP32, FP16, INT32, BOOL | Only positive indices (>=0) are supported <br />Compile with `-DSUPPORT_NEGATIVE_GATHER=1` to enable support for negative indices
-| GatherElements            | Y          | FP32, FP16, INT32, BOOL | Only positive indices (>=0) are supported <br />Compile with `-DSUPPORT_NEGATIVE_GATHER=1` to enable support for negative indices
-| GatherND                  | N          |
+| Gather                    | Y          | FP32, FP16, INT8, INT32 |
+| GatherElements            | Y          | FP32, FP16, INT8, INT32 |
+| GatherND                  | Y          | FP32, FP16, INT8, INT32 |
 | Gemm                      | Y          | FP32, FP16, INT8 |
 | GlobalAveragePool         | Y          | FP32, FP16, INT8 |
 | GlobalLpPool              | Y          | FP32, FP16, INT8 |
@@ -75,7 +75,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | ImageScaler               | Y          | FP32, FP16 |
 | InstanceNormalization     | Y          | FP32, FP16 | Scales `scale` and biases `B` must be initializers. Input rank must be >=3 & <=5                                                                                  |
 | IsInf                     | N          |
-| IsNaN                     | N          |
+| IsNaN                     | Y          | FP32, FP16, INT32 |
 | LeakyRelu                 | Y          | FP32, FP16, INT8 |
 | Less                      | Y          | FP32, FP16, INT32 |
 | LessOrEqual               | Y          | FP32, FP16, INT32 |
@@ -100,12 +100,12 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Multinomial               | N          |
 | Neg                       | Y          | FP32, FP16, INT32 |
 | NegativeLogLikelihoodLoss | N          |
-| NonMaxSuppression         | Y [EXPERIMENTAL] | FP32, FP16 | Inputs `max_output_boxes_per_class`, `iou_threshold`, and `score_threshold` must be initializers. <br />Output has fixed shape and is padded to [`max_output_boxes_per_class`, 3].
+| NonMaxSuppression         | Y [EXPERIMENTAL] | FP32, FP16 | Inputs `max_output_boxes_per_class`, `iou_threshold`, and `score_threshold` must be initializers. Output has fixed shape and is padded to [`max_output_boxes_per_class`, 3].
 | NonZero                   | N          |
 | Not                       | Y          | BOOL |
 | OneHot                    | N          |
 | Or                        | Y          | BOOL |
-| Pad                       | Y          | FP32, FP16, INT8, INT32 | Zero-constant padding on two dimensions only                    |
+| Pad                       | Y          | FP32, FP16, INT8, INT32 |
 | ParametricSoftplus        | Y          | FP32, FP16, INT8 |
 | Pow                       | Y          | FP32, FP16 |
 | PRelu                     | Y          | FP32, FP16, INT8 |
@@ -134,12 +134,12 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | ReverseSequence           | Y          | FP32, FP16 | Dynamic input shapes are unsupported
 | RNN                       | Y          | FP32, FP16 | For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | N          |
-| Round                     | N          |
+| Round                     | Y          | FP32, FP16, INT8 |
 | ScaledTanh                | Y          | FP32, FP16, INT8 |
 | Scan                      | Y          | FP32, FP16 |
-| Scatter                   | N          |
-| ScatterElements           | N          |
-| ScatterND                 | N          |
+| Scatter                   | Y          | FP32, FP16, INT8, INT32 |
+| ScatterElements           | Y          | FP32, FP16, INT8, INT32 |
+| ScatterND                 | Y          | FP32, FP16, INT8, INT32 |
 | Selu                      | Y          | FP32, FP16, INT8|
 | SequenceAt                | N          |
 | SequenceConstruct         | N          |
@@ -150,7 +150,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Shape                     | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Shrink                    | N          |
 | Sigmoid                   | Y          | FP32, FP16, INT8 |
-| Sign                      | N          |
+| Sign                      | Y          | FP32, FP16, INT8, INT32 |
 | Sin                       | Y          | FP32, FP16 |
 | Sinh                      | Y          | FP32, FP16 |
 | Size                      | Y          | FP32, FP16, INT32, INT8, BOOL |
