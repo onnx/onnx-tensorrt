@@ -4,8 +4,8 @@ cmake_minimum_required(VERSION 3.13)
 project(onnx2trt LANGUAGES CXX C)
 
 set(ONNX2TRT_ROOT ${PROJECT_SOURCE_DIR})
-# Set C++11 as standard for the whole project
-set(CMAKE_CXX_STANDARD  11)
+# Set C++14 as standard for the whole project
+set(CMAKE_CXX_STANDARD 14)
 
 # Enable compiler warnings
 if (CMAKE_COMPILER_IS_GNUCC)
@@ -20,12 +20,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(PARSER_LINKER_SCRIPT  ${ONNX2TRT_ROOT}/libnvonnxparser.version)
 
+# Find length of source directory used to pad filename in Status.hpp
+string(LENGTH "${CMAKE_SOURCE_DIR}/" SOURCE_LENGTH)
+add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
+
 #--------------------------------------------------
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 8)
-set(ONNX2TRT_MINOR 0)
-set(ONNX2TRT_PATCH 1)
+set(ONNX2TRT_MINOR 2)
+set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------
@@ -43,24 +47,11 @@ set(IMPORTER_SOURCES
   LoopHelpers.cpp
   RNNHelpers.cpp
   OnnxAttrs.cpp
+  ConditionalHelpers.cpp
 )
 
-# Do not build ONNXIFI by default.
-if(BUILD_ONNXIFI)
-  if (NOT CUDA_TOOLKIT_ROOT_DIR)
-    set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
-  endif()
-  message(debug "CUDA_TOOLKIT_ROOT_DIR: ${CUDA_TOOLKIT_ROOT_DIR}")
-  find_path(CUDA_INCLUDE_DIR cuda_runtime.h
-    HINTS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES include
-  )
+if (BUILD_ONNXIFI)
   set(ONNXIFI_SOURCES onnx_trt_backend.cpp)
-endif()
-
-# Build with negative indices support for Gather:
-if (DEFINED SUPPORT_NEGATIVE_GATHER)
-  add_definitions("-DSUPPORT_NEGATIVE_GATHER=1")
 endif()
 
 # Build executables if BUILD_LIBRARY_ONLY flag is not set
@@ -89,6 +80,16 @@ if(NOT TARGET onnx_proto)
   add_subdirectory(third_party/onnx EXCLUDE_FROM_ALL)
 endif()
 
+# CUDA
+if (NOT CUDA_TOOLKIT_ROOT_DIR)
+  set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
+endif()
+find_path(CUDA_INCLUDE_DIR cuda_runtime.h
+  HINTS ${CUDA_TOOLKIT_ROOT_DIR}
+  PATH_SUFFIXES include
+)
+MESSAGE(STATUS "Found CUDA headers at ${CUDA_INCLUDE_DIR}")
+
 # TensorRT
 find_path(TENSORRT_INCLUDE_DIR NvInfer.h
   HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
@@ -112,7 +113,7 @@ endif()
 # Importer library
 # --------------------------------
 add_library(nvonnxparser SHARED ${IMPORTER_SOURCES})
-target_include_directories(nvonnxparser PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
+target_include_directories(nvonnxparser PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
 target_link_libraries(nvonnxparser PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
 set_target_properties(nvonnxparser PROPERTIES
   VERSION   ${ONNX2TRT_VERSION}
@@ -121,7 +122,7 @@ set_target_properties(nvonnxparser PROPERTIES
   LINK_FLAGS "-Wl,--version-script=${PARSER_LINKER_SCRIPT}"
 )
 add_library(nvonnxparser_static STATIC ${IMPORTER_SOURCES})
-target_include_directories(nvonnxparser_static PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
+target_include_directories(nvonnxparser_static PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
 target_link_libraries(nvonnxparser_static PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
 
 # --------------------------------

@@ -170,11 +170,9 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype);
 // Helper function to convert INT64 weight values into INT32
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
 
-// Helper function to convert negative gather indices into non-negative indices.
-nvinfer1::ITensor* convertGatherIndices(IImporterContext* ctx, nvinfer1::ITensor* data, nvinfer1::ITensor* indices, int32_t axis);
-
-// Helper function to convert ONNX padding into TRT padding. Will update begPadding, endPadding, firstPerm, and secondPerm by reference
-bool convertOnnxPadding(std::vector<int64_t>& onnxPadding, nvinfer1::Dims2& begPadding, nvinfer1::Dims2& endPadding, nvinfer1::Permutation& firstPerm, nvinfer1::Permutation& secondPerm);
+// Helper function to convert ONNX padding into TRT padding. Will update startTensor and totalPaddingTensor by reference
+bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::vector<int32_t>& onnxPadding,
+    nvinfer1::ITensor*& startTensor, nvinfer1::ITensor*& totalPaddingTensor);
 
 // Helper function to check if all of the values in the shift tensor are zeros
 bool shiftIsAllZeros(const ShapedWeights& shiftInt8);
@@ -189,9 +187,9 @@ nvinfer1::ITensor* createZeroTensor(IImporterContext* ctx, nvinfer1::ITensor* da
 bool convertOnnxWeights(
     const ::ONNX_NAMESPACE::TensorProto& onnxTensor, onnx2trt::ShapedWeights* weights, IImporterContext* ctx);
 
-// Helper function to convert multi input convolution/deconvolution
-NodeImportResult convDeconvMultiInput(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, bool isConv);
+// Helper function to convert multi input convolution
+NodeImportResult convMultiInput(
+    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs);
 
 // Helper function to convert a 1D tensor into a scalar
 nvinfer1::ITensor* convertToScalar(IImporterContext* ctx, nvinfer1::ITensor* inpTensor);
@@ -210,7 +208,7 @@ bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1
 
 // Helper function to import an ONNX elementwise op into TRT
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
+    const std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper function to flatten a tensor on a given axis
 nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, int axis = 0, bool regLayer = false);
@@ -373,5 +371,9 @@ ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 
 //! Helper function to add SoftMax layer.
 nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input);
+
+// Helper function to import ONNX scatter nodes into TRT
+nvinfer1::IScatterLayer* addScatterLayer(
+    IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode);
 
 } // namespace onnx2trt

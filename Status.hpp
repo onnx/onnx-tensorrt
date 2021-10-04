@@ -9,6 +9,14 @@
 #include <cassert>
 #include <string>
 
+#ifndef ENABLE_STD_PLUGIN
+#define ENABLE_STD_PLUGIN 1
+#endif // ENABLE_STD_PLUGIN
+
+#ifndef ENABLE_SAFE_PLUGIN
+#define ENABLE_SAFE_PLUGIN 0
+#endif // ENABLE_SAFE_PLUGIN
+
 // Used to strip out build path information from debug prints
 #if defined(SOURCE_LENGTH)
 #define __FILENAME__ (__FILE__ + SOURCE_LENGTH)

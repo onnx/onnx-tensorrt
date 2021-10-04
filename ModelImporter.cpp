@@ -223,27 +223,96 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
     return Status::success();
 }
 
-Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const& input, nvinfer1::ITensor** tensor)
+Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const& input, nvinfer1::ITensor** tensor,
+    std::vector<NamedDimension>& namedDims)
 {
     auto const& onnxDtype = input.type().tensor_type();
     nvinfer1::DataType trtDtype;
     ASSERT_INPUT(convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX date type to TensorRT data type.", ErrorCode::kUNSUPPORTED_NODE, input.name());
     nvinfer1::Dims trt_dims;
-    ASSERT_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims) && "Failed to convert ONNX dimensions to TensorRT dimensions.", ErrorCode::kUNSUPPORTED_GRAPH, input.name());
+    size_t const oldNbNamedDimensions = namedDims.size();
+    ASSERT_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims, namedDims) && "Failed to convert ONNX dimensions to TensorRT dimensions.", ErrorCode::kUNSUPPORTED_GRAPH, input.name());
     nvinfer1::ITensor* userInput = ctx->getUserInput(input.name().c_str());
     if (userInput)
     {
         ASSERT_INPUT(userInput && "User input is missing.", ErrorCode::kINVALID_VALUE, input.name());
-        // Note: We intentionally don't check dimensions/dtype here so that users can change the input shape/type if
-        // they want to.
+        // Intentionally don't check dimensions/dtype here so that users can change the input shape/type if
+        // they want to. However, equalities implied by dimension names are nonetheless respected.
         *tensor = userInput;
-        return Status::success();
+    }
+    else
+    {
+        LOG_VERBOSE(
+            "Adding network input: " << input.name() << " with dtype: " << trtDtype << ", dimensions: " << trt_dims);
+        ASSERT_INPUT( (*tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims)) && "Failed to add input to the network.",
+            ErrorCode::kUNSUPPORTED_NODE, input.name());
     }
 
-    LOG_VERBOSE(
-        "Adding network input: " << input.name() << " with dtype: " << trtDtype << ", dimensions: " << trt_dims);
-    ASSERT_INPUT( (*tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims)) && "Failed to add input to the network.",
-        ErrorCode::kUNSUPPORTED_NODE, input.name());
+    // Fill in field `tensor` for any dimensions that had names in the ONNX.
+    for (auto i = oldNbNamedDimensions; i < namedDims.size(); ++i)
+    {
+        namedDims[i].tensor = *tensor;
+    }
+    return Status::success();
+}
+
+//! Add equality assertions for dimensions with the same name.
+static Status assertDimsWithSameNameAreEqual(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
+{
+    // Cache for IShapeLayer
+    std::unordered_map<nvinfer1::ITensor const*, nvinfer1::IShapeLayer*> shapeMap;
+
+    // Sort records by name of dimension, using stable_sort for reproducibility.
+    std::stable_sort(namedDims.begin(), namedDims.end(),
+        [](const NamedDimension& x, const NamedDimension& y) { return x.dimParam < y.dimParam; });
+
+    // Each loop iteration covers a sequence of named dimensions with the same name.
+    // For each sequence, add IAssertionLayers that assert that the values are equal.
+    // TensorRT knows about transitive closure of equality, so just add the assertions
+    // for adjacent records.
+    decltype(namedDims.begin()) j;
+    for (auto i = namedDims.begin(); i < namedDims.end(); i = j)
+    {
+        // Walk j forward so that [i,j) is indices of named dimensions with the same name.
+        j = i;
+        do
+        {
+            ++j;
+        } while (j != namedDims.end() && j->dimParam == i->dimParam);
+
+        if (j - i < 2)
+        {
+            // Single occurrence of name is uninteresting.
+            continue;
+        }
+
+        std::ostringstream message;
+        message << "input dimensions named " << i->tensor->getName() << " must be equal";
+
+        // prev is the current end of the daisy chain.
+        nvinfer1::ITensor* prev = nullptr;
+        for (auto k = i; k < j; ++k)
+        {
+            // Create ITensor "next" with dimension length for record k.
+            auto& shape = shapeMap[k->tensor];
+            if (shape == nullptr)
+            {
+                shape = ctx->network()->addShape(*k->tensor);
+            }
+            auto* slice = ctx->network()->addSlice(*shape->getOutput(0), {1, {k->index}}, {1, {1}}, {1, {1}});
+            nvinfer1::ITensor* next = slice->getOutput(0);
+
+            if (prev)
+            {
+                // Add a link to the chain.
+                auto* equal = ctx->network()->addElementWise(*prev, *next, nvinfer1::ElementWiseOperation::kEQUAL);
+                auto* assertion = ctx->network()->addAssertion(*equal->getOutput(0), message.str().c_str());
+                ASSERT(assertion != nullptr && "addAssertion failed", ErrorCode::kMODEL_DESERIALIZE_FAILED);
+            }
+            prev = next;
+        }
+    }
+
     return Status::success();
 }
 
@@ -258,19 +327,20 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
         initializers.emplace(initializer.name());
     }
 
+    std::vector<NamedDimension> namedDims;
     for (const ::ONNX_NAMESPACE::ValueInfoProto& input : graph.input())
     {
         TensorOrWeights tensor;
         if (!initializers.count(input.name()))
         {
-            nvinfer1::ITensor* tensor_ptr;
-            CHECK(importInput(ctx, input, &tensor_ptr));
+            nvinfer1::ITensor* tensor_ptr{nullptr};
+            CHECK(importInput(ctx, input, &tensor_ptr, namedDims));
             tensor = tensor_ptr;
         }
         ctx->registerTensor(std::move(tensor), input.name());
     }
 
-    return Status::success();
+    return assertDimsWithSameNameAreEqual(ctx, namedDims);
 }
 
 Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
@@ -419,7 +489,6 @@ bool ModelImporter::supportsModel(
     }
     return allSupported;
 }
-
 // Mark experimental ops as unsupported
 bool ModelImporter::supportsOperator(const char* op_name) const
 {
@@ -508,8 +577,10 @@ Status ModelImporter::importModel(
     ASSERT(!_importer_ctx.network()->hasImplicitBatchDimension() && "This version of the ONNX parser only supports TensorRT INetworkDefinitions with an explicit batch dimension. Please ensure the network was created using the EXPLICIT_BATCH NetworkDefinitionCreationFlag.", ErrorCode::kINVALID_VALUE);
     auto* ctx = &_importer_ctx;
     _importer_ctx.clearOpsets();
+#if ENABLE_STD_PLUGIN
     // Initialize plugin registry
     initLibNvInferPlugins(static_cast<void*>(&ctx->logger()), "");
+#endif // ENABLE_STD_PLUGIN
     for (int i = 0; i < model.opset_import().size(); ++i)
     {
         std::string domain = model.opset_import(i).domain();

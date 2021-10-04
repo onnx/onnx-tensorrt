@@ -43,14 +43,6 @@ public:
     {
         delete this;
     }
-    // virtual void registerOpImporter(std::string op,
-    //                                NodeImporter const &node_importer) override {
-    //  // Note: This allows existing importers to be replaced
-    //  _op_importers[op] = node_importer;
-    //}
-    // virtual Status const &setInput(const char *name,
-    //                               nvinfer1::ITensor *input) override;
-    // virtual Status const& setOutput(const char* name, nvinfer1::ITensor** output) override;
     int getNbErrors() const override
     {
         return _errors.size();

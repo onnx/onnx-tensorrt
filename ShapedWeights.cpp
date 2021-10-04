@@ -143,6 +143,7 @@ bool transposeWeights(ShapedWeights const& weights, nvinfer1::Permutation const&
         new_shape.d[d] = shape.d[perm.order[d]];
         result->shape.d[d] = new_shape.d[d];
     }
+    
 
     if (shape.nbDims <= 4)
     {
