@@ -1205,8 +1205,8 @@ NodeImportResult QuantDequantLinearHelper(
     else
     {
         // Per-Tensor Quantization.
-        // Currently axis is ignored by TRT, but it is required here by addScaleNd (for computing nbSpatialDims).
-        axis = 1;
+        // Currently axis is ignored by TRT, but it is required here by addScaleNd (for computing nbSpatialDims). Set to a sane default depending on rank the input tensor.
+        axis = nbDims <= 1 ? 0 : 1;
     }
 
     nvinfer1::ILayer* layer = nullptr;
