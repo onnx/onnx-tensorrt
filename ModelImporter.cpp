@@ -489,12 +489,16 @@ bool ModelImporter::supportsModel(
     }
     return allSupported;
 }
-// Mark experimental ops as unsupported
+// Mark experimental ops as unsupported, mark plugin ops as supported
 bool ModelImporter::supportsOperator(const char* op_name) const
 {
     if (std::string(op_name) == "NonMaxSuppression")
     {
         return false;
+    }
+    if (std::string(op_name) == "EfficientNMS_TRT" || std::string(op_name) == "PyramidROIAlign_TRT")
+    {
+        return true;
     }
     return _op_importers.count(op_name);
 }
