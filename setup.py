@@ -2,7 +2,6 @@
 
 import os
 import sys
-import onnx_tensorrt
 from setuptools import setup, find_packages
 
 def no_publish():
@@ -22,7 +21,7 @@ def main():
     no_publish()
     setup(
         name="onnx_tensorrt",
-        version=onnx_tensorrt.__version__,
+        version="8.2.1",
         description="ONNX-TensorRT - TensorRT backend for running ONNX models",
         long_description=open("README.md", "r", encoding="utf-8").read(),
         url="https://github.com/onnx/onnx-tensorrt",
