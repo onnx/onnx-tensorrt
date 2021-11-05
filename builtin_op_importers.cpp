@@ -1158,15 +1158,15 @@ NodeImportResult QuantDequantLinearHelper(
 
     // Read the optional quantization axis attribute.
     OnnxAttrs attrs(node, ctx);
-    const int32_t INVALID_AXIS = dataInput.getDimensions().nbDims;
-    int32_t axis = attrs.get<int>("axis", INVALID_AXIS);
+    const int32_t nbDims = dataInput.getDimensions().nbDims;
+    int32_t axis = attrs.get<int>("axis", nbDims);
 
     if (scaleSize != 1)
     {
         // Per-Channel Quantization.
         // We assume this is weight-quantization with dimensions KCRS (K is # output channels).
         // Activations-quantization does not support per-axis quantization.
-        if (axis == INVALID_AXIS)
+        if (axis == nbDims)
         {
             axis = 0;
         }
