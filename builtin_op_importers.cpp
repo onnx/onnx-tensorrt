@@ -1381,12 +1381,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand)
     const ShapeTensor starts = similar(ctx, newDims, 0);
     // Do the broadcast rule.
     const ShapeTensor sizes = broadcast(ctx, newDims, newShape);
-
-    const ShapeTensor delta = sub(ctx, sizes, newDims);
+    // Compute (x > 1 ? 1 : 0) for x in newDims, assuming positive x, using only TensorRT operations.
     const ShapeTensor one = shapeVector(1);
-    // stride 1 for dims where sizes same as Slice input, 0 for not the same.
-    // delta is non-negative for Expand here
-    const ShapeTensor strides = sub(ctx, one, min(ctx, one, delta));
+    const ShapeTensor strides = min(ctx, one, sub(ctx, newDims, one));
 
     nvinfer1::ISliceLayer* sliceLayer = addSlice(ctx, newInputTensor, starts, sizes, strides);
     ctx->registerLayer(sliceLayer, getNodeName(node));
@@ -3470,7 +3467,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceSum)
 }
 DEFINE_BUILTIN_OP_IMPORTER(ReduceSumSquare)
 {
-    nvinfer1::ITensor& tensor = inputs.at(0).tensor();
+    nvinfer1::ITensor& tensor = convertToTensor(inputs.at(0), ctx);
     auto* sqr_layer = ctx->network()->addElementWise(tensor, tensor, nvinfer1::ElementWiseOperation::kPROD);
     ASSERT(sqr_layer && "Failed to add an ElementWise layer.", ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* sqr_tensorPtr = sqr_layer->getOutput(0);
@@ -4070,21 +4067,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
 
 DEFINE_BUILTIN_OP_IMPORTER(ScatterND)
 {
-    auto* layer = addScatterLayer(ctx, inputs, nvinfer1::ScatterMode::kND);
-    ctx->registerLayer(layer, getNodeName(node));
-    RETURN_FIRST_OUTPUT(layer);
+    return addScatterLayer(ctx, node, inputs, nvinfer1::ScatterMode::kND);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ScatterElements)
 {
-    auto* layer = addScatterLayer(ctx, inputs, nvinfer1::ScatterMode::kELEMENT);
     OnnxAttrs attrs(node, ctx);
     int32_t axis = attrs.get<int>("axis", 0);
     int32_t nbDims = inputs.at(0).shape().nbDims;
     CHECK(convertAxis(axis, nbDims));
-    layer->setAxis(axis);
-    ctx->registerLayer(layer, getNodeName(node));
-    RETURN_FIRST_OUTPUT(layer);
+    return addScatterLayer(ctx, node, inputs, nvinfer1::ScatterMode::kELEMENT, axis);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Scatter)

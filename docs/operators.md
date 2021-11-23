@@ -31,13 +31,13 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Cast                      | Y          | FP32, FP16, INT32, INT8, BOOL |                                                                                                       |
 | Ceil                      | Y          | FP32, FP16 |
 | Celu                      | Y          | FP32, FP16 |
-| Clip                      | Y          | FP32, FP16, INT8 | `min` and `max` clip values must be initializers                                                                                         |
+| Clip                      | Y          | FP32, FP16, INT8 |                                                                                        |
 | Compress                  | N          |
 | Concat                    | Y          | FP32, FP16, INT32, INT8, BOOL |
 | ConcatFromSequence        | N          |
 | Constant                  | Y          | FP32, FP16, INT32, INT8, BOOL |
 | ConstantOfShape           | Y          | FP32 |
-| Conv                      | Y          | FP32, FP16, INT8 | 2D or 3D convolutions only                                                                                                               |
+| Conv                      | Y          | FP32, FP16, INT8 | 2D or 3D convolutions only\. Weights `W` must be an initailizer                                                                                            |
 | ConvInteger               | N          |
 | ConvTranspose             | Y          | FP32, FP16, INT8 | 2D or 3D deconvolutions only\. Weights `W` must be an initializer                                                                        |
 | Cos                       | Y          | FP32, FP16 |
@@ -49,7 +49,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Div                       | Y          | FP32, FP16, INT32 |
 | Dropout                   | Y          | FP32, FP16 |
 | DynamicQuantizeLinear     | N          |
-| Einsum                    | Y          | FP32, FP16 | Ellipsis and diagonal operations are not supported.
+| Einsum                    | Y          | FP32, FP16 | Ellipsis and diagonal operations are not supported. Broadcasting between inputs is not supported
 | Elu                       | Y          | FP32, FP16, INT8 |
 | Equal                     | Y          | FP32, FP16, INT32 |
 | Erf                       | Y          | FP32, FP16 |
@@ -89,7 +89,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | MatMul                    | Y          | FP32, FP16 |
 | MatMulInteger             | N          |
 | Max                       | Y          | FP32, FP16, INT32 |
-| MaxPool                   | Y          | FP32, FP16, INT8 |
+| MaxPool                   | Y          | FP32, FP16, INT8 | 2D or 3D pooling only. `Indices` output tensor unsupported
 | MaxRoiPool                | N          |
 | MaxUnpool                 | N          |
 | Mean                      | Y          | FP32, FP16, INT32 |
@@ -114,8 +114,8 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | QuantizeLinear            | Y          | FP32, FP16 | `y_zero_point` must be 0                                                                   |
 | RandomNormal              | N          |
 | RandomNormalLike          | N          |
-| RandomUniform             | Y          | FP32, FP16 |
-| RandomUniformLike         | Y          | FP32, FP16 |
+| RandomUniform             | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
+| RandomUniformLike         | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
 | Range                     | Y          | FP32, FP16, INT32 | Floating point inputs are only supported if `start`, `limit`, and `delta` inputs are initializers                                                 |
 | Reciprocal                | N          |
 | ReduceL1                  | Y          | FP32, FP16 |
@@ -160,7 +160,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Softplus                  | Y          | FP32, FP16, INT8 |
 | Softsign                  | Y          | FP32, FP16, INT8 |
 | SpaceToDepth              | Y          | FP32, FP16, INT32 |
-| Split                     | Y          | FP32, FP16, INT32, BOOL | `split` must be an initializer                                                                                                           |
+| Split                     | Y          | FP32, FP16, INT32, BOOL |                                                                                                          |
 | SplitToSequence           | N          |
 | Sqrt                      | Y          | FP32, FP16 |
 | Squeeze                   | Y          | FP32, FP16, INT32, INT8, BOOL | `axes` must be an initializer                                                                                                            |
@@ -172,7 +172,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | TfIdfVectorizer           | N          |
 | ThresholdedRelu           | Y          | FP32, FP16, INT8 |
 | Tile                      | Y          | FP32, FP16, INT32, BOOL |
-| TopK                      | Y          | FP32, FP16 |
+| TopK                      | Y          | FP32, FP16 | `K` input must be an initializer
 | Transpose                 | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Unique                    | N          |
 | Unsqueeze                 | Y          | FP32, FP16, INT32, INT8, BOOL | `axes` must be a constant tensor                                                                                                         |

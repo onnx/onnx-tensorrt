@@ -84,9 +84,8 @@ class ImporterContext final : public IImporterContext
     int64_t mSuffixCounter{0}; // increasing suffix counter used to uniquify layer names.
     std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
     StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
-    std::string mOnnxFileLocation;       // Keep track of the directory of the parsed ONNX file
+    std::string mOnnxFileLocation; // Keep track of the directory of the parsed ONNX file
     std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
-    StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
 
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
@@ -179,15 +178,6 @@ public:
             LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
 
             layer->setName(uniqueName.c_str());
-            if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
-            {
-                if (basename != uniqueName)
-                {
-                    LOG_ERROR("Constant layer: " << uniqueName << " can be a duplicate of: " << basename);
-                    assert(!"Internal error: duplicate constant layers for the same weights");
-                }
-                mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
-            }
         }
     }
 
@@ -281,20 +271,6 @@ public:
     {
         return mErrorWrapper ? mErrorWrapper->getErrorRecorder() : nullptr;
     }
-    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const final
-    {
-        if (name == nullptr)
-        {
-            return nullptr;
-        }
-        auto const iter = mConstantLayers.find(name);
-        if (iter == mConstantLayers.end())
-        {
-            return nullptr;
-        }
-        return iter->second;
-    }
-
 private:
     std::string generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
     {

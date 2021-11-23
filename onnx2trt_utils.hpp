@@ -373,7 +373,7 @@ ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input);
 
 // Helper function to import ONNX scatter nodes into TRT
-nvinfer1::IScatterLayer* addScatterLayer(
-    IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode);
+NodeImportResult addScatterLayer(
+    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
 
 } // namespace onnx2trt

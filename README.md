@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 8.2.0.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 8.2.1.8](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.2.0.6](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.2.0.6 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.2.1.8](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.2.1.8 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -101,9 +101,9 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.2.0.6 supports ONNX release 1.6.0. Install it with:
+TensorRT 8.2.1.8 supports ONNX release 1.8.0. Install it with:
 
-    python3 -m pip install onnx==1.6.0
+    python3 -m pip install onnx==1.8.0
 
 The ONNX-TensorRT backend can be installed by running:
 

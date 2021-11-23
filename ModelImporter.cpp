@@ -287,12 +287,16 @@ static Status assertDimsWithSameNameAreEqual(ImporterContext* ctx, std::vector<N
         }
 
         std::ostringstream message;
-        message << "input dimensions named " << i->tensor->getName() << " must be equal";
+        message << "For input: '" << i->tensor->getName()
+                << "' all named dimensions that share the same name must be equal. Note: Named dimensions were present on the following axes: ";
 
         // prev is the current end of the daisy chain.
         nvinfer1::ITensor* prev = nullptr;
         for (auto k = i; k < j; ++k)
         {
+            message << (prev ? ", " : "") << k->index << " (name: "
+                    << "'" << k->dimParam << "')";
+
             // Create ITensor "next" with dimension length for record k.
             auto& shape = shapeMap[k->tensor];
             if (shape == nullptr)
@@ -489,6 +493,7 @@ bool ModelImporter::supportsModel(
     }
     return allSupported;
 }
+
 // Mark experimental ops as unsupported, mark plugin ops as supported
 bool ModelImporter::supportsOperator(const char* op_name) const
 {
@@ -496,13 +501,12 @@ bool ModelImporter::supportsOperator(const char* op_name) const
     {
         return false;
     }
-    if (std::string(op_name) == "EfficientNMS_TRT" || std::string(op_name) == "PyramidROIAlign_TRT")
+    if (std::string(op_name) == "EfficientNMS_TRT" || std::string(op_name) == "PyramidROIAlign_TRT" || std::string(op_name) == "MultilevelCropAndResize_TRT")
     {
         return true;
     }
     return _op_importers.count(op_name);
 }
-
 bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size)
 {
     _current_node = -1;

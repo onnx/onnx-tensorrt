@@ -776,12 +776,6 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx
     }
     // Handle non-tensor indices input by adding a new constant layer to the network.
     ShapedWeights& weights = input.weights();
-
-    auto const existingConstantLayer = ctx->getConstantLayer(weights.getName());
-    if (existingConstantLayer != nullptr)
-    {
-        return *(existingConstantLayer->getOutput(0));
-    }
     // Note the TRT doesn't natively handle boolean weights. First create an INT32 weights copy of the boolean weights,
     // then cast it back to bool within TRT.
     if (weights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
@@ -2314,13 +2308,42 @@ nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
     return softMax->getOutput(0);
 }
 
-nvinfer1::IScatterLayer* addScatterLayer(
-    IImporterContext* ctx, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode)
+NodeImportResult addScatterLayer(
+    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis)
 {
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor& indices = convertToTensor(inputs.at(1), ctx);
     nvinfer1::ITensor& updates = convertToTensor(inputs.at(2), ctx);
-    return ctx->network()->addScatter(data, indices, updates, mode);
+
+    // Validate input dimensions
+    if (mode == nvinfer1::ScatterMode::kELEMENT)
+    {
+        const auto dataDims = data.getDimensions();
+        const auto indicesDims = indices.getDimensions();
+        const auto updatesDims = updates.getDimensions();
+
+        // Ranks must all be the same
+        ASSERT(dataDims.nbDims == indicesDims.nbDims && dataDims.nbDims == updatesDims.nbDims && "Input dimensions to ScatterElements must have the same rank!",
+                ErrorCode::kUNSUPPORTED_NODE);
+
+        // Corresponding dimensions of indices and updates must be <= data
+        for (int32_t i = 0; i < dataDims.nbDims; ++i)
+        {
+            if (indicesDims.d[i] != -1 && dataDims.d[i] != -1)
+            {
+                ASSERT(indicesDims.d[i] <= dataDims.d[i] && "Indices dimensions must be less than data dimensions!", ErrorCode::kUNSUPPORTED_NODE);
+            }
+            if (updatesDims.d[i] != -1 && dataDims.d[i] != -1)
+            {
+                ASSERT(updatesDims.d[i] <= dataDims.d[i] && "Updates dimensions must be less than data dimensions!", ErrorCode::kUNSUPPORTED_NODE);
+            }
+        }
+    }
+
+    auto* layer = ctx->network()->addScatter(data, indices, updates, mode);
+    layer->setAxis(axis);
+    ctx->registerLayer(layer, getNodeName(node));
+    return {{layer->getOutput(0)}};
 }
 
 } // namespace onnx2trt
