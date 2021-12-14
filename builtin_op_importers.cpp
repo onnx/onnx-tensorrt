@@ -422,9 +422,9 @@ NodeImportResult elementwiseClipHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::
     }
     else
     {
-        alpha = static_cast<ScalarType>(attrs.get("min", alpha));
+        alpha = static_cast<ScalarType>(attrs.get("min", std::numeric_limits<float>::min()));
         alphaT = addConstantScalar(ctx, alpha, onnxType)->getOutput(0);
-        beta = static_cast<ScalarType>(attrs.get("max", beta));
+        beta = static_cast<ScalarType>(attrs.get("max", std::numeric_limits<float>::max()));
         betaT = addConstantScalar(ctx, beta, onnxType)->getOutput(0);
     }
 
