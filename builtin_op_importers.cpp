@@ -11,6 +11,7 @@
 #include "OnnxAttrs.hpp"
 #include "RNNHelpers.hpp"
 #include "ShapeTensor.hpp"
+#include "Status.hpp"
 #include "onnx2trt_utils.hpp"
 
 #include <algorithm> // For std::min, std::max
@@ -381,6 +382,7 @@ template <typename ScalarType>
 NodeImportResult elementwiseClipHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     std::vector<TensorOrWeights>& inputs, size_t numInputs, int32_t onnxType)
 {
+    ASSERT( (ctx->getOpsetVersion() > 11 || onnxType == ::ONNX_NAMESPACE::TensorProto::FLOAT || onnxType == ::ONNX_NAMESPACE::TensorProto::DOUBLE || onnxType == ::ONNX_NAMESPACE::TensorProto::FLOAT16 ) && "Clip <= 11 only supports float/float16/double", ErrorCode::kUNSUPPORTED_NODE);
     OnnxAttrs attrs(node, ctx);
     auto* input = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* alphaT{nullptr};
