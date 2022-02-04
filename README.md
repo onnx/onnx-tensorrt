@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 8.2.1.8](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the Master branch is for the latest version of [TensorRT 8.2.3.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.2.1.8](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.2.1.8 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.2.3.0](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.2.3.0 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 

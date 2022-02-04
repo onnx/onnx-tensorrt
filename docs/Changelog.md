@@ -2,6 +2,10 @@
 
 # ONNX-TensorRT Changelog
 
+## 22.02 Container Release - 2021-02-03
+### Fixes
+ - Fixed naming issue in parsing `If` conditonal graphs
+
 ## TensorRT 8.2 GA Release - 2021-11-23
 
 ### Added

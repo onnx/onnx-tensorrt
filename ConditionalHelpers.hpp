@@ -22,12 +22,13 @@ namespace onnx2trt
 // The result is returned in `subgraphInputs`, which is a map indexed by layer-name and with values indicating a set
 // of external input indices.
 Status getSubgraphInputs(
-    const ::ONNX_NAMESPACE::GraphProto& graph, std::unordered_map<std::string, std::set<int32_t>>& subgraphInputs);
+    const std::vector<nvinfer1::ILayer*>& newLayers,
+    std::unordered_map<std::string, std::set<int32_t>>& subgraphInputs);
 
 // Given a subgraph, find all of its external outputs (tensors exiting the subgraph).
 // The result is returned in `subgraphInputs`, which is a map indexed by layer-name and with values indicating a set
 // of external outputs indices.
-Status getSubgraphOutputs(const ::ONNX_NAMESPACE::GraphProto& graph,
+Status getSubgraphOutputs(const std::vector<nvinfer1::ILayer*>& newLayers,
     std::unordered_map<std::string, std::set<int32_t>>& subgraphOutputs,
     const std::vector<std::string>& reportedOutputs);
 
@@ -40,7 +41,7 @@ using InputsMap = std::unordered_map<std::string, nvinfer1::IIfConditionalInputL
 
 // Add IIfConditionalInputLayers to the inputs of the subgraph indicated by `subgraph`.
 onnx2trt::Status addIfInputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    const ::ONNX_NAMESPACE::GraphProto& subgraph, const std::vector<nvinfer1::ILayer*>& newLayers);
+    const std::vector<nvinfer1::ILayer*>& newLayers);
 
 // Add IIfConditionalOutputLayers to the outputs of the subgraph indicated by `subgraph`.
 onnx2trt::Status addIfOutputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional,
