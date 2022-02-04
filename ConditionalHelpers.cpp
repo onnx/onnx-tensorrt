@@ -115,14 +115,14 @@ Status addConditionalInputIfNeeded(IImporterContext* ctx, nvinfer1::IIfCondition
 
 // Add IConditionalInputLayers to `layer`'s inputs.
 Status addIfInputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    const ::ONNX_NAMESPACE::GraphProto& subgraph, const std::vector<nvinfer1::ILayer*>& newLayers)
+    const std::vector<nvinfer1::ILayer*>& newLayers)
 {
     // Find all of the tensors entering the subgraph.
     // The node-names are from the ONNX context.
     using NodeName = std::string;
     using InputIndex = int32_t;
     std::unordered_map<NodeName, std::set<InputIndex>> subgraphInputsMap;
-    getSubgraphInputs(subgraph, subgraphInputsMap);
+    getSubgraphInputs(newLayers, subgraphInputsMap);
 
     // Add a ConditionalInputLayer in front of each input that is external to the subgraph.
     for (const auto& layer : newLayers)
@@ -158,10 +158,10 @@ Status addIfOutputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* condit
 
     std::vector<std::string> thenReportedOutputs;
     getReportedOutputs(thenGraph, thenReportedOutputs);
-    getSubgraphOutputs(thenGraph, thenOutputs, thenReportedOutputs);
+    getSubgraphOutputs(thenLayers, thenOutputs, thenReportedOutputs);
     std::vector<std::string> elseReportedOutputs;
-    getReportedOutputs(thenGraph, elseReportedOutputs);
-    getSubgraphOutputs(elseGraph, elseOutputs, elseReportedOutputs);
+    getReportedOutputs(elseGraph, elseReportedOutputs);
+    getSubgraphOutputs(elseLayers, elseOutputs, elseReportedOutputs);
 
     // Retrieve the output tensors of a subgraph (tensors exiting the subgraph).
     auto getSubgraphOutputTensors
@@ -212,18 +212,17 @@ Status addIfOutputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* condit
 }
 
 // Given a subgraph, find all of its external inputs/outputs (tensors entering/exiting the subgraph).
-Status getSubgraphTensors(const ::ONNX_NAMESPACE::GraphProto& graph,
+Status getSubgraphTensors(const std::vector<nvinfer1::ILayer*>& newLayers,
     std::unordered_map<std::string, std::set<int32_t>>& externalOutputs, bool extractOutputs,
     const std::vector<std::string>* reportedOutputs = nullptr)
 {
-    std::vector<size_t> topoOrder;
-    ASSERT(toposort(graph.node(), &topoOrder) && "Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH);
     using NodeName = std::string;
     using TensorName = std::string;
     using PortIndex = int32_t;
     using Port = std::pair<NodeName, PortIndex>;
-    std::unordered_set<TensorName> outputTensors;
-    std::unordered_set<TensorName> inputTensors;
+    using TensorsSet = std::unordered_set<nvinfer1::ITensor*>;
+    TensorsSet outputTensors;
+    TensorsSet inputTensors;
 
     // To determine which tensors are entering or exiting the given graph, we first collect the sets of all input and
     // output tensors. Then we categorize the tensors according to this logic:
@@ -231,40 +230,49 @@ Status getSubgraphTensors(const ::ONNX_NAMESPACE::GraphProto& graph,
     //  Exiting tensors := {outputs} - {inputs}
 
     // Collect all input and output tensors belonging to nodes in the graph.
-    for (const auto& nodeIndex : topoOrder)
+
+    auto getTensors = [](nvinfer1::ILayer const* l, bool const input, auto inserter) {
+        auto const count = input ? l->getNbInputs() : l->getNbOutputs();
+        for (int32_t i = 0; i < count; i++)
+        {
+            inserter(input ? l->getInput(i) : l->getOutput(i));
+        }
+    };
+
+    for (const auto& l : newLayers)
     {
-        const auto& node = graph.node(nodeIndex);
-        for (const auto& outputName : node.output())
-        {
-            outputTensors.insert(outputName);
-        }
-        for (const auto& inputName : node.input())
-        {
-            inputTensors.insert(inputName);
-        }
+        getTensors(l, false, [&](nvinfer1::ITensor* t) { outputTensors.insert(t); });
+        getTensors(l, true, [&](nvinfer1::ITensor* t) { inputTensors.insert(t); });
     }
 
-    using NodeProto = const ::ONNX_NAMESPACE::NodeProto;
-    auto getOutputs = [](NodeProto& node) { return node.output(); };
-    auto getInputs = [](NodeProto& node) { return node.input(); };
+    using TensorsVec = std::vector<nvinfer1::ITensor*>;
+    auto getOutputs = [&](nvinfer1::ILayer const* l, TensorsVec res) {
+        getTensors(l, false, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
+    };
+
+    auto getInputs = [&](nvinfer1::ILayer const* l, TensorsVec res) {
+        getTensors(l, true, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
+    };
 
     // Retrieve the list of tensors either exiting or entering the subgraph.
     std::unordered_map<TensorName, std::vector<Port>> externalPortsMap;
-    auto filterTensors = [&](std::unordered_set<TensorName> tensors, auto nodeAccessor) {
-        for (const auto& nodeIndex : topoOrder)
+    auto filterTensors = [&](TensorsSet const& tensors, auto getNodeAccessor) {
+        for (nvinfer1::ILayer const* l : newLayers)
         {
-            const auto& node = graph.node(nodeIndex);
-            const auto& nodeName = getNodeName(node);
+            const auto& nodeName = l->getName();
             PortIndex i = 0;
 
-            for (const auto& tensorName : nodeAccessor(node))
+            TensorsVec nodeAccessor;
+            getNodeAccessor(l, nodeAccessor);
+            for (const auto& tensor : nodeAccessor)
             {
-                if (tensorName.empty())
+                if (tensor == nullptr)
                 {
                     continue;
                 }
-                if (tensors.count(tensorName) == 0)
+                if (tensors.count(tensor) == 0)
                 {
+                    TensorName tensorName = tensor->getName();
                     auto prefixFound = false;
                     if (reportedOutputs)
                     {
@@ -314,17 +322,17 @@ Status getSubgraphTensors(const ::ONNX_NAMESPACE::GraphProto& graph,
     return Status::success();
 }
 
-Status getSubgraphOutputs(const ::ONNX_NAMESPACE::GraphProto& graph,
+Status getSubgraphOutputs(const std::vector<nvinfer1::ILayer*>& newLayers,
     std::unordered_map<std::string, std::set<int32_t>>& externalOutputs,
     const std::vector<std::string>& reportedOutputs)
 {
-    return getSubgraphTensors(graph, externalOutputs, true, &reportedOutputs);
+    return getSubgraphTensors(newLayers, externalOutputs, true, &reportedOutputs);
 }
 
-Status getSubgraphInputs(
-    const ::ONNX_NAMESPACE::GraphProto& graph, std::unordered_map<std::string, std::set<int32_t>>& externalInputs)
+Status getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers,
+    std::unordered_map<std::string, std::set<int32_t>>& externalInputs)
 {
-    return getSubgraphTensors(graph, externalInputs, false);
+    return getSubgraphTensors(newLayers, externalInputs, false);
 }
 
 } // namespace onnx2trt

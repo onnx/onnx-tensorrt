@@ -2170,8 +2170,8 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
 
     using InputsMap = std::unordered_map<std::string, nvinfer1::IIfConditionalInputLayer*>;
     InputsMap inputsMap;
-    CHECK(addIfInputLayers(ctx, conditional, inputsMap, thenGraph, thenLayers));
-    CHECK(addIfInputLayers(ctx, conditional, inputsMap, elseGraph, elseLayers));
+    CHECK(addIfInputLayers(ctx, conditional, inputsMap, thenLayers));
+    CHECK(addIfInputLayers(ctx, conditional, inputsMap, elseLayers));
     CHECK(addIfOutputLayers(ctx, conditional, thenGraph, thenLayers, elseGraph, elseLayers, graphOutputs));
 
     return {graphOutputs};
