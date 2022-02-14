@@ -4702,8 +4702,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Where)
     nvinfer1::ITensor* x = &convertToTensor(inputs.at(1), ctx);
     nvinfer1::ITensor* y = &convertToTensor(inputs.at(2), ctx);
     // TRT does not support BOOL input types for this node
-    ASSERT((x->getType() == y->getType() && x->getType() != nvinfer1::DataType::kBOOL)
-            && "This version of TensorRT requires input x and y to have the same data type. BOOL is unsupported.",
+    ASSERT((x->getType() != nvinfer1::DataType::kBOOL && y->getType() != nvinfer1::DataType::kBOOL)
+            && "This version of TensorRT does not support BOOL types for Where operators.",
         ErrorCode::kUNSUPPORTED_NODE);
 
     CHECK(broadcastTensors(ctx, x, y, condition));
