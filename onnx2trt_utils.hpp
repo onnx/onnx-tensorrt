@@ -14,15 +14,18 @@
 
 #include <cstring> // For std::memcpy
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <sstream>
-#include <limits>
+#include <typeindex>
+#include <unordered_map>
 
 #define LOG(msg, severity)                                                                                             \
     do                                                                                                                 \
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
-        if (severity <= nvinfer1::ILogger::Severity::kWARNING) ss << __FILENAME__ << ":" << __LINE__ << ": ";          \
+        if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
+            ss << __FILENAME__ << ":" << __LINE__ << ": ";                                                             \
         ss << msg;                                                                                                     \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
@@ -98,7 +101,9 @@ inline nvinfer1::IConstantLayer* addConstantScalar(
     assert(volume(shape) == 1 && "Cannot add constant scalar with a shape that has volume > 1");
     ShapedWeights scalarWeights = ctx->createTempWeights(type, shape);
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
-    return ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
+    nvinfer1::IConstantLayer* l = ctx->network()->addConstant(scalarWeights.shape, scalarWeights);
+    ctx->network()->setWeightsName(scalarWeights, scalarWeights.getName());
+    return l;
 }
 
 // Helper function to create a tensor given a vector of values and a shape.
@@ -110,7 +115,9 @@ inline nvinfer1::IConstantLayer* addConstant(
     assert(sizeof(ScalarType) == getDtypeSize(type) && "ONNX dtype does not have the same size as the value type");
     ShapedWeights weights = ctx->createTempWeights(type, shape);
     std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
-    return ctx->network()->addConstant(weights.shape, weights);
+    nvinfer1::IConstantLayer* l = ctx->network()->addConstant(weights.shape, weights);
+    ctx->network()->setWeightsName(weights, weights.getName());
+    return l;
 }
 
 enum ScaleOp
@@ -148,11 +155,11 @@ Status isBroadcastValid(IImporterContext* ctx, const nvinfer1::Dims& firstShape,
 std::vector<int32_t> calculateBias(
     const nvinfer1::Dims& daDims, const nvinfer1::Dims& idxDims, const std::vector<int32_t>& pitches, int32_t axis);
 
-// Helper function to calculate and return a vector representation of the pitches of a given shape
-std::vector<int32_t> calculatePitches(const nvinfer1::Dims& inputDims);
-
 // Helper function to check that linear resize can be used
 bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
+
+// Helper function to calculate and return a vector representation of the pitches of a given shape
+std::vector<int32_t> calculatePitches(const nvinfer1::Dims& inputDims);
 
 // Helper function to add a Cast layer in the network
 nvinfer1::ITensor* castHelper(IImporterContext* ctx, nvinfer1::ITensor* input, nvinfer1::DataType dtype);
@@ -307,10 +314,6 @@ void setAttr(
 nvinfer1::ITensor* sliceAcrossAxis(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* data, const int axis);
 
-// Helper function to filter out shape tensor outputs for layers that do not support it
-bool supportsShapeTensor(nvinfer1::LayerType type, nvinfer1::ElementWiseOperation eleOp,
-    nvinfer1::ReduceOperation redOp, nvinfer1::FillOperation fillOp);
-
 // Helper function to squeeze a tensor on a given set of axes
 nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor, const std::vector<int>& axes, bool regLayer = false);
 
@@ -325,6 +328,10 @@ NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::Node
 // Helper function to unsqueeze tensors on a given set of axes
 nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     nvinfer1::ITensor& tensor, const std::vector<int>& axes, bool regLayer = false);
+
+// Helper function to calculate and return the expected output shape of a resize given the resize scale weights or scale
+// tensor.
+nvinfer1::ITensor* resizeShapeTensor(IImporterContext* ctx, nvinfer1::ITensor& input, TensorOrWeights& scales);
 
 // Helper function to convert a ShapedWeights object into a vector
 template <typename WeightType>
@@ -351,6 +358,40 @@ Status weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightV
         auto array_start = static_cast<bool*>(weights.weights().values);
         std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
     }
+    return Status(ErrorCode::kSUCCESS);
+}
+
+template <typename T>
+ShapedWeights::DataType getShapeWeightsDataType()
+{
+    static const std::unordered_map<std::type_index, ::ONNX_NAMESPACE::TensorProto::DataType> tMap(
+        {{std::type_index(typeid(bool)), ::ONNX_NAMESPACE::TensorProto::BOOL},
+            {std::type_index(typeid(int8_t)), ::ONNX_NAMESPACE::TensorProto::INT8},
+            {std::type_index(typeid(uint8_t)), ::ONNX_NAMESPACE::TensorProto::UINT8},
+            {std::type_index(typeid(int16_t)), ::ONNX_NAMESPACE::TensorProto::INT16},
+            {std::type_index(typeid(uint16_t)), ::ONNX_NAMESPACE::TensorProto::UINT16},
+            {std::type_index(typeid(int32_t)), ::ONNX_NAMESPACE::TensorProto::INT32},
+            {std::type_index(typeid(uint32_t)), ::ONNX_NAMESPACE::TensorProto::UINT32},
+            {std::type_index(typeid(int64_t)), ::ONNX_NAMESPACE::TensorProto::INT64},
+            {std::type_index(typeid(uint64_t)), ::ONNX_NAMESPACE::TensorProto::UINT64},
+            {std::type_index(typeid(float)), ::ONNX_NAMESPACE::TensorProto::FLOAT},
+            {std::type_index(typeid(double)), ::ONNX_NAMESPACE::TensorProto::DOUBLE}});
+
+    if (tMap.find(std::type_index(typeid(T))) != tMap.end())
+    {
+        return tMap.at(std::type_index(typeid(T)));
+    }
+    return ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+}
+
+// Helper function to convert a vector object into a ShapedWeights object
+template <typename T>
+Status vectorToWeights(std::vector<T>& weightVector, TensorOrWeights* weights)
+{
+    nvinfer1::Dims shape{1, {static_cast<int32_t>(weightVector.size())}};
+    ShapedWeights::DataType dtype = getShapeWeightsDataType<T>();
+    ASSERT(dtype != ::ONNX_NAMESPACE::TensorProto::UNDEFINED && "Unsupported datatype", ErrorCode::kINVALID_VALUE);
+    *weights = ShapedWeights(dtype, weightVector.data(), shape);
     return Status(ErrorCode::kSUCCESS);
 }
 

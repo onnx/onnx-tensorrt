@@ -71,9 +71,9 @@ const char* ShapedWeights::getName() const
     return this->name;
 }
 
-void ShapedWeights::setName(const char* name)
+void ShapedWeights::setName(const char* n)
 {
-    this->name = name;
+    this->name = n;
 }
 
 template <typename DType>
@@ -88,7 +88,7 @@ void transpose4DWeights(ShapedWeights const& weights, nvinfer1::Permutation cons
     nvinfer1::Dims expanded_original_shape{4, {1, 1, 1, 1}};
     nvinfer1::Dims expanded_new_shape{4, {1, 1, 1, 1}};
     nvinfer1::Permutation expanded_perm{0, 1, 2, 3};
-    
+
     int pad = 4 - nbDims;
     for (int i = 0; i < nbDims; ++i)
     {
@@ -100,12 +100,12 @@ void transpose4DWeights(ShapedWeights const& weights, nvinfer1::Permutation cons
 
     int src_strides[4] = {1, 1, 1, 1};
     int dst_strides[4] = {1, 1, 1, 1};
-    
+
     for (int i = 2; i >= 0; --i)
     {
         src_strides[i] = expanded_original_shape.d[i + 1] * src_strides[i + 1];
         dst_strides[i] = expanded_new_shape.d[i + 1] * dst_strides[i + 1];
-    } 
+    }
 
     for (int n = 0; n < expanded_original_shape.d[0]; ++n)
     {
@@ -136,6 +136,7 @@ bool transposeWeights(ShapedWeights const& weights, nvinfer1::Permutation const&
 {
     nvinfer1::Dims shape = weights.shape;
     int nbDims = shape.nbDims;
+    assert(nbDims != 2); // No longer transpose 2D weights
     nvinfer1::Dims new_shape;
     new_shape.nbDims = nbDims;
     for (int d = 0; d < nbDims; ++d)
@@ -143,7 +144,6 @@ bool transposeWeights(ShapedWeights const& weights, nvinfer1::Permutation const&
         new_shape.d[d] = shape.d[perm.order[d]];
         result->shape.d[d] = new_shape.d[d];
     }
-    
 
     if (shape.nbDims <= 4)
     {

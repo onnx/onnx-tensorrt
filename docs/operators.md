@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 8.2 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 8.4 supports operators up to Opset 13. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, INT8, and BOOL
 
@@ -178,4 +178,4 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Unsqueeze                 | Y          | FP32, FP16, INT32, INT8, BOOL | `axes` must be a constant tensor                                                                                                         |
 | Upsample                  | Y          | FP32, FP16 |
 | Where                     | Y          | FP32, FP16, INT32, BOOL |
-| Xor                       | N          |
+| Xor                       | Y          | BOOL

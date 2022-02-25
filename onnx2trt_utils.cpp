@@ -3,7 +3,6 @@
  */
 
 #include "onnx2trt_utils.hpp"
-#include "NvInferSafeRuntime.h"
 #include "OnnxAttrs.hpp"
 #include <set>
 
@@ -776,6 +775,12 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, IImporterContext* ctx
     }
     // Handle non-tensor indices input by adding a new constant layer to the network.
     ShapedWeights& weights = input.weights();
+
+    auto const existingConstantLayer = ctx->getConstantLayer(weights.getName());
+    if (existingConstantLayer != nullptr)
+    {
+        return *(existingConstantLayer->getOutput(0));
+    }
     // Note the TRT doesn't natively handle boolean weights. First create an INT32 weights copy of the boolean weights,
     // then cast it back to bool within TRT.
     if (weights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
@@ -1171,13 +1176,18 @@ nvinfer1::IPluginCreator* importPluginCreator(
     nvinfer1::IPluginCreator* creator = nullptr;
 
 #if ENABLE_STD_PLUGIN
-    creator = getPluginRegistry()->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), pluginNamespace.c_str());
+    auto pluginRegistry = nvinfer1::getBuilderPluginRegistry(nvinfer1::EngineCapability::kSTANDARD);
+    if (pluginRegistry != nullptr)
+    {
+        creator = pluginRegistry->getPluginCreator(pluginName.c_str(), pluginVersion.c_str(), pluginNamespace.c_str());
+    }
 #endif // ENABLE_STD_PLUGIN
 
 #if ENABLE_SAFE_PLUGIN
-    if (creator == nullptr && nvinfer1::safe::getSafePluginRegistry() != nullptr)
+    auto safetyPluginRegistry = nvinfer1::getBuilderPluginRegistry(nvinfer1::EngineCapability::kSAFETY);
+    if (creator == nullptr && safetyPluginRegistry != nullptr)
     {
-        creator = nvinfer1::safe::getSafePluginRegistry()->getPluginCreator(
+        creator = safetyPluginRegistry->getPluginCreator(
             pluginName.c_str(), pluginVersion.c_str(), pluginNamespace.c_str());
     }
 #endif // ENABLE_SAFE_PLUGIN
@@ -1308,7 +1318,7 @@ NodeImportResult lstmLegacyImporter(
                 auto* source = reinterpret_cast<unsigned char*>(weights.values);
                 std::vector<unsigned char> buffer;
                 buffer.resize(len);
-                for (int i = 0; i < num_directions; i++)
+                for (int d = 0; d < num_directions; d++)
                 {
                     for (int j = 0; j < batch_size; j++)
                     {
@@ -1316,10 +1326,10 @@ NodeImportResult lstmLegacyImporter(
                         {
                             for (int b = 0; b < dtype_size; b++)
                             {
-                                int src_idx = i * batch_size * hidden_size * dtype_size + j * hidden_size * dtype_size
+                                int src_idx = d * batch_size * hidden_size * dtype_size + j * hidden_size * dtype_size
                                     + k * dtype_size + b;
                                 int buf_idx = j * num_directions * hidden_size * dtype_size
-                                    + i * hidden_size * dtype_size + k * dtype_size + b;
+                                    + d * hidden_size * dtype_size + k * dtype_size + b;
                                 buffer.at(buf_idx) = source[src_idx];
                             }
                         }
@@ -1618,7 +1628,6 @@ NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     bool ceilMode(false);
     if (ctx->getOpsetVersion() >= 10)
     {
-        OnnxAttrs attrs(node, ctx);
         ceilMode = static_cast<bool>(attrs.get<int>("ceil_mode", 0));
         const auto dilations = attrs.get<std::vector<int>>("dilations", std::vector<int>(2, 1));
         for (size_t i = 0; i < dilations.size(); i++)
@@ -1827,96 +1836,6 @@ nvinfer1::ITensor* sliceAcrossAxis(
     }
     auto output = addSlice(ctx, *data, starts, sizes, strides)->getOutput(0);
     return output;
-}
-
-bool supportsShapeTensor(nvinfer1::LayerType type, nvinfer1::ElementWiseOperation eleOp,
-    nvinfer1::ReduceOperation redOp, nvinfer1::FillOperation fillOp)
-{
-    switch (type)
-    {
-    // Layers that allow shape tensor output
-    case nvinfer1::LayerType::kCONCATENATION:
-    case nvinfer1::LayerType::kCONDITION:
-    case nvinfer1::LayerType::kCONDITIONAL_INPUT:
-    case nvinfer1::LayerType::kCONDITIONAL_OUTPUT:
-    case nvinfer1::LayerType::kCONSTANT:
-    case nvinfer1::LayerType::kGATHER:
-    case nvinfer1::LayerType::kIDENTITY:
-    case nvinfer1::LayerType::kPADDING:
-    case nvinfer1::LayerType::kSCATTER:
-    case nvinfer1::LayerType::kSELECT:
-    case nvinfer1::LayerType::kSHAPE:
-    case nvinfer1::LayerType::kSHUFFLE:
-    case nvinfer1::LayerType::kSLICE: return true;
-    // Layers that do not allow shape tensor output
-    case nvinfer1::LayerType::kACTIVATION:
-    case nvinfer1::LayerType::kASSERTION:
-    case nvinfer1::LayerType::kCONVOLUTION:
-    case nvinfer1::LayerType::kDECONVOLUTION:
-    case nvinfer1::LayerType::kDEQUANTIZE:
-    case nvinfer1::LayerType::kEINSUM:
-    case nvinfer1::LayerType::kFULLY_CONNECTED:
-    case nvinfer1::LayerType::kITERATOR:
-    case nvinfer1::LayerType::kLOOP_OUTPUT:
-    case nvinfer1::LayerType::kLRN:
-    case nvinfer1::LayerType::kMATRIX_MULTIPLY:
-    case nvinfer1::LayerType::kPARAMETRIC_RELU:
-    case nvinfer1::LayerType::kPLUGIN:
-    case nvinfer1::LayerType::kPLUGIN_V2:
-    case nvinfer1::LayerType::kPOOLING:
-    case nvinfer1::LayerType::kQUANTIZE:
-    case nvinfer1::LayerType::kRAGGED_SOFTMAX:
-    case nvinfer1::LayerType::kRECURRENCE:
-    case nvinfer1::LayerType::kRESIZE:
-    case nvinfer1::LayerType::kRNN_V2:
-    case nvinfer1::LayerType::kSCALE:
-    case nvinfer1::LayerType::kSOFTMAX:
-    case nvinfer1::LayerType::kTRIP_LIMIT:
-    case nvinfer1::LayerType::kTOPK:
-    case nvinfer1::LayerType::kUNARY: return false;
-    // Layers that have partial shape tensor output support
-    case nvinfer1::LayerType::kELEMENTWISE:
-        switch (eleOp)
-        {
-        // Supported elementwise operations
-        case nvinfer1::ElementWiseOperation::kAND:
-        case nvinfer1::ElementWiseOperation::kDIV:
-        case nvinfer1::ElementWiseOperation::kEQUAL:
-        case nvinfer1::ElementWiseOperation::kFLOOR_DIV:
-        case nvinfer1::ElementWiseOperation::kGREATER:
-        case nvinfer1::ElementWiseOperation::kLESS:
-        case nvinfer1::ElementWiseOperation::kMAX:
-        case nvinfer1::ElementWiseOperation::kMIN:
-        case nvinfer1::ElementWiseOperation::kOR:
-        case nvinfer1::ElementWiseOperation::kPROD:
-        case nvinfer1::ElementWiseOperation::kSUB:
-        case nvinfer1::ElementWiseOperation::kSUM:
-        case nvinfer1::ElementWiseOperation::kXOR: return true;
-        // Unsupported elementwise operations
-        case nvinfer1::ElementWiseOperation::kPOW: return false;
-        }
-        return false;
-    case nvinfer1::LayerType::kREDUCE:
-        switch (redOp)
-        {
-        // Supported reduce operations
-        case nvinfer1::ReduceOperation::kSUM:
-        case nvinfer1::ReduceOperation::kMAX:
-        case nvinfer1::ReduceOperation::kMIN:
-        case nvinfer1::ReduceOperation::kPROD: return true;
-        // Unsupported reduce operations
-        case nvinfer1::ReduceOperation::kAVG: return false;
-        }
-        return false;
-    case nvinfer1::LayerType::kFILL:
-        switch (fillOp)
-        {
-        case nvinfer1::FillOperation::kLINSPACE: return true;
-        case nvinfer1::FillOperation::kRANDOM_UNIFORM: return false;
-        }
-        return false;
-    }
-    return false;
 }
 
 nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
@@ -2195,6 +2114,27 @@ nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
         ctx->registerLayer(unsqueezeLayer, getNodeName(node));
     }
     return unsqueezeLayer->getOutput(0);
+}
+
+nvinfer1::ITensor* resizeShapeTensor(IImporterContext* ctx, nvinfer1::ITensor& input, TensorOrWeights& scales)
+{
+    // Create below subnetwork for processing resize scale tensor or weights.
+    // clang-format off
+    // scale weights (convert to tensor) or scale tensor -> elementwise mul -> transformation(floor, ceil, round) -> identity (cast to int) -> resize shape tensor
+    //      input -> shapeof -> identity (cast to float) ->
+    // clang-format on
+    auto* floatCast = ctx->network()->addIdentity(shapeOf(input).tensor(ctx));
+    floatCast->setOutputType(0, nvinfer1::DataType::kFLOAT);
+    auto* inputShapeTensor = floatCast->getOutput(0);
+
+    auto& scaleTensor = convertToTensor(scales, ctx);
+    auto* prod = ctx->network()
+                     ->addElementWise(scaleTensor, *inputShapeTensor, nvinfer1::ElementWiseOperation::kPROD)
+                     ->getOutput(0);
+    auto* floor = ctx->network()->addUnary(*prod, nvinfer1::UnaryOperation::kFLOOR)->getOutput(0);
+    auto* intCast = ctx->network()->addIdentity(*floor);
+    intCast->setOutputType(0, nvinfer1::DataType::kINT32);
+    return intCast->getOutput(0);
 }
 
 int64_t volume(const nvinfer1::Dims& dims)

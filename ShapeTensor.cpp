@@ -15,7 +15,7 @@ namespace onnx2trt
 //! and a shape tensor is expected.
 static const bool gTolerateTRT_12408 = true;
 
-ShapeTensor::ShapeTensor(int rank_, std::vector<int64_t>&& values_)
+ShapeTensor::ShapeTensor(int32_t rank_, std::vector<int64_t>&& values_)
     : mDepth(0)
     , mAllValuesKnown(true)
     , mRank(rank_)
@@ -26,8 +26,32 @@ ShapeTensor::ShapeTensor(int rank_, std::vector<int64_t>&& values_)
     assert(rank_ > 0 || mValues.size() == 1);
 }
 
+//!
+//! Construct a shape tensor representation for float values.
+//! This is a hack to get shape tensor working with float values with minimal changes.
+//! The constructed ShapeTensor has the following properties:
+//! 1. mAllValuesKnown == false
+//! 2. mValues.size() == 0
+//! 3. mIsFloat == true
+//!
+//! Float shape tensor does not have any constant folding in parser as available to int32_t shape tensors.
+//! Instead, rely on builder for constant folding and build-time simplifications.
+//!
+ShapeTensor::ShapeTensor(int32_t rank_, std::vector<float>&& values_)
+    : mDepth(0)
+    , mAllValuesKnown(false)
+    , mRank(rank_)
+    , mSize(values_.size())
+    , mValues({})
+    , mIsFloat{true}
+{
+    assert((rank_ == 0 || rank_ == 1) && "shape tensor must have rank 0 or 1");
+    assert(mValues.size() == 0 && "non-empty floating-point shape tensor with known values not supported");
+}
+
 ShapeTensor::ShapeTensor(IImporterContext* ctx, TensorOrWeights& t)
     : mDepth(0)
+    , mIsFloat(t.isFp32())
 {
     if (t.is_tensor())
     {
@@ -36,13 +60,19 @@ ShapeTensor::ShapeTensor(IImporterContext* ctx, TensorOrWeights& t)
     else
     {
         const nvinfer1::Dims d = t.shape();
-         const auto& weights = t.weights();
-        if (gTolerateTRT_12408 && weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && d.nbDims == 0 && weights.count() == 0)
+        auto const& weights = t.weights();
+        if (gTolerateTRT_12408 && weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && d.nbDims == 0
+            && weights.count() == 0)
         {
             LOG_WARNING("Scalar constant of type FLOAT with no value encountered where ONNX specification requires tensor describing a shape. Assuming it's an INT64 empty vector.");
             mRank = 1;
             mSize = 0;
             mAllValuesKnown = true;
+            return;
+        }
+        if (isFloat())
+        {
+            *this = ShapeTensor(convertToTensor(t, ctx));
             return;
         }
         assert(0 <= d.nbDims);
@@ -67,13 +97,17 @@ ShapeTensor::ShapeTensor(nvinfer1::ITensor& t, int depth)
     : mDepth(depth)
     , mRank(1)
     , mTensor(&t)
+    // The check for depth == 0 is needed because when depth > 0, it means *this represents the shape of mTensor, and
+    // shapes always have integral type.
+    , mIsFloat(depth == 0 && t.getType() == nvinfer1::DataType::kFLOAT)
 {
     const nvinfer1::Dims dims = t.getDimensions();
+    assert((!isFloat() || mDepth == 0) && "floating-point shape tensor must have depth == 0");
 
     switch (mDepth)
     {
     case 0:
-        assert(t.getType() == nvinfer1::DataType::kINT32);
+        assert(t.getType() == nvinfer1::DataType::kINT32 || t.getType() == nvinfer1::DataType::kFLOAT);
         mRank = dims.nbDims;
         if (mRank == 0)
         {
@@ -227,6 +261,7 @@ static ShapeTensor op(IImporterContext* ctx, const ShapeTensor& x, const ShapeTe
     }
     if (x.allValuesKnown() && y.allValuesKnown())
     {
+        assert(!x.isFloat() && !y.isFloat());
         std::vector<int64_t> values(std::max(x.size(), y.size()));
         for (size_t i = 0; i < values.size(); ++i)
         {
@@ -333,6 +368,14 @@ ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTe
     return ShapeTensor(*ctx->network()->addGather(data.tensor(ctx), indices.tensor(ctx), 0)->getOutput(0));
 }
 
+ShapeTensor castToInt32(IImporterContext* ctx, ShapeTensor const& x)
+{
+    nvinfer1::ILayer* identity = ctx->network()->addIdentity(x.tensor(ctx));
+    assert(identity != nullptr);
+    identity->setOutputType(0, nvinfer1::DataType::kINT32);
+    return ShapeTensor(*identity->getOutput(0));
+}
+
 ShapeTensor shapeOf(nvinfer1::ITensor& tensor)
 {
     return ShapeTensor(tensor, 1);
@@ -360,7 +403,7 @@ ShapeTensor shapeOf(const ShapeTensor& t)
     // ShapeTensor is either a scalar or vector.
     // shape of a scalar is an empty tensor.
     // shape of a vector is a one-element tensor containing the length of the vector.
-    return t.rank() == 0 ? ShapeTensor(0, {}) : ShapeTensor(1, {t.size()});
+    return t.rank() == 0 ? ShapeTensor(0, std::vector<int64_t>{}) : ShapeTensor(1, std::vector<int64_t>{t.size()});
 }
 
 ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)

@@ -9,6 +9,7 @@
 #include "onnxErrorRecorder.hpp"
 #include "onnx/common/stl_backports.h"
 #include <list>
+#include <string>
 #include <unordered_map>
 
 namespace onnx2trt
@@ -84,8 +85,9 @@ class ImporterContext final : public IImporterContext
     int64_t mSuffixCounter{0}; // increasing suffix counter used to uniquify layer names.
     std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
     StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
-    std::string mOnnxFileLocation; // Keep track of the directory of the parsed ONNX file
+    std::string mOnnxFileLocation;       // Keep track of the directory of the parsed ONNX file
     std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
+    StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
 
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
@@ -138,7 +140,7 @@ public:
     void registerTensor(TensorOrWeights tensor, const std::string& basename) override
     {
         // TRT requires unique tensor names.
-        const std::string uniqueName = generateUniqueName(mTensorNames, basename);
+        std::string const& uniqueName = generateUniqueName(mTensorNames, basename);
 
         if (tensor)
         {
@@ -171,13 +173,22 @@ public:
         // No layer will be added for Constant nodes in ONNX.
         if (layer)
         {
-            const std::string name = basename.empty() ? layer->getName() : basename;
-            const std::string uniqueName = generateUniqueName(mLayerNames, name);
+            std::string const name = basename.empty() ? layer->getName() : basename;
+            std::string const& uniqueName = generateUniqueName(mLayerNames, name);
 
             auto* ctx = this; // To enable logging.
             LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
 
             layer->setName(uniqueName.c_str());
+            if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
+            {
+                if (basename != uniqueName)
+                {
+                    LOG_ERROR("Constant layer: " << uniqueName << " can be a duplicate of: " << basename);
+                    assert(!"Internal error: duplicate constant layers for the same weights");
+                }
+                mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
+            }
         }
     }
 
@@ -188,7 +199,9 @@ public:
 
     ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, uint8_t value = 0) override
     {
+        std::string const& name = generateUniqueName(mTensorNames, "tmp_weight");
         ShapedWeights weights(type, nullptr, shape);
+        weights.setName(name.c_str());
         // Need special logic for handling scalars.
         if (shape.nbDims == 0)
         {
@@ -271,8 +284,22 @@ public:
     {
         return mErrorWrapper ? mErrorWrapper->getErrorRecorder() : nullptr;
     }
+    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const final
+    {
+        if (name == nullptr)
+        {
+            return nullptr;
+        }
+        auto const iter = mConstantLayers.find(name);
+        if (iter == mConstantLayers.end())
+        {
+            return nullptr;
+        }
+        return iter->second;
+    }
+
 private:
-    std::string generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
+    std::string const& generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
     {
         std::string candidate = basename;
 
@@ -283,8 +310,8 @@ private:
         }
 
         namesSet.insert(candidate);
-
-        return candidate;
+        // Return reference to newly inserted string to avoid any c_str()'s going out of scope
+        return *namesSet.find(candidate);
     }
 };
 
