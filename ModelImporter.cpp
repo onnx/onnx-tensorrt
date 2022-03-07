@@ -358,8 +358,13 @@ Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serializ
     else
     {
         google::protobuf::io::CodedInputStream coded_input(&raw_input);
+      #if GOOGLE_PROTOBUF_VERSION >= 3011000
+        // Starting Protobuf 3.11 accepts only single parameter.
+        coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
+      #else
         // Note: This WARs the very low default size limit (64MB)
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
+      #endif
         ASSERT( (model->ParseFromCodedStream(&coded_input)) && "Failed to parse the ONNX model.", ErrorCode::kMODEL_DESERIALIZE_FAILED);
     }
     return Status::success();
