@@ -67,9 +67,14 @@ namespace common
     google::protobuf::io::FileInputStream raw_input(fd);
     raw_input.SetCloseOnDelete(true);
     google::protobuf::io::CodedInputStream coded_input(&raw_input);
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Starting Protobuf 3.11 accepts only single parameter.
+    coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
+  #else
     // Note: This WARs the very low default size limit (64MB)
     coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(),
                                    std::numeric_limits<int>::max()/4);
+  #endif
     return msg->ParseFromCodedStream(&coded_input);
   }
 
