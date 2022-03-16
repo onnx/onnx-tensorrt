@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 8.2.3.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.2.3.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support. For those using TensorRT 8.4 EA, checkout and build on the `8.4-EA` branch.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -36,8 +36,8 @@ Python
     builder.create_network(explicit_batch)
 
 For examples of usage of these APIs see:
-* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleOnnxMNIST)
-* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleDynamicReshape)
+* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleOnnxMNIST)
+* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleDynamicReshape)
 
 ## Supported Operators
 
@@ -49,7 +49,7 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
  - [TensorRT 8.2.3.0](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.2.3.0 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.2.3.0 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
