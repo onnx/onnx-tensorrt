@@ -3,20 +3,20 @@
 # ONNX-TensorRT FAQ
 
 For all uses we recommend installing the following tools:
-* [ONNX-Graphsurgeon](https://github.com/NVIDIA/TensorRT/tree/master/tools/onnx-graphsurgeon)
-* [Polygraphy](https://github.com/NVIDIA/TensorRT/tree/master/tools/Polygraphy)
+* [ONNX-Graphsurgeon](https://github.com/NVIDIA/TensorRT/tree/main/tools/onnx-graphsurgeon)
+* [Polygraphy](https://github.com/NVIDIA/TensorRT/tree/main/tools/Polygraphy)
 
 ## How do I import and run an ONNX model through TensorRT?
 
 There are currently two officially supported tools for users to quickly check if an ONNX model can parse and build into a TensorRT engine from an ONNX file.
 
-For C++ users, there is the (trtexec)[https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/trtexec] binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
+For C++ users, there is the (trtexec)[https://github.com/NVIDIA/TensorRT/tree/main/samples/trtexec] binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
 
 `trtexec --onnx=model.onnx`
 
 Refer to the link or run `trtexec -h` for more information on CLI options.
 
-For Python users, there is the [polygraphy](https://github.com/NVIDIA/TensorRT/tree/master/tools/Polygraphy) tool . The basic command for running an onnx model is:
+For Python users, there is the [polygraphy](https://github.com/NVIDIA/TensorRT/tree/main/tools/Polygraphy) tool . The basic command for running an onnx model is:
 
 `polygraphy run model.onnx --trt`
 
@@ -44,8 +44,8 @@ Custom layer support in onnx-tensorrt is done through TensorRT plugins. Any cust
 
 For writing a plugin for a custom ONNX operator, the quickest way to do so without modifying the parser code is by utilizing the `fallbackPluginImporter` function. As long as the inputs, outputs, and attributes of your custom operator are consistent with those of your plugin, the ONNX-TensorRT parser will do the mapping for you. You can refer to [this blog post](https://developer.nvidia.com/blog/estimating-depth-beyond-2d-using-custom-layers-on-tensorrt-and-onnx-models/) on how to write a plugin for a custom ONNX operator.
 
-For writing a plugin for existing ONNX operators that requires modification of the parser code, you can refer to the InstanceNormalization import function and the [corresponding plugin implementation](https://github.com/NVIDIA/TensorRT/tree/master/plugin/instanceNormalizationPlugin) in the main TensorRT repository.
+For writing a plugin for existing ONNX operators that requires modification of the parser code, you can refer to the InstanceNormalization import function and the [corresponding plugin implementation](https://github.com/NVIDIA/TensorRT/tree/main/plugin/instanceNormalizationPlugin) in the main TensorRT repository.
 
 ## Quantized Operator Support
 
-As of the latest release version of TensorRT (7.2), the only two ONNX quantizing operators we support are the opset 11 definitions of `QuantizeLinear` and `DequantizeLinear` only. We are currently working to expand the ability for TensorRT to import QAT and PTQ ONNX networks in future releases.
+As of the latest release version of TensorRT (8.2), the only two ONNX quantizing operators we support are the opset 11 definitions of `QuantizeLinear` and `DequantizeLinear` only. We are currently working to expand the ability for TensorRT to import QAT and PTQ ONNX networks in future releases.
