@@ -114,8 +114,8 @@ namespace common
     int onnx_ir_major = ir_version / 1000000;
     int onnx_ir_minor = ir_version % 1000000 / 10000;
     int onnx_ir_patch = ir_version % 10000;
-    return (std::to_string(onnx_ir_major) + "." +
-            std::to_string(onnx_ir_minor) + "." +
+    return (std::to_string(onnx_ir_major) + '.' +
+            std::to_string(onnx_ir_minor) + '.' +
             std::to_string(onnx_ir_patch));
   }
 

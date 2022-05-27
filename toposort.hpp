@@ -70,6 +70,7 @@ template <class Container>
 bool toposort(Container const& nodes, std::vector<size_t>* order)
 {
     std::unordered_map<std::string, size_t> node_map;
+    node_map.reserve(nodes.size());
     for (size_t i = 0; i < (size_t) nodes.size(); ++i)
     {
         // TODO: This .Get().input() is highly specific to protobuf, should

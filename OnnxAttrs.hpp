@@ -23,9 +23,10 @@ public:
     explicit OnnxAttrs(::ONNX_NAMESPACE::NodeProto const& onnx_node, onnx2trt::IImporterContext* ctx)
         : mCtx{ctx}
     {
+        _attrs.reserve(onnx_node.attribute().size());
         for (auto const& attr : onnx_node.attribute())
         {
-            _attrs.insert({attr.name(), &attr});
+            _attrs.emplace(attr.name(), &attr);
         }
     }
 
