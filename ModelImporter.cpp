@@ -15,6 +15,7 @@
 #include <limits>
 #include <functional>
 #include <unordered_set>
+#include <sys/stat.h>
 
 namespace onnx2trt
 {
@@ -358,13 +359,13 @@ Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serializ
     else
     {
         google::protobuf::io::CodedInputStream coded_input(&raw_input);
-      #if GOOGLE_PROTOBUF_VERSION >= 3011000
+#if GOOGLE_PROTOBUF_VERSION >= 3011000
         // Starting Protobuf 3.11 accepts only single parameter.
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
-      #else
+#else
         // Note: This WARs the very low default size limit (64MB)
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-      #endif
+#endif
         ASSERT( (model->ParseFromCodedStream(&coded_input)) && "Failed to parse the ONNX model.", ErrorCode::kMODEL_DESERIALIZE_FAILED);
     }
     return Status::success();
@@ -380,24 +381,22 @@ Status deserialize_onnx_model(int fd, bool is_serialized_as_text, ::ONNX_NAMESPA
     else
     {
         google::protobuf::io::CodedInputStream coded_input(&raw_input);
-      #if GOOGLE_PROTOBUF_VERSION >= 3011000
+        // Note: This WARs the very low default size limit (64MB)
+#if GOOGLE_PROTOBUF_VERSION >= 3011000
         // Starting Protobuf 3.11 accepts only single parameter.
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
-      #else
+#else
         // Note: This WARs the very low default size limit (64MB)
-        coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-      #endif
-        // Note: This WARs the very low default size limit (64MB)
+        coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()/4);
+#endif
         ASSERT( (model->ParseFromCodedStream(&coded_input)) && "Failed to parse the ONNX model.", ErrorCode::kMODEL_DESERIALIZE_FAILED);
     }
     return Status::success();
 }
 
-bool ModelImporter::supportsModel(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size, SubGraphCollection_t& sub_graph_collection,
-    const char* model_path)
+bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
+    SubGraphCollection_t& sub_graph_collection, const char* model_path)
 {
-
     ::ONNX_NAMESPACE::ModelProto model;
     bool is_serialized_as_text = false;
     Status status
@@ -512,7 +511,8 @@ bool ModelImporter::supportsOperator(const char* op_name) const
     {
         return false;
     }
-    if (is("EfficientNMS_TRT") || is("PyramidROIAlign_TRT") || is("MultilevelCropAndResize_TRT"))
+    if (is("EfficientNMS_TRT") || is("PyramidROIAlign_TRT") || is("MultilevelCropAndResize_TRT")
+        || is("DisentangledAttention_TRT"))
     {
         return true;
     }
@@ -547,6 +547,12 @@ bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model
 
 bool ModelImporter::parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path)
 {
+    auto* const ctx = &_importer_ctx;
+    if (ctx->network()->getNbLayers() > 0)
+    {
+        LOG_ERROR("Parse was called with a non-empty network definition");
+        return false;
+    }
     if (model_path)
     {
         _importer_ctx.setOnnxFileLocation(model_path);
@@ -706,9 +712,22 @@ Status ModelImporter::importModel(
 
 bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
 {
+    auto* ctx = &_importer_ctx;
+    
+    // Define S_ISREG macro for Windows
+#if !defined(S_ISREG)
+# define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
+#endif
+    
+    struct stat sb;
+    if (stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode))
+    {
+	LOG_ERROR("Input is not a regular file: " << onnxModelFile);
+	return false;
+    }
+
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    auto* ctx = &_importer_ctx;
 
     const bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
@@ -735,11 +754,6 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
     { //...Read input file, parse it
         std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
         auto const file_size = onnx_file.tellg();
-        if (-1 == file_size)
-        {
-            LOG_ERROR("File size error (possibly the path points to a directory): " << onnxModelFile);
-            return false;
-        }
         onnx_file.seekg(0, std::ios::beg);
         std::vector<char> onnx_buf(file_size);
         if (!onnx_file.read(onnx_buf.data(), onnx_buf.size()))

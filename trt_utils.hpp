@@ -102,31 +102,6 @@ inline nvinfer1::Permutation remove_first_dim(nvinfer1::Permutation const& perm)
     return new_perm;
 }
 
-inline nvinfer1::Dims squeeze_trailing_dims(nvinfer1::Dims const& dims)
-{
-    nvinfer1::Dims new_dims = dims;
-    // Note: TRT requires at least one dimension, so we don't squeeze [1]->[]
-    while (new_dims.nbDims > 1 && new_dims.d[new_dims.nbDims - 1] == 1)
-    {
-        --new_dims.nbDims;
-    }
-    return new_dims;
-}
-
-inline nvinfer1::Dims squeeze_leading_dims(const nvinfer1::Dims& dims)
-{
-    nvinfer1::Dims newDims;
-    // Copy dims only if a non-1 has been seen already.
-    bool non1Seen{false};
-    newDims.nbDims = std::copy_if(dims.d, dims.d + dims.nbDims, newDims.d,
-                         [&non1Seen](int x) {
-                             non1Seen = (x != 1) ? true : non1Seen;
-                             return non1Seen;
-                         })
-        - newDims.d;
-    return newDims;
-}
-
 inline nvinfer1::DimsHW operator-(nvinfer1::DimsHW dims)
 {
     return nvinfer1::DimsHW(-dims.h(), -dims.w());

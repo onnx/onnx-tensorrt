@@ -261,9 +261,6 @@ nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
 
-// Helper function to determine if a ONNX tensor is empty
-bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor);
-
 // Helper function to load a creator from the registry
 nvinfer1::IPluginCreator* importPluginCreator(
     const std::string& pluginName, const std::string& pluginVersion, const std::string& pluginNamespace = "");
@@ -413,8 +410,25 @@ ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 //! Helper function to add SoftMax layer.
 nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input);
 
-// Helper function to import ONNX scatter nodes into TRT
+//! Helper function to import ONNX scatter nodes into TRT
 NodeImportResult addScatterLayer(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
+
+//! RAII wrapper for IImporterContext::pushBaseNameScope() and popBaseNameScope().
+class NameScope
+{
+public:
+    NameScope(IImporterContext& context)
+        : mContext(context)
+    {
+        mContext.pushBaseNameScope();
+    }
+    ~NameScope()
+    {
+        mContext.popBaseNameScope();
+    }
+private:
+    IImporterContext& mContext;
+};
 
 } // namespace onnx2trt

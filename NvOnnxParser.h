@@ -1,5 +1,23 @@
 /*
- * SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 1993-2022, NVIDIA CORPORATION. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #ifndef NV_ONNX_PARSER_H
@@ -135,7 +153,9 @@ public:
      */
     virtual bool parseFromFile(const char* onnxModelFile, int verbosity) = 0;
 
-    /** \brief Check whether TensorRT supports a particular ONNX model
+    /** \brief Check whether TensorRT supports a particular ONNX model.
+     * 	       If the function returns True, one can proceed to engine building
+     * 	       without having to call \p parse or \p parseFromFile.
      *
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
@@ -218,6 +238,7 @@ namespace
  * because correctness of the translation may rely on those constants.
  * Changing a dynamic input dimension, i.e. one that translates to -1 in
  * TensorRT, to a constant is okay if the constant is consistent with the model.
+ * Each instance of the parser is designed to only parse one ONNX model once.
  *
  * \see IParser
  */

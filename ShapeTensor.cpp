@@ -11,10 +11,6 @@
 namespace onnx2trt
 {
 
-//! If true, tolerate bug where scalar constant of type FLOAT is missing its value,
-//! and a shape tensor is expected.
-static const bool gTolerateTRT_12408 = true;
-
 ShapeTensor::ShapeTensor(int32_t rank_, std::vector<int64_t>&& values_)
     : mDepth(0)
     , mAllValuesKnown(true)
@@ -61,15 +57,6 @@ ShapeTensor::ShapeTensor(IImporterContext* ctx, TensorOrWeights& t)
     {
         const nvinfer1::Dims d = t.shape();
         auto const& weights = t.weights();
-        if (gTolerateTRT_12408 && weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT && d.nbDims == 0
-            && weights.count() == 0)
-        {
-            LOG_WARNING("Scalar constant of type FLOAT with no value encountered where ONNX specification requires tensor describing a shape. Assuming it's an INT64 empty vector.");
-            mRank = 1;
-            mSize = 0;
-            mAllValuesKnown = true;
-            return;
-        }
         if (isFloat())
         {
             *this = ShapeTensor(convertToTensor(t, ctx));

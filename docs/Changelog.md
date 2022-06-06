@@ -2,9 +2,23 @@
 
 # ONNX-TensorRT Changelog
 
-## 22.02 Container Release - 2021-02-03
+## TensorRT 8.4 GA Release -2022-6-6
+
+### Added 
+
+For more details, see the 8.4 GA release notes for new features added in TensorRT 8.4
+
+- Added native FP16 support for importing and manipulating FP16 initializers
+- Added support for `Shrink`
+- Added support for `Xor`
+- Added dynamic shape support for `ArgMax` and `ArgMin`
+- Added dynamic shape support for `Range` for floating point types
+
 ### Fixes
- - Fixed naming issue in parsing `If` conditonal graphs
+- Fixed an issue in tensor name scoping in ONNX models with nested subgraphs
+- Fixed misc issues when dealing with empty tensors
+- Fixed the operations in the `Celu` importer function
+- Removed unnecessary reshapes in the `GEMM` importer function
 
 ## TensorRT 8.2 GA Release - 2021-11-23
 

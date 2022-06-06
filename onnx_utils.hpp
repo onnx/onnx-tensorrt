@@ -1,4 +1,4 @@
-/*
+ /*
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -151,13 +151,13 @@ inline bool ParseFromFile_WAR(google::protobuf::Message* msg, const char* filena
     google::protobuf::io::IstreamInputStream rawInput(&stream);
 
     google::protobuf::io::CodedInputStream coded_input(&rawInput);
-  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+#if GOOGLE_PROTOBUF_VERSION >= 3011000
     // Starting Protobuf 3.11 accepts only single parameter.
     coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
-  #else
+#else
     // Note: This WARs the very low default size limit (64MB)
     coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-  #endif
+#endif
     return msg->ParseFromCodedStream(&coded_input);
 }
 

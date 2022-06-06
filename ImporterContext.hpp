@@ -11,6 +11,7 @@
 #include <list>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace onnx2trt
 {
@@ -89,6 +90,21 @@ class ImporterContext final : public IImporterContext
     std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
     StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
 
+    //! Stack of names defined by nested ONNX graphs, with information about how to
+    //! restore their associated values when popping back to the surrounding scope.
+    //!
+    //! The stack is empty when processing the top-level ONNX graph.
+    //! back() corresponds to the innermost ONNX graph being processed.
+    //!
+    //! For each entry {name, {bool, TensorOrWeights}}:
+    //!
+    //! * If the bool is true, the name was newly introduced by the scope.
+    //!
+    //! * If the bool is false, the name shadows a name in a surrounding scope,
+    //!   and TensorOrWeights was the name's value before being shadowed.
+    //!
+    std::vector<StringMap<std::pair<bool, TensorOrWeights>>> mBaseNameScopeStack;
+
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
@@ -136,61 +152,15 @@ public:
     {
         return mOnnxFileLocation;
     }
+
+    void pushBaseNameScope() override;
+
+    void popBaseNameScope() override;
+
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
-    void registerTensor(TensorOrWeights tensor, const std::string& basename) override
-    {
-        // TRT requires unique tensor names.
-        std::string const& uniqueName = generateUniqueName(mTensorNames, basename);
+    void registerTensor(TensorOrWeights tensor, std::string const& basename) override;
 
-        if (tensor)
-        {
-            auto* ctx = this; // To enable logging.
-            if (tensor.is_tensor())
-            {
-                tensor.tensor().setName(uniqueName.c_str());
-
-                LOG_VERBOSE("Registering tensor: " << uniqueName << " for ONNX tensor: " << basename);
-            }
-            else if (tensor.is_weights())
-            {
-                const auto& weights = tensor.weights();
-                if (tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
-                {
-                    tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
-                        convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, ctx), weights.shape};
-                }
-                tensor.weights().setName(basename.c_str());
-            }
-
-        }
-        // Overwrite previous tensors registered with the same name (this only happens when there are subgraphs,
-        // and in that case, overwriting is the desired behavior).
-        this->tensors()[basename] = std::move(tensor);
-    }
-
-    void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) override
-    {
-        // No layer will be added for Constant nodes in ONNX.
-        if (layer)
-        {
-            std::string const name = basename.empty() ? layer->getName() : basename;
-            std::string const& uniqueName = generateUniqueName(mLayerNames, name);
-
-            auto* ctx = this; // To enable logging.
-            LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
-
-            layer->setName(uniqueName.c_str());
-            if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
-            {
-                if (basename != uniqueName)
-                {
-                    LOG_ERROR("Constant layer: " << uniqueName << " can be a duplicate of: " << basename);
-                    assert(!"Internal error: duplicate constant layers for the same weights");
-                }
-                mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
-            }
-        }
-    }
+    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename) override;
 
     nvinfer1::ILogger& logger() override
     {
@@ -202,15 +172,7 @@ public:
         std::string const& name = generateUniqueName(mTensorNames, "tmp_weight");
         ShapedWeights weights(type, nullptr, shape);
         weights.setName(name.c_str());
-        // Need special logic for handling scalars.
-        if (shape.nbDims == 0)
-        {
-            mTempBufs.push_back(std::vector<uint8_t>(getDtypeSize(type), value));
-        }
-        else
-        {
-            mTempBufs.push_back(std::vector<uint8_t>(weights.size_bytes(), value));
-        }
+        mTempBufs.push_back(std::vector<uint8_t>(weights.size_bytes(), value));
         weights.values = mTempBufs.back().data();
         return weights;
     }
@@ -269,8 +231,13 @@ public:
         {
             return mOpsets.begin()->second;
         }
+        else if (mOpsets.count(domain))
+        {
+            return mOpsets.at(domain);
+        }
         else
         {
+            domain = "ai.onnx";
             assert(mOpsets.count(domain));
             return mOpsets.at(domain);
         }

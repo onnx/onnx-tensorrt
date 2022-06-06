@@ -107,21 +107,25 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
     // We don't care about the TopK values, just the indices.
     nvinfer1::ITensor* indices = layer->getOutput(1);
     indices->setType(nvinfer1::DataType::kINT32);
+
+    // If selectLastIndex is true, the TopK operation was performed on reversed data on the provided axis.
+    // Convert reversed indices back to forward indices by calculating the following:
+    // indices = shape(tensor)[axis] - indices - 1
     if (selectLastIndex)
     {
-        nvinfer1::Dims dims = tensor.getDimensions();
-        int dimOnAxis = dims.d[axis];
-        nvinfer1::Dims resultShape(dims);
-        resultShape.d[axis] = 1;
-        ShapedWeights shapeWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, resultShape);
-        std::vector<int> tempData(shapeWeights.count(), dimOnAxis);
-        std::memcpy(shapeWeights.values, tempData.data(), shapeWeights.count() * sizeof(int));
+        // Use shapeTensor semantics to support dynamic shapes
+        auto const dims = shapeOf(tensor);
+        auto const indicesDims = shapeOf(*indices);
+        auto const axisTensor = shapeVector(axis);
+        auto const dimOnAxis = gather(ctx, dims, axisTensor);
 
-        ShapedWeights weightOfOnes = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, resultShape);
-        std::vector<int> ones(shapeWeights.count(), 1);
-        std::memcpy(weightOfOnes.values, ones.data(), weightOfOnes.count() * sizeof(int));
+        // Create constant of shape indicesDims with values tensor.shape[axis]
+        auto const tensorDimOnAxis = constantOfShape(ctx, node, &dimOnAxis.tensor(ctx), &indicesDims.tensor(ctx));
 
-        std::vector<TensorOrWeights> newInputs{shapeWeights, indices, weightOfOnes};
+        // Create constant of shape indicesDims with values of 1
+        auto const ones = constantOfShape(ctx, node, &shapeVector(1).tensor(ctx), &indicesDims.tensor(ctx));
+
+        std::vector<TensorOrWeights> newInputs{tensorDimOnAxis, indices, ones};
         indices = &elementwiseHelper(ctx, node, newInputs, nvinfer1::ElementWiseOperation::kSUB).value().at(0).tensor();
     }
     if (keepdims)
@@ -538,8 +542,11 @@ bool convertOnnxWeights(
 {
     void* dataPtr{nullptr};
     size_t nbytes{0};
-    nvinfer1::Dims shape;
     auto onnxDtype = onnxTensor.data_type();
+
+    nvinfer1::Dims shape{};
+    shape.nbDims = onnxTensor.dims().size();
+    std::copy_n(onnxTensor.dims().begin(), shape.nbDims, shape.d);
 
     // ONNX weight values can be stored in either the TensorProto itself, or in an external file in the case
     // of large models. Check for this here.
@@ -587,8 +594,6 @@ bool convertOnnxWeights(
         {
             return false;
         }
-        shape.nbDims = onnxTensor.dims().size();
-        std::copy(onnxTensor.dims().begin(), onnxTensor.dims().end(), shape.d);
 
         // For weights parsed from external files, createTempWeights is necessary to keep them in scope
         ShapedWeights externalWeights;
@@ -631,17 +636,8 @@ bool convertOnnxWeights(
         *weights = externalWeights;
         return true;
     }
-    // Weights information is within the TensorProto itself
-    // Pass through for optional (empty) initializers for unused attributes.
-    if (isOnnxTensorEmpty(onnxTensor))
-    {
-        auto empty = onnx2trt::ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto::FLOAT);
-        *weights = empty;
-        return true;
-    }
 
-    shape.nbDims = onnxTensor.dims().size();
-    std::copy(onnxTensor.dims().begin(), onnxTensor.dims().end(), shape.d);
+    // Weights information is within the TensorProto itself
 
     // Cast non-native TRT types to their corresponding proxy types
     if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64)
@@ -701,9 +697,10 @@ bool convertOnnxWeights(
         {
             switch (onnxDtype)
             {
-            // Import INT32 and FP16 weights as is.
-            case ::ONNX_NAMESPACE::TensorProto::INT32:
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT16: dataPtr = (void*) (onnxTensor.int32_data().data()); break;
+            case ::ONNX_NAMESPACE::TensorProto::INT32: dataPtr = (void*) (onnxTensor.int32_data().data()); break;
+            case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
+                dataPtr = convertINT32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
+                break;
             case ::ONNX_NAMESPACE::TensorProto::INT8:
                 dataPtr = convertINT32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
                 break;
@@ -1215,13 +1212,6 @@ bool isDynamic(const nvinfer1::Dims& shape)
     return std::any_of(shape.d, shape.d + shape.nbDims, [](int dim) { return dim < 0; });
 }
 
-bool isOnnxTensorEmpty(const ::ONNX_NAMESPACE::TensorProto& onnxTensor)
-{
-    return onnxTensor.raw_data().empty() && onnxTensor.double_data().empty() && onnxTensor.float_data().empty()
-        && onnxTensor.int32_data().empty() && onnxTensor.int64_data().empty() && onnxTensor.string_data().empty()
-        && onnxTensor.uint64_data().empty();
-}
-
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm)
 {
     int ndim = shape.nbDims;
@@ -1564,6 +1554,11 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
     // The weight paths in the ONNX model are relative paths to the main ONNX file.
 #ifdef _MSC_VER
     size_t slash = path.rfind("\\");
+    // When using WSL path can have "\" or "/". Need to check both options here.
+    if (slash == std::string::npos)
+    {
+        slash = path.rfind("/");
+    }
 #else
     size_t slash = path.rfind("/");
 #endif
