@@ -32,7 +32,8 @@ TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device,
-            max_workspace_size=None, serialize_engine=False, verbose=False, fp16=False, flags=None, **kwargs):
+            max_workspace_size=None, serialize_engine=False, verbose=False, \
+                 fp16=False, flags=None, external_data_format=False, engine_path=None, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)
@@ -47,6 +48,7 @@ class TensorRTBackendRep(BackendRep):
         self.dynamic = False
         self.fp16 = fp16
         self.builder_flags = flags
+        self.engine_path = engine_path
         
         if self.fp16 and self.builder.platform_has_fast_fp16:
             self.config.set_flag(trt.BuilderFlag.FP16)
@@ -58,17 +60,22 @@ class TensorRTBackendRep(BackendRep):
         if self.verbose:
             print(f'\nRunning {model.graph.name}...')
             TRT_LOGGER.min_severity = trt.Logger.VERBOSE
-
-        if not isinstance(model, six.string_types):
-            model_str = model.SerializeToString()
-        else:
+        
+        if external_data_format:
+            parser_func = self.parser.parse_from_file
             model_str = model
-
+        else:
+            if not isinstance(model, six.string_types):
+                model_str = model.SerializeToString()
+            else:
+                model_str = model
+            parser_func = self.parser.parse
+            
         if not trt.init_libnvinfer_plugins(TRT_LOGGER, ""):
             msg = "Failed to initialize TensorRT's plugin library."
             raise RuntimeError(msg)
 
-        if not self.parser.parse(model_str):
+        if not parser_func(model_str):
             error = self.parser.get_error(0)
             msg = "While parsing node number %i:\n" % error.node()
             msg += ("%s:%i In function %s:\n[%i] %s" %
@@ -149,6 +156,10 @@ class TensorRTBackendRep(BackendRep):
     def _serialize_deserialize(self, trt_engine):
         self.runtime = trt.Runtime(TRT_LOGGER)
         serialized_engine = trt_engine.serialize()
+        
+        with open(self.engine_path,'wb') as w:
+            w.write(serialized_engine)
+        
         del self.parser # Parser no longer needed for ownership of plugins
         trt_engine = self.runtime.deserialize_cuda_engine(
                 serialized_engine)
