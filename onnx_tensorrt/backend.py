@@ -64,6 +64,7 @@ class TensorRTBackendRep(BackendRep):
         if external_data_format:
             parser_func = self.parser.parse_from_file
             model_str = model
+            model = onnx.load(model)
         else:
             if not isinstance(model, six.string_types):
                 model_str = model.SerializeToString()
