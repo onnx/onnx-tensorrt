@@ -58,7 +58,6 @@ class TensorRTBackendRep(BackendRep):
                 self.config.set_flag(flag)
             
         if self.verbose:
-            print(f'\nRunning {model.graph.name}...')
             TRT_LOGGER.min_severity = trt.Logger.VERBOSE
         
         if external_data_format:
