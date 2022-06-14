@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the Master branch is for the latest version of [TensorRT 8.4.1.4](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.4.1.5](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -36,8 +36,8 @@ Python
     builder.create_network(explicit_batch)
 
 For examples of usage of these APIs see:
-* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleOnnxMNIST)
-* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/master/samples/opensource/sampleDynamicReshape)
+* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/sampleOnnxMNIST)
+* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/sampleDynamicReshape)
 
 ## Supported Operators
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x, <= 3.11.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.4.1.4](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.4.1.4 open source libaries (master branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.4.1.5](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.4.1.5 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -101,7 +101,7 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.4.1.4 supports ONNX release 1.8.0. Install it with:
+TensorRT 8.4.1.5 supports ONNX release 1.8.0. Install it with:
 
     python3 -m pip install onnx==1.8.0
 
