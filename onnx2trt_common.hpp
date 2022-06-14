@@ -15,8 +15,7 @@ enum class PluginFormat : uint8_t
 {
     kNCHW = 0,   //!< NCHW
     kNC2HW2 = 1, //!< NCHW with 2-element packed channels
-    kNHWC8 = 2   //!< NHWC with 8-element packed channels (C
-                 //! must be a multiple of 8)
+    kNHWC8 = 2   //!< NHWC with 8-element packed channels (C must be a multiple of 8)
 };
 // from NvInfer.h
 class IPluginExt : public IPlugin

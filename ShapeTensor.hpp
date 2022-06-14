@@ -22,8 +22,11 @@ public:
     //! Create undefined ShapeTensor.
     ShapeTensor() = default;
 
-    //! Create ShapeTensor with known rank and values.
-    ShapeTensor(int rank_, std::vector<int64_t>&& values_);
+    //! Create ShapeTensor with known rank and int64_t values.
+    ShapeTensor(int32_t rank_, std::vector<int64_t>&& values_);
+
+    //! Create ShapeTensor with known rank and float values.
+    ShapeTensor(int32_t rank_, std::vector<float>&& values_);
 
     //! Create ShapeTensor representing value of TensorOrWeights.
     ShapeTensor(IImporterContext* ctx, TensorOrWeights& t);
@@ -66,6 +69,12 @@ public:
 
     //! True if all element values equal the given value.
     bool isAll(int64_t value) const;
+
+    //! True if floating-point shape tensor.
+    bool isFloat() const
+    {
+        return mIsFloat;
+    }
 
     using const_iterator = std::vector<int64_t>::const_iterator;
 
@@ -134,7 +143,9 @@ private:
     //! and mValues.size() == mSize.
     //! When mAllValuesKnown==false, only the non-negative values in mValues
     //! are guaranteed to be correct, and only so if mValues.size() == mSize.
-    std::vector<int64_t> mValues;
+    std::vector<int64_t> mValues{};
+
+    bool mIsFloat{false};
 };
 
 //! Print ShapeTensor.  Unknown values are printed as _.
@@ -190,6 +201,9 @@ ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTe
 
 //! Concatenation of two 1D tensors
 ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+
+//! Cast to int32_t shape tensor.
+ShapeTensor castToInt32(IImporterContext* ctx, ShapeTensor const& x);
 
 //! Return gather(concat(x,y),subscripts)
 inline ShapeTensor interlace(

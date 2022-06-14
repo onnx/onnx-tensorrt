@@ -308,7 +308,7 @@ nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(const std::string& key
     {
         return nvinfer1::ResizeMode::kNEAREST;
     }
-    if (mode == "linear")
+    if (mode == "linear" || mode == "bilinear")
     {
         return nvinfer1::ResizeMode::kLINEAR;
     }
