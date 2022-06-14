@@ -15,9 +15,12 @@ class ShapedWeights
 public:
     using DataType = int32_t;
 
+    //! Create 1D zero-length ShapedWeights of given type, count()==0, and values=nullptr.
     static ShapedWeights empty(DataType type);
 
-    ShapedWeights();
+    //! Construct ShapedWeights that is not expected to be usuable,
+    //! except with `operator=` and method `setName()`.
+    ShapedWeights() = default;
 
     explicit ShapedWeights(DataType type, void* values, nvinfer1::Dims shape_);
 
@@ -29,6 +32,7 @@ public:
 
     void setName(const char* name);
 
+    //! True if values exist.
     explicit operator bool() const;
 
     operator nvinfer1::Weights() const;
@@ -48,13 +52,12 @@ public:
     }
 
 public:
-    DataType type;
-    void* values;
-    nvinfer1::Dims shape;
+    DataType type{static_cast<DataType>(-1)};
+    void* values{nullptr};
+    nvinfer1::Dims shape{-1, {}};
     const char* name{};
 };
 
 class IImporterContext;
-bool transposeWeights(ShapedWeights const& weights, nvinfer1::Permutation const& perm, ShapedWeights* result, IImporterContext* ctx);
 
 } // namespace onnx2trt

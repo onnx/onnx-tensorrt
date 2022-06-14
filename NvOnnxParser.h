@@ -135,7 +135,9 @@ public:
      */
     virtual bool parseFromFile(const char* onnxModelFile, int verbosity) = 0;
 
-    /** \brief Check whether TensorRT supports a particular ONNX model
+    /** \brief Check whether TensorRT supports a particular ONNX model.
+     * 	       If the function returns True, one can proceed to engine building
+     * 	       without having to call \p parse or \p parseFromFile.
      *
      * \param serialized_onnx_model Pointer to the serialized ONNX model
      * \param serialized_onnx_model_size Size of the serialized ONNX model
@@ -218,6 +220,7 @@ namespace
  * because correctness of the translation may rely on those constants.
  * Changing a dynamic input dimension, i.e. one that translates to -1 in
  * TensorRT, to a constant is okay if the constant is consistent with the model.
+ * Each instance of the parser is designed to only parse one ONNX model once.
  *
  * \see IParser
  */

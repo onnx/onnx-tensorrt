@@ -15,6 +15,7 @@
 #include <limits>
 #include <functional>
 #include <unordered_set>
+#include <sys/stat.h>
 
 namespace onnx2trt
 {
@@ -244,8 +245,8 @@ Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const&
     {
         LOG_VERBOSE(
             "Adding network input: " << input.name() << " with dtype: " << trtDtype << ", dimensions: " << trt_dims);
-        ASSERT_INPUT( (*tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims)) && "Failed to add input to the network.",
-            ErrorCode::kUNSUPPORTED_NODE, input.name());
+        *tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims);
+        ASSERT_INPUT(*tensor && "Failed to add input to the network.", ErrorCode::kUNSUPPORTED_NODE, input.name());
     }
 
     // Fill in field `tensor` for any dimensions that had names in the ONNX.
@@ -358,13 +359,13 @@ Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serializ
     else
     {
         google::protobuf::io::CodedInputStream coded_input(&raw_input);
-      #if GOOGLE_PROTOBUF_VERSION >= 3011000
+#if GOOGLE_PROTOBUF_VERSION >= 3011000
         // Starting Protobuf 3.11 accepts only single parameter.
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
-      #else
+#else
         // Note: This WARs the very low default size limit (64MB)
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-      #endif
+#endif
         ASSERT( (model->ParseFromCodedStream(&coded_input)) && "Failed to parse the ONNX model.", ErrorCode::kMODEL_DESERIALIZE_FAILED);
     }
     return Status::success();
@@ -380,24 +381,22 @@ Status deserialize_onnx_model(int fd, bool is_serialized_as_text, ::ONNX_NAMESPA
     else
     {
         google::protobuf::io::CodedInputStream coded_input(&raw_input);
-      #if GOOGLE_PROTOBUF_VERSION >= 3011000
+        // Note: This WARs the very low default size limit (64MB)
+#if GOOGLE_PROTOBUF_VERSION >= 3011000
         // Starting Protobuf 3.11 accepts only single parameter.
         coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max());
-      #else
+#else
         // Note: This WARs the very low default size limit (64MB)
-        coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-      #endif
-        // Note: This WARs the very low default size limit (64MB)
+        coded_input.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()/4);
+#endif
         ASSERT( (model->ParseFromCodedStream(&coded_input)) && "Failed to parse the ONNX model.", ErrorCode::kMODEL_DESERIALIZE_FAILED);
     }
     return Status::success();
 }
 
-bool ModelImporter::supportsModel(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size, SubGraphCollection_t& sub_graph_collection,
-    const char* model_path)
+bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
+    SubGraphCollection_t& sub_graph_collection, const char* model_path)
 {
-
     ::ONNX_NAMESPACE::ModelProto model;
     bool is_serialized_as_text = false;
     Status status
@@ -470,13 +469,11 @@ bool ModelImporter::supportsModel(
         // Add the node to the subgraph if:
         //     1. There is an importer function registered for the operator type
         //     2. It is not directly connected to an unsupported input
-        //     3. It did not illegally produce a shape tensor output
-        //     4. The importer function did not throw an assertion
+        //     3. The importer function did not throw an assertion
         bool registered = supportsOperator(node.op_type().c_str());
         bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
-        bool unsupportedShapeTensor = ctx->unsupportedShapeTensors().count(node.name()) > 0 ? true : false;
         bool unsuccessfulParse = node_idx == error_node;
-        if (registered && !unsupportedInput && !unsupportedShapeTensor && !unsuccessfulParse)
+        if (registered && !unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
@@ -508,17 +505,20 @@ bool ModelImporter::supportsModel(
 // Mark experimental ops as unsupported, mark plugin ops as supported
 bool ModelImporter::supportsOperator(const char* op_name) const
 {
-    if (std::string(op_name) == "NonMaxSuppression")
+    auto is = [op_name](const char* name) { return std::strcmp(op_name, name) == 0; };
+
+    if (is("NonMaxSuppression"))
     {
         return false;
     }
-    if (std::string(op_name) == "EfficientNMS_TRT" || std::string(op_name) == "PyramidROIAlign_TRT" || std::string(op_name) == "MultilevelCropAndResize_TRT"
-        || std::string(op_name) == "DisentangledAttention_TRT")
+    if (is("EfficientNMS_TRT") || is("PyramidROIAlign_TRT") || is("MultilevelCropAndResize_TRT")
+        || is("DisentangledAttention_TRT"))
     {
         return true;
     }
     return _op_importers.count(op_name);
 }
+
 bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size)
 {
     _current_node = -1;
@@ -547,48 +547,17 @@ bool ModelImporter::parseWithWeightDescriptors(void const* serialized_onnx_model
 
 bool ModelImporter::parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path)
 {
+    auto* const ctx = &_importer_ctx;
+    if (ctx->network()->getNbLayers() > 0)
+    {
+        LOG_ERROR("Parse was called with a non-empty network definition");
+        return false;
+    }
     if (model_path)
     {
         _importer_ctx.setOnnxFileLocation(model_path);
     }
     return this->parseWithWeightDescriptors(serialized_onnx_model, serialized_onnx_model_size);
-}
-
-void removeShapeTensorCasts(IImporterContext* ctx)
-{
-    // Removes any casts on shape tensors, as TensorRT does not support them.
-    for (int i = 0, e = ctx->network()->getNbLayers(); i < e; ++i)
-    {
-        nvinfer1::ILayer* layer = ctx->network()->getLayer(i);
-        if (layer->getNbOutputs() > 0 && layer->getOutput(0)->isShapeTensor())
-        {
-            layer->resetOutputType(0);
-            nvinfer1::ITensor& t = *layer->getOutput(0);
-            // Assume that boolean tensors were not cast, and thus have their type correctly set.
-            const nvinfer1::DataType shapeTensorType = t.getType() == nvinfer1::DataType::kBOOL ? nvinfer1::DataType::kBOOL : nvinfer1::DataType::kINT32;
-            layer->setOutputType(0, shapeTensorType);
-            // Set type only if necessary, to avoid TensorRT warnings
-            // about setting type of non-input/output tensors.
-            if (t.getType() != shapeTensorType)
-            {
-                t.setType(shapeTensorType);
-            }
-            // Some layers do not support shape tensor outputs. Keep track of these tensor names
-            // for supportsModel().
-            auto type = layer->getType();
-            auto elementwiseOp = type == nvinfer1::LayerType::kELEMENTWISE ? (static_cast<nvinfer1::IElementWiseLayer*>(layer))->getOperation() : nvinfer1::ElementWiseOperation::kSUM;
-            auto reduceOp = type == nvinfer1::LayerType::kREDUCE ? (static_cast<nvinfer1::IReduceLayer*>(layer))->getOperation() : nvinfer1::ReduceOperation::kSUM;
-            auto fillOp = type == nvinfer1::LayerType::kFILL
-                ? (static_cast<nvinfer1::IFillLayer*>(layer))->getOperation()
-                : nvinfer1::FillOperation::kLINSPACE;
-            if (!supportsShapeTensor(type, elementwiseOp, reduceOp, fillOp))
-            {
-                auto name = layer->getName();
-                ctx->unsupportedShapeTensors().insert(name);
-                LOG_ERROR("Found unsupported shape-tensor producing layer:" << name);
-            }
-        }
-    }
 }
 
 Status ModelImporter::importModel(
@@ -738,15 +707,27 @@ Status ModelImporter::importModel(
         }
     }
 
-    removeShapeTensorCasts(ctx);
     return Status::success();
 }
 
 bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
 {
+    auto* ctx = &_importer_ctx;
+    
+    // Define S_ISREG macro for Windows
+#if !defined(S_ISREG)
+# define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
+#endif
+    
+    struct stat sb;
+    if (stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode))
+    {
+	LOG_ERROR("Input is not a regular file: " << onnxModelFile);
+	return false;
+    }
+
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    auto* ctx = &_importer_ctx;
 
     const bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
@@ -772,7 +753,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
 
     { //...Read input file, parse it
         std::ifstream onnx_file(onnxModelFile, std::ios::binary | std::ios::ate);
-        const std::streamsize file_size = onnx_file.tellg();
+        auto const file_size = onnx_file.tellg();
         onnx_file.seekg(0, std::ios::beg);
         std::vector<char> onnx_buf(file_size);
         if (!onnx_file.read(onnx_buf.data(), onnx_buf.size()))

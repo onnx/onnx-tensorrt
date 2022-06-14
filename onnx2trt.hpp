@@ -54,11 +54,15 @@ public:
     virtual nvinfer1::ILogger& logger() = 0;
     virtual bool hasError() const = 0;
     virtual nvinfer1::IErrorRecorder* getErrorRecorder() const = 0;
+    virtual nvinfer1::IConstantLayer* getConstantLayer(const char* name) const = 0;
 
+    //! Push a new scope for base names (ONNX names).
+    virtual void pushBaseNameScope() = 0;
+
+    //! Revert actions of registerTensor for names in the top scope and pop it.
+    virtual void popBaseNameScope() = 0;
 protected:
-    virtual ~IImporterContext()
-    {
-    }
+    virtual ~IImporterContext() {}
 };
 
 } // namespace onnx2trt

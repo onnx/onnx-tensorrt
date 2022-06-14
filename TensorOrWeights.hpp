@@ -81,6 +81,11 @@ public:
     {
         return is_tensor() ? _tensor != nullptr : static_cast<bool>(_weights);
     }
+    bool isFp32() const
+    {
+        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kFLOAT
+                           : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
+    }
     bool isInt32() const
     {
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT32 : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;

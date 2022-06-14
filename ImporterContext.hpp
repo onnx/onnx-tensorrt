@@ -9,7 +9,9 @@
 #include "onnxErrorRecorder.hpp"
 #include "onnx/common/stl_backports.h"
 #include <list>
+#include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace onnx2trt
 {
@@ -84,8 +86,24 @@ class ImporterContext final : public IImporterContext
     int64_t mSuffixCounter{0}; // increasing suffix counter used to uniquify layer names.
     std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
     StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
-    std::string mOnnxFileLocation; // Keep track of the directory of the parsed ONNX file
+    std::string mOnnxFileLocation;       // Keep track of the directory of the parsed ONNX file
     std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
+    StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
+
+    //! Stack of names defined by nested ONNX graphs, with information about how to
+    //! restore their associated values when popping back to the surrounding scope.
+    //!
+    //! The stack is empty when processing the top-level ONNX graph.
+    //! back() corresponds to the innermost ONNX graph being processed.
+    //!
+    //! For each entry {name, {bool, TensorOrWeights}}:
+    //!
+    //! * If the bool is true, the name was newly introduced by the scope.
+    //!
+    //! * If the bool is false, the name shadows a name in a surrounding scope,
+    //!   and TensorOrWeights was the name's value before being shadowed.
+    //!
+    std::vector<StringMap<std::pair<bool, TensorOrWeights>>> mBaseNameScopeStack;
 
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
@@ -134,52 +152,15 @@ public:
     {
         return mOnnxFileLocation;
     }
+
+    void pushBaseNameScope() override;
+
+    void popBaseNameScope() override;
+
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
-    void registerTensor(TensorOrWeights tensor, const std::string& basename) override
-    {
-        // TRT requires unique tensor names.
-        const std::string uniqueName = generateUniqueName(mTensorNames, basename);
+    void registerTensor(TensorOrWeights tensor, std::string const& basename) override;
 
-        if (tensor)
-        {
-            auto* ctx = this; // To enable logging.
-            if (tensor.is_tensor())
-            {
-                tensor.tensor().setName(uniqueName.c_str());
-
-                LOG_VERBOSE("Registering tensor: " << uniqueName << " for ONNX tensor: " << basename);
-            }
-            else if (tensor.is_weights())
-            {
-                const auto& weights = tensor.weights();
-                if (tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
-                {
-                    tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
-                        convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, ctx), weights.shape};
-                }
-                tensor.weights().setName(basename.c_str());
-            }
-
-        }
-        // Overwrite previous tensors registered with the same name (this only happens when there are subgraphs,
-        // and in that case, overwriting is the desired behavior).
-        this->tensors()[basename] = std::move(tensor);
-    }
-
-    void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) override
-    {
-        // No layer will be added for Constant nodes in ONNX.
-        if (layer)
-        {
-            const std::string name = basename.empty() ? layer->getName() : basename;
-            const std::string uniqueName = generateUniqueName(mLayerNames, name);
-
-            auto* ctx = this; // To enable logging.
-            LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
-
-            layer->setName(uniqueName.c_str());
-        }
-    }
+    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename) override;
 
     nvinfer1::ILogger& logger() override
     {
@@ -188,16 +169,10 @@ public:
 
     ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, uint8_t value = 0) override
     {
+        std::string const& name = generateUniqueName(mTensorNames, "tmp_weight");
         ShapedWeights weights(type, nullptr, shape);
-        // Need special logic for handling scalars.
-        if (shape.nbDims == 0)
-        {
-            mTempBufs.push_back(std::vector<uint8_t>(getDtypeSize(type), value));
-        }
-        else
-        {
-            mTempBufs.push_back(std::vector<uint8_t>(weights.size_bytes(), value));
-        }
+        weights.setName(name.c_str());
+        mTempBufs.push_back(std::vector<uint8_t>(weights.size_bytes(), value));
         weights.values = mTempBufs.back().data();
         return weights;
     }
@@ -256,8 +231,13 @@ public:
         {
             return mOpsets.begin()->second;
         }
+        else if (mOpsets.count(domain))
+        {
+            return mOpsets.at(domain);
+        }
         else
         {
+            domain = "ai.onnx";
             assert(mOpsets.count(domain));
             return mOpsets.at(domain);
         }
@@ -271,8 +251,22 @@ public:
     {
         return mErrorWrapper ? mErrorWrapper->getErrorRecorder() : nullptr;
     }
+    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const final
+    {
+        if (name == nullptr)
+        {
+            return nullptr;
+        }
+        auto const iter = mConstantLayers.find(name);
+        if (iter == mConstantLayers.end())
+        {
+            return nullptr;
+        }
+        return iter->second;
+    }
+
 private:
-    std::string generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
+    std::string const& generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
     {
         std::string candidate = basename;
 
@@ -283,8 +277,8 @@ private:
         }
 
         namesSet.insert(candidate);
-
-        return candidate;
+        // Return reference to newly inserted string to avoid any c_str()'s going out of scope
+        return *namesSet.find(candidate);
     }
 };
 

@@ -34,8 +34,8 @@ Status getSubgraphOutputs(const std::vector<nvinfer1::ILayer*>& newLayers,
 
 // Take a snapshot of the network before and after parsing the subgraph and return a list
 // of newly added network layers.
-Status importSubgraph(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& subgraph, std::vector<nvinfer1::ILayer*>& newLayers);
+Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& subgraph,
+    std::vector<nvinfer1::ILayer*>& newLayers, StringMap<TensorOrWeights>& subgraphTensors);
 
 using InputsMap = std::unordered_map<std::string, nvinfer1::IIfConditionalInputLayer*>;
 
@@ -45,8 +45,9 @@ onnx2trt::Status addIfInputLayers(IImporterContext* ctx, nvinfer1::IIfConditiona
 
 // Add IIfConditionalOutputLayers to the outputs of the subgraph indicated by `subgraph`.
 onnx2trt::Status addIfOutputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional,
-    const ::ONNX_NAMESPACE::GraphProto& thenGraph, const std::vector<nvinfer1::ILayer*>& thenLayers,
-    const ::ONNX_NAMESPACE::GraphProto& elseGraph, const std::vector<nvinfer1::ILayer*>& elseLayers,
+    ::ONNX_NAMESPACE::GraphProto const& thenGraph, std::vector<nvinfer1::ILayer*> const& thenLayers,
+    StringMap<TensorOrWeights> const& thenSubgraphTensors, ::ONNX_NAMESPACE::GraphProto const& elseGraph,
+    std::vector<nvinfer1::ILayer*> const& elseLayers, StringMap<TensorOrWeights> const& elseSubgraphTensors,
     std::vector<TensorOrWeights>& graphOutputs);
 
 } // namespace onnx2trt
