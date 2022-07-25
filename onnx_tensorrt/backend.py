@@ -18,6 +18,8 @@ def cudaSetDevice(device_idx):
     ret = libcudart.cudaSetDevice(device_idx)
     if ret != 0:
         error_string = libcudart.cudaGetErrorString(ret)
+        if isinstance(error_string, bytes):
+            error_string = error_string.decode("utf-8")
         raise RuntimeError("cudaSetDevice: " + error_string)
 
 def count_trailing_ones(vals):
