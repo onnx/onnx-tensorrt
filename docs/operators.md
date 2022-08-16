@@ -76,6 +76,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | HannWindow                | N          |
 | HardSwish                 | N          |
 | HardSigmoid               | Y          | FP32, FP16, INT8 |
+| HardSwish                 | Y          | FP32, FP16 |
 | Hardmax                   | N          |
 | Identity                  | Y          | FP32, FP16, INT32, INT8, BOOL |
 | If                        | Y          | FP32, FP16, INT32, BOOL | Output tensors of the two conditional branches must have broadcastable shapes, and must have different names
@@ -124,12 +125,12 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | QLinearConv               | N          |
 | QLinearMatMul             | N          |
 | QuantizeLinear            | Y          | FP32, FP16 | `y_zero_point` must be 0                                                                   |
-| RandomNormal              | N          |
-| RandomNormalLike          | N          |
+| RandomNormal              | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
+| RandomNormalLike          | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
 | RandomUniform             | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
 | RandomUniformLike         | Y          | FP32, FP16 | `seed` value is ignored by TensorRT
 | Range                     | Y          | FP32, FP16, INT32 |
-| Reciprocal                | N          |
+| Reciprocal                | Y          | FP32, FP16 | 
 | ReduceL1                  | Y          | FP32, FP16 |
 | ReduceL2                  | Y          | FP32, FP16 |
 | ReduceLogSum              | Y          | FP32, FP16 |

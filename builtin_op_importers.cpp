@@ -1450,11 +1450,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Flatten)
     int axis = attrs.get("axis", 1);
     CHECK(convertAxis(axis, nbDims));
 
-    if (nbDims > 2)
+    // No-op Flatten: (a, b) => Flatten(axis = 1) => (a, b)
+    // Add identity layer to avoid name mangling of engine bindings
+    // For rest of configurations, we must flatten.
+    if (nbDims == 2 && axis == 1)
     {
-        tensorPtr = flattenTensor(ctx, node, *tensorPtr, axis, true);
-        ASSERT(tensorPtr && "Failed to flatten the tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        RETURN_IDENTITY(inputs.at(0));
     }
+
+    tensorPtr = flattenTensor(ctx, node, *tensorPtr, axis, true);
+    ASSERT(tensorPtr && "Failed to flatten the tensor.", ErrorCode::kUNSUPPORTED_NODE);
     return {{tensorPtr}};
 }
 
@@ -3542,7 +3547,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
     if (ctx->getOpsetVersion() >= 14)
     {
         OnnxAttrs attrs{node, ctx};
-        allowZero = attrs.get<int>("allowzero");
+        allowZero = attrs.get<int32_t>("allowzero", 0);
     }
 
     ShapeTensor shape;
