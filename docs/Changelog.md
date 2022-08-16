@@ -2,6 +2,19 @@
 
 # ONNX-TensorRT Changelog
 
+## TensorRT 22.08 Release 2022-8-16
+### Updated
+- Updated TensorRT version to 8.4.2
+- Updated ONNX submodule version to 1.12
+- Updated operators support documentation
+
+### Fixes
+- Fixed handling of no-op `Flatten` operations
+- Fixed `allowZero` logic in Reshape operation
+
+### Deprecated
+- Deprecated `onnx2trt` binary. This will be removed in the next release of TensorRT.
+
 ## TensorRT 8.4 GA Release -2022-6-6
 
 ### Added 
