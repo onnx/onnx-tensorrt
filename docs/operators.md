@@ -110,7 +110,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Multinomial               | N          |
 | Neg                       | Y          | FP32, FP16, INT32 |
 | NegativeLogLikelihoodLoss | N          |
-| NonMaxSuppression         | Y [EXPERIMENTAL] | FP32, FP16 | Inputs `max_output_boxes_per_class`, `iou_threshold`, and `score_threshold` must be initializers. Output has fixed shape and is padded to [`max_output_boxes_per_class`, 3].
+| NonMaxSuppression         | Y [EXPERIMENTAL] | FP32, FP16 | Inputs `max_output_boxes_per_class`, `iou_threshold`, and `score_threshold` must be initializers. Output has fixed shape and is padded with `-1`s to [`num_batches * max_output_boxes_per_class`, 3].
 | NonZero                   | N          |
 | Not                       | Y          | BOOL |
 | OneHot                    | N          |
