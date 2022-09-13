@@ -3484,7 +3484,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
             }
         }
 
-        if (inputs.size() == 4)
+        if (inputs.size() == 4 && !inputs.at(3).isNullTensor())
         {
             auto* resizeShape = &convertToTensor(inputs.at(3), ctx);
             layer->setInput(1, *resizeShape);
