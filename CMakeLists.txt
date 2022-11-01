@@ -29,7 +29,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 8)
 set(ONNX2TRT_MINOR 4)
-set(ONNX2TRT_PATCH 1)
+set(ONNX2TRT_PATCH 3)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------
@@ -55,8 +55,8 @@ if (BUILD_ONNXIFI)
   set(ONNXIFI_SOURCES onnx_trt_backend.cpp)
 endif()
 
-# Build executables if BUILD_LIBRARY_ONLY flag is not set
-if (NOT DEFINED BUILD_LIBRARY_ONLY)
+# Build executables if BUILD_EXES flag is set
+if (DEFINED BUILD_EXES)
   set(EXECUTABLE_SOURCES
     main.cpp
   )
@@ -138,7 +138,7 @@ endif()
 # --------------------------------
 # Converter executable
 # --------------------------------
-if (NOT DEFINED BUILD_LIBRARY_ONLY)
+if (DEFINED BUILD_EXES)
   add_executable(onnx2trt ${EXECUTABLE_SOURCES})
   target_include_directories(onnx2trt PUBLIC ${ONNX_INCLUDE_DIRS})
   target_link_libraries(onnx2trt PUBLIC ${PROTOBUF_LIB} onnx nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES}
@@ -147,7 +147,7 @@ endif()
 # --------------------------------
 # API Tests
 # --------------------------------
-if (NOT DEFINED BUILD_LIBRARY_ONLY)
+if (DEFINED BUILD_EXES)
   add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
   target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
   target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS}) #${CUDA_LIBRARIES}
@@ -166,7 +166,7 @@ install(TARGETS
 install(FILES ${HEADERS}
   DESTINATION include
 )
-if (NOT DEFINED BUILD_LIBRARY_ONLY)
+if (DEFINED BUILD_EXES)
   install(TARGETS
           onnx2trt
           RUNTIME DESTINATION bin
@@ -174,7 +174,7 @@ if (NOT DEFINED BUILD_LIBRARY_ONLY)
 endif()
 
 SET(CPACK_GENERATOR "DEB")
-SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Mike Houston") #required
+SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "NVIDIA") #required
 SET(CPACK_PACKAGE_NAME "onnx-trt-dev")
 SET(CPACK_PACKAGE_VERSION "0.5.9")
 SET(CPACK_PACKAGE_VERSION_MAJOR "0")

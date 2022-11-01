@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the `main` branch is for the latest version of [TensorRT 8.4.1.5](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.4.3.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -47,13 +47,13 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 
 ### Dependencies
 
- - [Protobuf >= 3.0.x, <= 3.11.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.4.1.5](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.4.1.5 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
+ - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
+ - [TensorRT 8.4.3.1](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.4.3.1 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
-For building within docker, we recommend using and setting up the docker containers as instructed in the main (TensorRT repository)[https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment] to build the onnx-tensorrt library.
+For building within docker, we recommend using and setting up the docker containers as instructed in the main [TensorRT repository](https://github.com/NVIDIA/TensorRT#setting-up-the-build-environment) to build the onnx-tensorrt library.
 
 Once you have cloned the repository, you can build the parser libraries and executables by running:
 
@@ -65,14 +65,34 @@ Once you have cloned the repository, you can build the parser libraries and exec
 
 Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
 
-For building only the libraries, append `-DBUILD_LIBRARY_ONLY=1` to the CMake build command.
-
 ### Experimental Ops
 All experimental operators will be considered unsupported by the ONNX-TRT's `supportsModel()` function.
 
 `NonMaxSuppression` is available as an experimental operator in TensorRT 8. It has the limitation that the output shape is always padded to length [`max_output_boxes_per_class`, 3], therefore some post processing is required to extract the valid indices.
 
 ## Executable Usage
+
+There are currently two officially supported tools for users to quickly check if an ONNX model can parse and build into a TensorRT engine from an ONNX file.
+
+For C++ users, there is the [trtexec](https://github.com/NVIDIA/TensorRT/tree/main/samples/trtexec) binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
+
+`trtexec --onnx=model.onnx`
+
+Refer to the link or run `trtexec -h` for more information on CLI options.
+
+For Python users, there is the [polygraphy](https://github.com/NVIDIA/TensorRT/tree/main/tools/Polygraphy) tool. The basic command for running an onnx model is:
+
+`polygraphy run model.onnx --trt`
+
+Refer to the link or run `polygraphy run -h` for more information on CLI options.
+
+**NOTE: the `onnx2trt` executable is marked for deprecation, and will be removed in the next TensorRT release. It is no longer built by default with the library.**
+
+In order to build this binary, the following prerequisites are needed:
+
+    1. Downgraded ONNX version (checkout v1.8.0 tag in `third_party/onnx`)
+    2. Ensure protobuf version is <= 3.11.x
+    3. Append `BUILD_EXES=1` to CMake command
 
 ONNX models can be converted to serialized TensorRT engines using the `onnx2trt` executable:
 
@@ -101,9 +121,9 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.4.1.5 supports ONNX release 1.8.0. Install it with:
+TensorRT 8.4.3.1 supports ONNX release 1.12.0. Install it with:
 
-    python3 -m pip install onnx==1.8.0
+    python3 -m pip install onnx==1.12.0
 
 The ONNX-TensorRT backend can be installed by running:
 
