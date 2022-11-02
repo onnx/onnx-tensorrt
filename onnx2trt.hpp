@@ -47,7 +47,8 @@ public:
     virtual StringMap<std::string>& loopTensors() = 0;
     virtual void setOnnxFileLocation(std::string location) = 0;
     virtual std::string getOnnxFileLocation() = 0;
-    virtual void registerTensor(TensorOrWeights tensor, const std::string& basename) = 0;
+    virtual void registerTensor(TensorOrWeights tensor, const std::string& basename, bool const checkUniqueName = false)
+        = 0;
     virtual void registerLayer(nvinfer1::ILayer* layer, const std::string& basename) = 0;
     virtual ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, uint8_t value = 0) = 0;
     virtual int64_t getOpsetVersion(const char* domain = "") const = 0;

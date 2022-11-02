@@ -158,7 +158,8 @@ public:
     void popBaseNameScope() override;
 
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
-    void registerTensor(TensorOrWeights tensor, std::string const& basename) override;
+    void registerTensor(
+        TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName = false) override;
 
     void registerLayer(nvinfer1::ILayer* layer, std::string const& basename) override;
 

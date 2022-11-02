@@ -12,6 +12,7 @@
 #include <NvInfer.h>
 #include <onnx/onnx_pb.h>
 
+#include "half.h"
 #include <cstring> // For std::memcpy
 #include <iostream>
 #include <limits>
@@ -71,6 +72,7 @@ static std::ostream& operator<<(std::ostream& stream, const nvinfer1::DataType& 
     case nvinfer1::DataType::kFLOAT: return stream << "float32";
     case nvinfer1::DataType::kHALF: return stream << "float16";
     case nvinfer1::DataType::kINT8: return stream << "int8";
+    case nvinfer1::DataType::kUINT8: return stream << "uint8";
     case nvinfer1::DataType::kINT32: return stream << "int32";
     case nvinfer1::DataType::kBOOL: return stream << "bool";
     default: throw std::runtime_error("Unknown dtype");
@@ -155,8 +157,8 @@ Status isBroadcastValid(IImporterContext* ctx, const nvinfer1::Dims& firstShape,
 std::vector<int32_t> calculateBias(
     const nvinfer1::Dims& daDims, const nvinfer1::Dims& idxDims, const std::vector<int32_t>& pitches, int32_t axis);
 
-// Helper function to check that linear resize can be used
-bool canUseLinearResize(const size_t scaleSize, const float* scaleFactors);
+// Helper function to check that linear/cubic resize can be used
+bool canUseNDResize(size_t const scaleSize, float const* scaleFactors, size_t const n);
 
 // Helper function to calculate and return a vector representation of the pitches of a given shape
 std::vector<int32_t> calculatePitches(const nvinfer1::Dims& inputDims);
@@ -255,11 +257,21 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
 // Helper function to get the scaling mode for TRT's scale layer
 nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::Dims const& tensor_shape);
 
+// Helper function to get a float representation of a FLOAT or FLOAT16 ONNX type.
+float getSingleValueAsFloat(void* data, bool fp16);
+
 // Helper function to map ONNX Global Pooling ops into TensorRT.
 nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
 
+// Helper function to create a greaterOrEqual or lessOrEqual operation. Provide `greater=true` for greaterOrEqual, `greater=false` for lessOrEqual
+nvinfer1::ITensor* greaterLessOrEqual(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB,
+    bool greater);
+
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
+
+// Helper fucntion to create an iota fill given a set of dimensions and an axis
+nvinfer1::ITensor* iota(IImporterContext* ctx, ShapeTensor iotaDims, int32_t axis);
 
 // Helper function to load a creator from the registry
 nvinfer1::IPluginCreator* importPluginCreator(
@@ -414,6 +426,12 @@ nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
 NodeImportResult addScatterLayer(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
 
+//! Helper function to calculate mod(A, B), A & B are integers
+nvinfer1::IElementWiseLayer* modWithIntegerInputs(IImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1, bool fmod);
+
+//! Helper function to calculate mod(A, B), A & B are floating point numbers
+nvinfer1::IElementWiseLayer* modWithFPInputs(IImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1, nvinfer1::ITensor* divResult, bool sameSign);
+
 //! RAII wrapper for IImporterContext::pushBaseNameScope() and popBaseNameScope().
 class NameScope
 {
@@ -430,5 +448,11 @@ public:
 private:
     IImporterContext& mContext;
 };
+
+// Helper function to convert weightValues' type from fp16 to fp32
+float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
+
+// Helper function to validate input types for an ONNX node
+Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes);
 
 } // namespace onnx2trt

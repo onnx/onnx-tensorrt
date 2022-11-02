@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the `main` branch is for the latest version of [TensorRT 8.4.3.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.5.1](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -36,8 +36,8 @@ Python
     builder.create_network(explicit_batch)
 
 For examples of usage of these APIs see:
-* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/sampleOnnxMNIST)
-* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/sampleDynamicReshape)
+* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleOnnxMNIST)
+* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleDynamicReshape)
 
 ## Supported Operators
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.4.3.1](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.4.3.1 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.5.1](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.5.1 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -74,7 +74,7 @@ All experimental operators will be considered unsupported by the ONNX-TRT's `sup
 
 There are currently two officially supported tools for users to quickly check if an ONNX model can parse and build into a TensorRT engine from an ONNX file.
 
-For C++ users, there is the [trtexec](https://github.com/NVIDIA/TensorRT/tree/main/samples/trtexec) binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
+For C++ users, there is the [trtexec](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/trtexec) binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
 
 `trtexec --onnx=model.onnx`
 
@@ -86,42 +86,13 @@ For Python users, there is the [polygraphy](https://github.com/NVIDIA/TensorRT/t
 
 Refer to the link or run `polygraphy run -h` for more information on CLI options.
 
-**NOTE: the `onnx2trt` executable is marked for deprecation, and will be removed in the next TensorRT release. It is no longer built by default with the library.**
-
-In order to build this binary, the following prerequisites are needed:
-
-    1. Downgraded ONNX version (checkout v1.8.0 tag in `third_party/onnx`)
-    2. Ensure protobuf version is <= 3.11.x
-    3. Append `BUILD_EXES=1` to CMake command
-
-ONNX models can be converted to serialized TensorRT engines using the `onnx2trt` executable:
-
-    onnx2trt my_model.onnx -o my_engine.trt
-
-ONNX models can also be converted to human-readable text:
-
-    onnx2trt my_model.onnx -t my_model.onnx.txt
-
-ONNX models can also be optimized by ONNX's optimization libraries (added by [dsandler](https://gitlab-master.nvidia.com/dsandler)).
-To optimize an ONNX model and output a new one use `-m` to specify the output model name and `-O` to specify a semicolon-separated list of optimization passes to apply:
-
-    onnx2trt my_model.onnx -O "pass_1;pass_2;pass_3" -m my_model_optimized.onnx
-
-See more all available optimization passes by running:
-
-    onnx2trt -p
-
-See more usage information by running:
-
-    onnx2trt -h
-
 ### Python Modules
 
 Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. Install them with
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.4.3.1 supports ONNX release 1.12.0. Install it with:
+TensorRT 8.5.1 supports ONNX release 1.12.0. Install it with:
 
     python3 -m pip install onnx==1.12.0
 

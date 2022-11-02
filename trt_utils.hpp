@@ -21,6 +21,7 @@ inline int getDtypeSize(nvinfer1::DataType trtDtype)
     switch (trtDtype)
     {
     case nvinfer1::DataType::kFLOAT: return 4;
+    case nvinfer1::DataType::kUINT8:
     case nvinfer1::DataType::kINT8: return 1;
     case nvinfer1::DataType::kHALF: return 2;
     case nvinfer1::DataType::kINT32:
@@ -154,6 +155,7 @@ inline ::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataTy
     case nvinfer1::DataType::kINT32: return ::ONNX_NAMESPACE::TensorProto::INT32;
     case nvinfer1::DataType::kINT8: return ::ONNX_NAMESPACE::TensorProto::INT8;
     case nvinfer1::DataType::kBOOL: return ::ONNX_NAMESPACE::TensorProto::BOOL;
+    case nvinfer1::DataType::kUINT8: return ::ONNX_NAMESPACE::TensorProto::UINT8;
     default: return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
     }
     throw std::runtime_error{"Unreachable"};

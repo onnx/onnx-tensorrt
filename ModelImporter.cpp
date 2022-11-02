@@ -23,7 +23,7 @@ namespace onnx2trt
 
 // Helper for deserializing INetwork
 Status setTensorLocations(
-    IImporterContext* ctx, const std::vector<std::string>& tensors, const std::vector<std::string>& locations)
+    IImporterContext* ctx, std::vector<std::string> const& tensors, std::vector<std::string> const& locations)
 {
     ASSERT( (tensors.size() >= locations.size()) && "The size of tensors misaligns with the size of the attribute trt_outputs_loc.", nvonnxparser::ErrorCode::kINVALID_GRAPH);
     for (size_t i = 0; i < locations.size(); ++i)
@@ -46,13 +46,14 @@ Status setTensorLocations(
     return Status::success();
 }
 
-
 // Helper for deserializing INetwork
 template <typename T>
 Status setStringMap(
-    IImporterContext* ctx, const std::vector<std::string>& tensors, const std::vector<T>& data, string_map<T>& map)
+    IImporterContext* ctx, std::vector<std::string> const& tensors, std::vector<T> const& data, string_map<T>& map)
 {
-    ASSERT( (tensors.size() >= data.size()) && "The size of tensors misaligns with the size of the attribute trt_outputs_range_min/max.", nvonnxparser::ErrorCode::kINVALID_GRAPH);
+    ASSERT((tensors.size() >= data.size())
+            && "The size of tensors misaligns with the size of the attribute trt_outputs_range_min/max.",
+        nvonnxparser::ErrorCode::kINVALID_GRAPH);
     for (size_t i = 0; i < data.size(); ++i)
     {
         std::string name = tensors.at(i);
@@ -70,14 +71,14 @@ Status setStringMap(
 }
 
 //! Make error explanation from TensorRT error recorder.
-static std::string makeErrorExplanation(IImporterContext* ctx, const std::string& nodeName)
+static std::string makeErrorExplanation(IImporterContext* ctx,  std::string const& nodeName)
 {
     std::ostringstream result;
     result << "Invalid Node - " << nodeName;
     if (auto* errorRecorder = ctx->getErrorRecorder())
     {
         // Append information that might help the user understand the error.
-        const int32_t nbErrors = errorRecorder->getNbErrors();
+        int32_t const nbErrors = errorRecorder->getNbErrors();
         for (int32_t i = 0; i < nbErrors; ++i)
         {
             result << "\n" << errorRecorder->getErrorDesc(i);
@@ -87,17 +88,18 @@ static std::string makeErrorExplanation(IImporterContext* ctx, const std::string
 }
 
 //! Make error explanation from an exception.
-static std::string makeErrorExplanation(const std::exception& e, const std::string& nodeName)
+static std::string makeErrorExplanation(std::exception const& e, std::string const& nodeName)
 {
     std::ostringstream result;
     result << "Invalid Node - " << nodeName << "\n" << e.what();
     return result.str();
 }
 
-Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork, int* currentNode)
+Status parseGraph(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork, int* currentNode)
 {
     // Import initializers.
-    for (const ::ONNX_NAMESPACE::TensorProto& initializer : graph.initializer())
+    for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
     {
         LOG_VERBOSE("Importing initializer: " << initializer.name());
         ShapedWeights weights;
@@ -108,26 +110,27 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
     std::vector<size_t> topoOrder;
     ASSERT(toposort(graph.node(), &topoOrder) && "Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH);
 
-    const string_map<NodeImporter>& opImporters = getBuiltinOpImporterMap();
-    for (const auto& nodeIndex : topoOrder)
+    string_map<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
+    for (auto const& nodeIndex : topoOrder)
     {
         if (currentNode)
         {
             *currentNode = nodeIndex;
         }
-        const auto& node = graph.node(nodeIndex);
-        const std::string& nodeName = getNodeName(node);
+        auto const& node = graph.node(nodeIndex);
+        std::string const& nodeName = getNodeName(node);
         LOG_VERBOSE("Parsing node: " << nodeName << " [" << node.op_type() << "]");
 
         // Assemble node inputs. These may come from outside the subgraph.
         std::vector<TensorOrWeights> nodeInputs;
         std::ostringstream ssInputs{};
         ssInputs << nodeName << " [" << node.op_type() << "] inputs: ";
-        for (const auto& inputName : node.input())
+        for (auto const& inputName : node.input())
         {
             // Empty input names indicate optional inputs which have not been supplied.
             if (inputName.empty())
             {
+                // Push back null input as place holder.
                 nodeInputs.emplace_back(nullptr);
                 ssInputs << "[optional input, not set], ";
             }
@@ -136,13 +139,15 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
                 LOG_VERBOSE("Searching for input: " << inputName);
                 ASSERT( (ctx->tensors().count(inputName)) && "Node input was not registered.", ErrorCode::kINVALID_GRAPH);
                 nodeInputs.push_back(ctx->tensors().at(inputName));
-                ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "[" << nodeInputs.back().getType() << "]" <<"], ";
+                ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "["
+                         << nodeInputs.back().getType() << "]"
+                         << "], ";
             }
         }
         LOG_VERBOSE(ssInputs.str());
 
         // Dispatch to appropriate converter.
-        const NodeImporter* importFunc{nullptr};
+        NodeImporter const* importFunc{nullptr};
         if (opImporters.count(node.op_type()))
         {
             importFunc = &opImporters.at(node.op_type());
@@ -158,7 +163,7 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
         {
             GET_VALUE((*importFunc)(ctx, node, nodeInputs), &outputs);
         }
-        catch (const std::exception& e)
+        catch (std::exception const& e)
         {
             return MAKE_ERROR(makeErrorExplanation(e, nodeName), ErrorCode::kINVALID_NODE);
         }
@@ -167,7 +172,7 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
             return MAKE_ERROR(makeErrorExplanation(ctx, nodeName), ErrorCode::kINVALID_NODE);
         }
 
-        for (const auto& output : outputs)
+        for (auto const& output : outputs)
         {
             if (output.is_tensor())
             {
@@ -207,11 +212,12 @@ Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& gra
         // Set output names and register outputs with the context.
         std::ostringstream ssOutputs{};
         ssOutputs << nodeName << " [" << node.op_type() << "] outputs: ";
-        for (int i = 0; i < node.output().size(); ++i)
+        for (int32_t i = 0; i < node.output().size(); ++i)
         {
-            const auto& outputName = node.output(i);
+            auto const& outputName = node.output(i);
             auto& output = outputs.at(i);
-            ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]" << "], ";
+            ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]"
+                      << "], ";
             // Note: This condition is to allow ONNX outputs to be ignored
             // Always register output weights (even empty ones) as it may be mapped to an unused input
             if ((output || output.is_weights()) && !outputName.empty())
@@ -257,67 +263,12 @@ Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const&
     return Status::success();
 }
 
-//! Add equality assertions for dimensions with the same name.
-static Status assertDimsWithSameNameAreEqual(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
+static Status setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
 {
-    // Cache for IShapeLayer
-    std::unordered_map<nvinfer1::ITensor const*, nvinfer1::IShapeLayer*> shapeMap;
-
-    // Sort records by name of dimension, using stable_sort for reproducibility.
-    std::stable_sort(namedDims.begin(), namedDims.end(),
-        [](const NamedDimension& x, const NamedDimension& y) { return x.dimParam < y.dimParam; });
-
-    // Each loop iteration covers a sequence of named dimensions with the same name.
-    // For each sequence, add IAssertionLayers that assert that the values are equal.
-    // TensorRT knows about transitive closure of equality, so just add the assertions
-    // for adjacent records.
-    decltype(namedDims.begin()) j;
-    for (auto i = namedDims.begin(); i < namedDims.end(); i = j)
+    for (auto const& namedDim : namedDims)
     {
-        // Walk j forward so that [i,j) is indices of named dimensions with the same name.
-        j = i;
-        do
-        {
-            ++j;
-        } while (j != namedDims.end() && j->dimParam == i->dimParam);
-
-        if (j - i < 2)
-        {
-            // Single occurrence of name is uninteresting.
-            continue;
-        }
-
-        std::ostringstream message;
-        message << "For input: '" << i->tensor->getName()
-                << "' all named dimensions that share the same name must be equal. Note: Named dimensions were present on the following axes: ";
-
-        // prev is the current end of the daisy chain.
-        nvinfer1::ITensor* prev = nullptr;
-        for (auto k = i; k < j; ++k)
-        {
-            message << (prev ? ", " : "") << k->index << " (name: "
-                    << "'" << k->dimParam << "')";
-
-            // Create ITensor "next" with dimension length for record k.
-            auto& shape = shapeMap[k->tensor];
-            if (shape == nullptr)
-            {
-                shape = ctx->network()->addShape(*k->tensor);
-            }
-            auto* slice = ctx->network()->addSlice(*shape->getOutput(0), {1, {k->index}}, {1, {1}}, {1, {1}});
-            nvinfer1::ITensor* next = slice->getOutput(0);
-
-            if (prev)
-            {
-                // Add a link to the chain.
-                auto* equal = ctx->network()->addElementWise(*prev, *next, nvinfer1::ElementWiseOperation::kEQUAL);
-                auto* assertion = ctx->network()->addAssertion(*equal->getOutput(0), message.str().c_str());
-                ASSERT(assertion != nullptr && "addAssertion failed", ErrorCode::kMODEL_DESERIALIZE_FAILED);
-            }
-            prev = next;
-        }
+        namedDim.tensor->setDimensionName(namedDim.index, namedDim.dimParam.c_str());
     }
-
     return Status::success();
 }
 
@@ -327,13 +278,13 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
     // The weights come from the Initializer list in onnx graph
     // Initializers are not really network inputs, so they need to be excluded.
     std::unordered_set<std::string> initializers{};
-    for (const ::ONNX_NAMESPACE::TensorProto& initializer : graph.initializer())
+    for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
     {
         initializers.emplace(initializer.name());
     }
 
     std::vector<NamedDimension> namedDims;
-    for (const ::ONNX_NAMESPACE::ValueInfoProto& input : graph.input())
+    for (::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input())
     {
         TensorOrWeights tensor;
         if (!initializers.count(input.name()))
@@ -345,7 +296,7 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
         ctx->registerTensor(std::move(tensor), input.name());
     }
 
-    return assertDimsWithSameNameAreEqual(ctx, namedDims);
+    return setDimensionNames(ctx, namedDims);
 }
 
 Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
@@ -371,7 +322,7 @@ Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serializ
     return Status::success();
 }
 
-Status deserialize_onnx_model(int fd, bool is_serialized_as_text, ::ONNX_NAMESPACE::ModelProto* model)
+Status deserialize_onnx_model(int32_t fd, bool is_serialized_as_text, ::ONNX_NAMESPACE::ModelProto* model)
 {
     google::protobuf::io::FileInputStream raw_input(fd);
     if (is_serialized_as_text)
@@ -395,7 +346,7 @@ Status deserialize_onnx_model(int fd, bool is_serialized_as_text, ::ONNX_NAMESPA
 }
 
 bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-    SubGraphCollection_t& sub_graph_collection, const char* model_path)
+    SubGraphCollection_t& sub_graph_collection, char const* model_path)
 {
     ::ONNX_NAMESPACE::ModelProto model;
     bool is_serialized_as_text = false;
@@ -418,13 +369,13 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
     // Parse the graph and see if we hit any parsing errors
     allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
 
-    int error_node = -1;
+    int32_t error_node = -1;
     std::string input_node{};
 
     if (!allSupported)
     {
-        int nerror = getNbErrors();
-        for (int i = 0; i < nerror; ++i)
+        int32_t nerror = getNbErrors();
+        for (int32_t i = 0; i < nerror; ++i)
         {
             nvonnxparser::IParserError const* error = getError(i);
             if (error->node() != -1)
@@ -463,7 +414,7 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
         return false;
     }
 
-    for (int node_idx : topological_order)
+    for (int32_t node_idx : topological_order)
     {
         ::ONNX_NAMESPACE::NodeProto const& node = model.graph().node(node_idx);
         // Add the node to the subgraph if:
@@ -502,19 +453,21 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
     return allSupported;
 }
 
-// Mark experimental ops as unsupported, mark plugin ops as supported
-bool ModelImporter::supportsOperator(const char* op_name) const
+// This funciton is used by ONNXRT to partition out unsupported nodes
+bool ModelImporter::supportsOperator(char const* op_name) const
 {
-    auto is = [op_name](const char* name) { return std::strcmp(op_name, name) == 0; };
+    auto is = [op_name](char const* name) { return std::strcmp(op_name, name) == 0; };
 
-    if (is("NonMaxSuppression"))
-    {
-        return false;
-    }
+    // Mark these following plugins as supported
     if (is("EfficientNMS_TRT") || is("PyramidROIAlign_TRT") || is("MultilevelCropAndResize_TRT")
         || is("DisentangledAttention_TRT"))
     {
         return true;
+    }
+    // Disable nodes that rely on DDS as ONNXRuntime does not support it at the moment
+    if (is("NonMaxSuppression") || is("NonZero") || is("RoiAlign"))
+    {
+        return false;
     }
     return _op_importers.count(op_name);
 }
@@ -570,7 +523,7 @@ Status ModelImporter::importModel(
     // Initialize plugin registry
     initLibNvInferPlugins(static_cast<void*>(&ctx->logger()), "");
 #endif // ENABLE_STD_PLUGIN
-    for (int i = 0; i < model.opset_import().size(); ++i)
+    for (int32_t i = 0; i < model.opset_import().size(); ++i)
     {
         std::string domain = model.opset_import(i).domain();
         int64_t version = model.opset_import(i).version();
@@ -585,7 +538,7 @@ Status ModelImporter::importModel(
     ::ONNX_NAMESPACE::GraphProto const& graph = model.graph();
     // Create a dummy tensors so that we can reserve output names. If the output names are encountered elsewhere
     // in the graph, the ctx will know to make the names unique.
-    for (const ::ONNX_NAMESPACE::ValueInfoProto& output : graph.output())
+    for (::ONNX_NAMESPACE::ValueInfoProto const& output : graph.output())
     {
         _importer_ctx.registerTensor(TensorOrWeights{}, output.name());
     }
@@ -645,7 +598,7 @@ Status ModelImporter::importModel(
         // iterate over all tensors in the network and add them to "tensors" map
         string_map<nvinfer1::ITensor*> tensors;
         string_map<nvinfer1::ILayer*> layers;
-        for (int idx = 0; idx < _importer_ctx.network()->getNbInputs(); ++idx)
+        for (int32_t idx = 0; idx < _importer_ctx.network()->getNbInputs(); ++idx)
         {
             nvinfer1::ITensor* tensor = _importer_ctx.network()->getInput(idx);
             if (tensor != nullptr)
@@ -653,7 +606,7 @@ Status ModelImporter::importModel(
                 tensors[tensor->getName()] = tensor;
             }
         }
-        for (int idx = 0; idx < _importer_ctx.network()->getNbOutputs(); ++idx)
+        for (int32_t idx = 0; idx < _importer_ctx.network()->getNbOutputs(); ++idx)
         {
             nvinfer1::ITensor* tensor = _importer_ctx.network()->getOutput(idx);
             if (tensor != nullptr)
@@ -661,10 +614,10 @@ Status ModelImporter::importModel(
                 tensors[tensor->getName()] = tensor;
             }
         }
-        for (int layerIdx = 0; layerIdx < _importer_ctx.network()->getNbLayers(); ++layerIdx)
+        for (int32_t layerIdx = 0; layerIdx < _importer_ctx.network()->getNbLayers(); ++layerIdx)
         {
             nvinfer1::ILayer* layer = _importer_ctx.network()->getLayer(layerIdx);
-            for (int idx = 0; idx < layer->getNbInputs(); ++idx)
+            for (int32_t idx = 0; idx < layer->getNbInputs(); ++idx)
             {
                 nvinfer1::ITensor* tensor = layer->getInput(idx);
                 if (tensor != nullptr)
@@ -672,7 +625,7 @@ Status ModelImporter::importModel(
                     tensors[tensor->getName()] = tensor;
                 }
             }
-            for (int idx = 0; idx < layer->getNbOutputs(); ++idx)
+            for (int32_t idx = 0; idx < layer->getNbOutputs(); ++idx)
             {
                 nvinfer1::ITensor* tensor = layer->getOutput(idx);
                 if (tensor != nullptr)
@@ -710,15 +663,15 @@ Status ModelImporter::importModel(
     return Status::success();
 }
 
-bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
+bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity)
 {
     auto* ctx = &_importer_ctx;
-    
+
     // Define S_ISREG macro for Windows
 #if !defined(S_ISREG)
 # define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
 #endif
-    
+
     struct stat sb;
     if (stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode))
     {
@@ -729,7 +682,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
     GOOGLE_PROTOBUF_VERIFY_VERSION;
     ::ONNX_NAMESPACE::ModelProto onnx_model;
 
-    const bool is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
+    bool const is_binary = ParseFromFile_WAR(&onnx_model, onnxModelFile);
     if (!is_binary && !ParseFromTextFile(&onnx_model, onnxModelFile))
     {
         LOG_ERROR("Failed to parse ONNX model from file: " << onnxModelFile);
@@ -739,7 +692,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
     // Keep track of the absolute path to the ONNX file.
     _importer_ctx.setOnnxFileLocation(onnxModelFile);
 
-    const int64_t opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
+    int64_t const opset_version = (onnx_model.opset_import().size() ? onnx_model.opset_import(0).version() : 0);
     LOG_INFO("----------------------------------------------------------------");
     LOG_INFO("Input filename:   " << onnxModelFile);
     LOG_INFO("ONNX IR version:  " << onnx_ir_version_string(onnx_model.ir_version()));
@@ -763,7 +716,7 @@ bool ModelImporter::parseFromFile(const char* onnxModelFile, int32_t verbosity)
         }
         if (!parse(onnx_buf.data(), onnx_buf.size()))
         {
-            const int32_t nerror = getNbErrors();
+            int32_t const nerror = getNbErrors();
             for (int32_t i = 0; i < nerror; ++i)
             {
                 nvonnxparser::IParserError const* error = getError(i);
