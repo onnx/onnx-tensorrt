@@ -104,7 +104,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | MeanVarianceNormalization | Y          | FP32, FP16 |
 | MelWeightMatrix           | N          |
 | Min                       | Y          | FP32, FP16, INT32 |
-| Mod                       | N          |
+| Mod                       | Y          | FP32, FP16, INT32 |
 | Mul                       | Y          | FP32, FP16, INT32 |
 | Multinomial               | N          |
 | Neg                       | Y          | FP32, FP16, INT32 |
