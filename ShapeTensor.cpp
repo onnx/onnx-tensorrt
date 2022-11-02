@@ -234,6 +234,17 @@ static ShapeTensor op(IImporterContext* ctx, const ShapeTensor& x, const ShapeTe
     bool commutative, int64_t rightIdentity, const std::function<int64_t(int64_t, int64_t)>&& f)
 {
     assert(!x.rankKnown() || !y.rankKnown() || x.rank() == y.rank());
+    // Return early for empty-vector operands -- when present, the result is empty too.
+    // Returning early for empty-vector operands simplifies subsequent logic, which
+    // can assume the size of the result is the max of the sizes of the operands.
+    if (x.isEmpty())
+    {
+        return x;
+    }
+    if (y.isEmpty())
+    {
+        return y;
+    }
     if (x.sizeKnown() && y.sizeKnown())
     {
         assert(x.size() == 1 || y.size() == 1 || x.size() == y.size());

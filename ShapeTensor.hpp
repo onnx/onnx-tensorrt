@@ -61,6 +61,14 @@ public:
         return mSize;
     }
 
+    //! True if tensor is known to be an empty vector.
+    bool isEmpty() const
+    {
+        // No need to check rank because if rank is 0, then mSize==1,
+        // and if rank is unknown, mSize = kSIZE_UNKNOWN.
+        return mSize == 0;
+    }
+
     //! True if all element values are known.
     bool allValuesKnown() const
     {

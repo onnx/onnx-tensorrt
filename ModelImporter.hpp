@@ -13,7 +13,8 @@
 namespace onnx2trt
 {
 
-Status parseGraph(IImporterContext* ctx, const ::ONNX_NAMESPACE::GraphProto& graph, bool deserializingINetwork = false, int* currentNode = nullptr);
+Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork = false,
+    int32_t* currentNode = nullptr);
 
 class ModelImporter : public nvonnxparser::IParser
 {
@@ -43,13 +44,13 @@ public:
     {
         delete this;
     }
-    int getNbErrors() const override
+    int32_t getNbErrors() const override
     {
         return _errors.size();
     }
-    nvonnxparser::IParserError const* getError(int index) const override
+    nvonnxparser::IParserError const* getError(int32_t index) const override
     {
-        assert(0 <= index && index < (int) _errors.size());
+        assert(0 <= index && index < (int32_t) _errors.size());
         return &_errors[index];
     }
     void clearErrors() override
@@ -58,7 +59,7 @@ public:
     }
 
     //...LG: Move the implementation to .cpp
-    bool parseFromFile(const char* onnxModelFile, int verbosity) override;
+    bool parseFromFile(char const* onnxModelFile, int32_t verbosity) override;
 };
 
 } // namespace onnx2trt

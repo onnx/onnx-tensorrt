@@ -86,6 +86,11 @@ public:
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kFLOAT
                            : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
     }
+    bool isFp16() const
+    {
+        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kHALF
+                    : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
+    }
     bool isInt32() const
     {
         return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT32 : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
@@ -107,6 +112,7 @@ public:
                 case nvinfer1::DataType::kFLOAT:return "FLOAT";
                 case nvinfer1::DataType::kHALF: return "HALF";
                 case nvinfer1::DataType::kINT8: return "INT8";
+                case nvinfer1::DataType::kUINT8: return "UINT8";
                 case nvinfer1::DataType::kINT32: return "INT32";
                 case nvinfer1::DataType::kBOOL: return "BOOL";
                 default: return "UNKNOWN TYPE";
@@ -114,16 +120,17 @@ public:
         }
         else
         {
-            switch(_weights.type)
+            switch (_weights.type)
             {
-                case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return "DOUBLE -> FLOAT";
-                case ::ONNX_NAMESPACE::TensorProto::FLOAT: return "FLOAT";
-                case ::ONNX_NAMESPACE::TensorProto::INT8: return "INT8";
-                case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return "HALF";
-                case ::ONNX_NAMESPACE::TensorProto::BOOL: return "BOOL";
-                case ::ONNX_NAMESPACE::TensorProto::INT32: return "INT32";
-                case ::ONNX_NAMESPACE::TensorProto::INT64: return "INT64 -> INT32";
-                default: return "UNKNOWN TYPE";
+            case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return "FLOAT";
+            case ::ONNX_NAMESPACE::TensorProto::FLOAT: return "FLOAT";
+            case ::ONNX_NAMESPACE::TensorProto::INT8: return "INT8";
+            case ::ONNX_NAMESPACE::TensorProto::UINT8: return "UINT8";
+            case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return "HALF";
+            case ::ONNX_NAMESPACE::TensorProto::BOOL: return "BOOL";
+            case ::ONNX_NAMESPACE::TensorProto::INT32: return "INT32";
+            case ::ONNX_NAMESPACE::TensorProto::INT64: return "INT32";
+            default: return "UNKNOWN TYPE";
             }
         }
     }

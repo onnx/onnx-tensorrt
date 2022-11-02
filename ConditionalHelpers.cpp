@@ -58,7 +58,10 @@ Status addConditionalInputLayer(IImporterContext* ctx, nvinfer1::IIfConditional*
         inputsMap[name] = inputLayer;
         const std::string inputLayerName(name);
         ctx->registerLayer(inputLayer, inputLayerName + "_InputLayer");
-        ctx->registerTensor(TensorOrWeights{inputLayer->getOutput(0)}, inputLayerName + "_InputLayer_output");
+        // Note: Since multiple conditionals may use the same external tensor, check unique names for output tensors of
+        // IfConditionalInputLayers to avoid tensor name duplication.
+        ctx->registerTensor(
+            TensorOrWeights{inputLayer->getOutput(0)}, inputLayerName + "_InputLayer_output", /*checkUniqueName*/ true);
     }
     else
     {
@@ -259,11 +262,11 @@ Status getSubgraphTensors(const std::vector<nvinfer1::ILayer*>& newLayers,
     }
 
     using TensorsVec = std::vector<nvinfer1::ITensor*>;
-    auto getOutputs = [&](nvinfer1::ILayer const* l, TensorsVec res) {
+    auto getOutputs = [&](nvinfer1::ILayer const* l, TensorsVec& res) {
         getTensors(l, false, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
     };
 
-    auto getInputs = [&](nvinfer1::ILayer const* l, TensorsVec res) {
+    auto getInputs = [&](nvinfer1::ILayer const* l, TensorsVec& res) {
         getTensors(l, true, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
     };
 
