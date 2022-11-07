@@ -428,10 +428,6 @@ bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::v
         const auto idx = i - diff;
         const auto pre = onnxPadding[idx];
         const auto post = onnxPadding[onnxPadding.size() / 2U + idx];
-        if (pre < 0 || post < 0)
-        {
-            return false;
-        }
 
         start[i] = -pre;
         totalPadding[i] = pre + post;
