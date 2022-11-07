@@ -74,7 +74,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | GRU                       | Y          | FP32, FP16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
 | HammingWindow             | N          |
 | HannWindow                | N          |
-| HardSwish                 | N          |
+| HardSwish                 | Y          | FP32, FP16, INT8 |
 | HardSigmoid               | Y          | FP32, FP16, INT8 |
 | Hardmax                   | N          |
 | Identity                  | Y          | FP32, FP16, INT32, INT8, BOOL |
@@ -112,7 +112,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | NonMaxSuppression         | Y          | FP32, FP16 |
 | NonZero                   | Y          | FP32, FP16
 | Not                       | Y          | BOOL |
-| OneHot                    | N          |
+| OneHot                    | Y          | FP32, FP16, INT32, BOOL |
 | Optional                  | N          |
 | OptionalGetElement        | N          |
 | OptionalHasElement        | N          |
