@@ -1543,8 +1543,8 @@ NodeImportResult lstmLegacyImporter(
 
 nvinfer1::Dims makeDims(int nbDims, int val)
 {
-    nvinfer1::Dims dims;
-    dims.nbDims = nbDims;
+    // Zero all the dimensions, so that unused dimensions are deterministic even if accidentally used.
+    nvinfer1::Dims dims{nbDims, {}};
     std::fill_n(dims.d, nbDims, val);
     return dims;
 }
