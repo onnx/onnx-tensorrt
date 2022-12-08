@@ -253,6 +253,12 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     ASSERT((inputs.at(3).shape().nbDims == 1) && "The shape of the mean input must be (C, )", ErrorCode::kINVALID_NODE);
     ASSERT((inputs.at(4).shape().nbDims == 1) && "The shape of the var input must be (C, )", ErrorCode::kINVALID_NODE);
 
+    OnnxAttrs attrs(node, ctx);
+    auto const isTraining = attrs.get<int32_t>("training_mode", 0);
+    ASSERT(!isTraining
+            && "This version of TensorRT does not support training_mode == 1 in BatchNormalization.",
+        ErrorCode::kUNSUPPORTED_NODE);
+
     bool const allInputsWeights = inputs.at(1).is_weights() && inputs.at(2).is_weights() && inputs.at(3).is_weights()
         && inputs.at(4).is_weights();
 
@@ -279,7 +285,6 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
 
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
 
-    OnnxAttrs attrs(node, ctx);
     float eps = attrs.get<float>("epsilon", 1e-5f);
 
     // Fold the weights together into a single bias and scale
@@ -515,7 +520,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
     // beta is the upper bound
     float alpha = std::numeric_limits<float>::lowest();
     float beta = std::numeric_limits<float>::max();
-    bool fp16 = inputs.at(0).isFp16();
 
     if (ctx->getOpsetVersion() >= 11)
     {
@@ -524,6 +528,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
         {
             ASSERT(inputs.at(1).is_weights() && "Clip min value must be an initializer!", ErrorCode::kUNSUPPORTED_NODE);
             auto min = inputs.at(1).weights();
+            bool fp16 = inputs.at(1).isFp16();
             alpha = getSingleValueAsFloat(min.values, /*isFp16*/ fp16);
         }
         // Handle both "min" and "max" node inputs
@@ -535,6 +540,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
                 ASSERT(inputs.at(1).is_weights() && "Clip min value must be an initializer!",
                     ErrorCode::kUNSUPPORTED_NODE);
                 auto min = inputs.at(1).weights();
+                bool fp16 = inputs.at(1).isFp16();
                 alpha = getSingleValueAsFloat(min.values, /*isFp16*/ fp16);
             }
 
@@ -543,6 +549,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
                 ASSERT(inputs.at(2).is_weights() && "Clip max value must be an initializer!",
                     ErrorCode::kUNSUPPORTED_NODE);
                 auto max = inputs.at(2).weights();
+                bool fp16 = inputs.at(2).isFp16();
                 beta = getSingleValueAsFloat(max.values, /*isFp16*/ fp16);
             }
         }
@@ -3870,11 +3877,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
     // "data : T
     // An input tensor"
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
+
+    // The attribute allowzero was introduced in opset 14, but as an extension
+    // recognize it for opset >= 5.
     int32_t allowZero = 0;
-    if (ctx->getOpsetVersion() >= 14)
+    if (ctx->getOpsetVersion() >= 5)
     {
         OnnxAttrs attrs{node, ctx};
-        allowZero = attrs.get<int32_t>("allowzero", 0);
+        if (attrs.count("allowzero"))
+        {
+            allowZero = attrs.get<int32_t>("allowzero");
+            if (ctx->getOpsetVersion() < 14)
+            {
+                LOG_WARNING(
+                    getNodeName(node) << ": Using attribute allowzero with opset < 14 is a TensorRT extension.");
+            }
+        }
     }
 
     ShapeTensor shape;
