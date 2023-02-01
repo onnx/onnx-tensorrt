@@ -1185,6 +1185,12 @@ NodeImportResult QuantDequantLinearHelper(
     IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, bool isDQ)
 {
     CHECK(notInvalidType(inputs.at(0), {"UINT8"}));
+
+    // For QuantizeLinear, the output type (and thus quantization type) is dependent on the second input (zero point).
+    if (!isDQ && inputs.size() >= 3)
+    {
+        CHECK(notInvalidType(inputs.at(2), {"UINT8"}));
+    }
     auto addConstantLayer
         = [ctx](nvinfer1::INetworkDefinition& network, ShapedWeights const& weights) -> nvinfer1::ITensor* {
         nvinfer1::IConstantLayer* constLayer = network.addConstant(weights.shape, weights);
