@@ -132,9 +132,11 @@ endif()
 # --------------------------------
 # API Tests
 # --------------------------------
-add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
-target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
-target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+if (BUILD_API_TEST)
+  add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
+  target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
+  target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+endif()
 
 # --------------------------------
 # Installation
