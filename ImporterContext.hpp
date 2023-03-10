@@ -89,6 +89,15 @@ class ImporterContext final : public IImporterContext
     std::string mOnnxFileLocation;       // Keep track of the directory of the parsed ONNX file
     std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
     StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
+    bool mConvertINT64Logged{false};
+    bool mConvertINT64OutOfBoundsLogged{false};
+    bool mConvertDoubleLogged{false};
+    bool mConvertDoubleOutOfBoundsLogged{false};
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags; // OnnxParserFlags specified by the parser
+
+    // Logical library names for VC plugin libraries.  This gets translated to library paths
+    // when getUsedVCPluginLibraries() is called.
+    std::set<std::string> mLogicalVCPluginLibraries;
 
     //! Stack of names defined by nested ONNX graphs, with information about how to
     //! restore their associated values when popping back to the surrounding scope.
@@ -161,7 +170,8 @@ public:
     void registerTensor(
         TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName = false) override;
 
-    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename) override;
+    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node) override;
+    void registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node) override;
 
     nvinfer1::ILogger& logger() override
     {
@@ -264,6 +274,53 @@ public:
             return nullptr;
         }
         return iter->second;
+    }
+
+    void setFlags(nvonnxparser::OnnxParserFlags const& onnxParserFlags) override
+    {
+        mOnnxParserFlags = onnxParserFlags;
+    }
+    nvonnxparser::OnnxParserFlags getFlags() const override
+    {
+        return mOnnxParserFlags;
+    }
+
+    virtual void addUsedVCPluginLibrary(
+        ::ONNX_NAMESPACE::NodeProto const& node, char const* pluginName, char const* pluginLib) final;
+
+    virtual std::vector<std::string> getUsedVCPluginLibraries() final;
+
+    bool isConvertINT64Logged()
+    {
+        return mConvertINT64Logged;
+    }
+    void setConvertINT64Logged(bool logged)
+    {
+        mConvertINT64Logged = logged;
+    }
+    bool isConvertINT64OutOfBoundsLogged()
+    {
+        return mConvertINT64OutOfBoundsLogged;
+    }
+    void setConvertINT64OutOfBoundsLogged(bool logged)
+    {
+        mConvertINT64OutOfBoundsLogged = logged;
+    }
+    bool isConvertDoubleLogged()
+    {
+        return mConvertDoubleLogged;
+    }
+    void setConvertDoubleLogged(bool logged)
+    {
+        mConvertDoubleLogged = logged;
+    }
+    bool isConvertDoubleOutOfBoundsLogged()
+    {
+        return mConvertDoubleOutOfBoundsLogged;
+    }
+    void setConvertDoubleOutOfBoundsLogged(bool logged)
+    {
+        mConvertDoubleOutOfBoundsLogged = logged;
     }
 
 private:

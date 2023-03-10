@@ -2,6 +2,23 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 8.6 EA Release - 2023-3-13
+
+## Added
+
+For more details, see the 8.6 EA release notes for new features added in TensorRT 8.6.
+
+- Added support for `GroupNormalization`, `LayerNormalization`, `IsInf` operations
+- Added support for INT32 input types for `Argmin`, `Argmax`, and `TopK`
+- Added support for `ReverseSequence` operators with dynamic shapes
+- Added support for `TopK` operators with dynamic `K` values
+- Added `OnnxParserFlag` enum and `setFlag` interfaces to the ONNX parser to modify the default parsing behavior
+- Added metadata tracking, now ONNX node metadata will be embedded into TensorRT layers
+
+## Changed
+
+- All cast operations will now use the new `CastLayer` over the pervious `IdentityLayer`. 
+
 # TensorRT 8.5 GA Release - 2022-11-2
 
 ## Added

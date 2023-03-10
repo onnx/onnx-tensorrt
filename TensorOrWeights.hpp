@@ -107,15 +107,15 @@ public:
     {
         if (is_tensor())
         {
-            switch(_tensor->getType())
+            switch (_tensor->getType())
             {
-                case nvinfer1::DataType::kFLOAT:return "FLOAT";
-                case nvinfer1::DataType::kHALF: return "HALF";
-                case nvinfer1::DataType::kINT8: return "INT8";
-                case nvinfer1::DataType::kUINT8: return "UINT8";
-                case nvinfer1::DataType::kINT32: return "INT32";
-                case nvinfer1::DataType::kBOOL: return "BOOL";
-                default: return "UNKNOWN TYPE";
+            case nvinfer1::DataType::kFLOAT:return "FLOAT";
+            case nvinfer1::DataType::kHALF: return "HALF";
+            case nvinfer1::DataType::kINT8: return "INT8";
+            case nvinfer1::DataType::kUINT8: return "UINT8";
+            case nvinfer1::DataType::kINT32: return "INT32";
+            case nvinfer1::DataType::kBOOL: return "BOOL";
+            case nvinfer1::DataType::kFP8: return "FP8";
             }
         }
         else
@@ -130,9 +130,9 @@ public:
             case ::ONNX_NAMESPACE::TensorProto::BOOL: return "BOOL";
             case ::ONNX_NAMESPACE::TensorProto::INT32: return "INT32";
             case ::ONNX_NAMESPACE::TensorProto::INT64: return "INT32";
-            default: return "UNKNOWN TYPE";
             }
         }
+        return "UNKNOWN TYPE";
     }
 };
 

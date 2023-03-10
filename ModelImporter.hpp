@@ -23,15 +23,19 @@ protected:
     virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model);
 
 private:
-    ImporterContext _importer_ctx;
-    std::list<::ONNX_NAMESPACE::ModelProto> _onnx_models; // Needed for ownership of weights
-    int _current_node;
-    std::vector<Status> _errors;
+    ImporterContext mImporterCtx;
+    std::vector<std::string> mPluginLibraryList; // Array of strings containing plugin libs
+    std::vector<char const*>
+        mPluginLibraryListCStr; // Array of C-strings corresponding to the strings in mPluginLibraryList
+    std::list<::ONNX_NAMESPACE::ModelProto> mONNXModels; // Needed for ownership of weights
+    int mCurrentNode;
+    std::vector<Status> mErrors;
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags{0};
 
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : _op_importers(getBuiltinOpImporterMap())
-        , _importer_ctx(network, logger)
+        , mImporterCtx(network, logger)
     {
     }
     bool parseWithWeightDescriptors(void const* serialized_onnx_model, size_t serialized_onnx_model_size) override;
@@ -40,26 +44,53 @@ public:
         SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) override;
 
     bool supportsOperator(const char* op_name) const override;
+
+    void setFlags(nvonnxparser::OnnxParserFlags onnxParserFlags) noexcept override
+    {
+        mOnnxParserFlags = onnxParserFlags;
+    }
+    nvonnxparser::OnnxParserFlags getFlags() const noexcept override
+    {
+        return mOnnxParserFlags;
+    }
+
+    void clearFlag(nvonnxparser::OnnxParserFlag onnxParserFlag) noexcept override
+    {
+        mOnnxParserFlags &= ~(1U << static_cast<uint32_t>(onnxParserFlag));
+    }
+
+    void setFlag(nvonnxparser::OnnxParserFlag onnxParserFlag) noexcept override
+    {
+        mOnnxParserFlags |= 1U << static_cast<uint32_t>(onnxParserFlag);
+    }
+
+    bool getFlag(nvonnxparser::OnnxParserFlag onnxParserFlag) const noexcept override
+    {
+        auto flag = 1U << static_cast<uint32_t>(onnxParserFlag);
+        return static_cast<bool>(mOnnxParserFlags & flag);
+    }
+
     void destroy() override
     {
         delete this;
     }
     int32_t getNbErrors() const override
     {
-        return _errors.size();
+        return mErrors.size();
     }
     nvonnxparser::IParserError const* getError(int32_t index) const override
     {
-        assert(0 <= index && index < (int32_t) _errors.size());
-        return &_errors[index];
+        assert(0 <= index && index < (int32_t) mErrors.size());
+        return &mErrors[index];
     }
     void clearErrors() override
     {
-        _errors.clear();
+        mErrors.clear();
     }
 
-    //...LG: Move the implementation to .cpp
     bool parseFromFile(char const* onnxModelFile, int32_t verbosity) override;
+
+    virtual char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept override;
 };
 
 } // namespace onnx2trt

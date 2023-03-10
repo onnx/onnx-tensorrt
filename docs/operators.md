@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 8.5 supports operators up to Opset 17. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 8.6 supports operators up to Opset 17. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, INT8, and BOOL
 
@@ -19,8 +19,8 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Acosh                     | Y          | FP32, FP16 |
 | Add                       | Y          | FP32, FP16, INT32 |
 | And                       | Y          | BOOL |
-| ArgMax                    | Y          | FP32, FP16 |
-| ArgMin                    | Y          | FP32, FP16 |
+| ArgMax                    | Y          | FP32, FP16, INT32 |
+| ArgMin                    | Y          | FP32, FP16, INT32 |
 | Asin                      | Y          | FP32, FP16 |
 | Asinh                     | Y          | FP32, FP16 |
 | Atan                      | Y          | FP32, FP16 |
@@ -30,7 +30,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Bernoulli                 | N          |
 | BitShift                  | N          |
 | BlackmanWindow            | N          |
-| Cast                      | Y          | FP32, FP16, INT32, INT8, BOOL |                                                                                                       |
+| Cast                      | Y          | FP32, FP16, INT32, INT8, UINT8, BOOL |                                                                                                       |
 | Ceil                      | Y          | FP32, FP16 |
 | Celu                      | Y          | FP32, FP16 |
 | Clip                      | Y          | FP32, FP16, INT8 |                                                                                        |
@@ -70,7 +70,8 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | GlobalMaxPool             | Y          | FP32, FP16, INT8 |
 | Greater                   | Y          | FP32, FP16, INT32 |
 | GreaterOrEqual            | Y          | FP32, FP16, INT32 |
-| GridSample                | Y          | FP32, FP16
+| GridSample                | Y          | FP32, FP16 |
+| GroupNormalization        | Y          | FP32, FP16 |
 | GRU                       | Y          | FP32, FP16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
 | HammingWindow             | N          |
 | HannWindow                | N          |
@@ -80,10 +81,10 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Identity                  | Y          | FP32, FP16, INT32, INT8, BOOL |
 | If                        | Y          | FP32, FP16, INT32, BOOL | Output tensors of the two conditional branches must have broadcastable shapes, and must have different names
 | ImageScaler               | Y          | FP32, FP16 |
-| InstanceNormalization     | Y          | FP32, FP16 | Scales `scale` and biases `B` must be initializers. Input rank must be >=3 & <=5                                                                                  |
-| IsInf                     | N          |
+| InstanceNormalization     | Y          | FP32, FP16 |
+| IsInf                     | Y          | FP32, FP16
 | IsNaN                     | Y          | FP32, FP16, INT32 |
-| LayerNormalization        | N          |
+| LayerNormalization        | Y          | FP32, FP16
 | LeakyRelu                 | Y          | FP32, FP16, INT8 |
 | Less                      | Y          | FP32, FP16, INT32 |
 | LessOrEqual               | Y          | FP32, FP16, INT32 |
@@ -143,7 +144,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | Relu                      | Y          | FP32, FP16, INT8 |
 | Reshape                   | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Resize                    | Y          | FP32, FP16 | Supported resize transformation modes: `half_pixel`, `pytorch_half_pixel`, `tf_half_pixel_for_nn`, `asymmetric`, and `align_corners`.<br />Supported resize modes: `nearest`, `linear`.<br />Supported nearest modes: `floor`, `ceil`, `round_prefer_floor`, `round_prefer_ceil`   |
-| ReverseSequence           | Y          | FP32, FP16 | Dynamic input shapes are unsupported
+| ReverseSequence           | Y          | FP32, FP16, INT32, INT8, BOOL |
 | RNN                       | Y          | FP32, FP16 | For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | Y          | FP32, FP16 |
 | Round                     | Y          | FP32, FP16, INT8 |
@@ -186,7 +187,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | TfIdfVectorizer           | N          |
 | ThresholdedRelu           | Y          | FP32, FP16, INT8 |
 | Tile                      | Y          | FP32, FP16, INT32, BOOL |
-| TopK                      | Y          | FP32, FP16 | `K` input must be an initializer
+| TopK                      | Y          | FP32, FP16, INT32 |
 | Transpose                 | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Trilu                     | Y          | FP32, FP16, INT32, INT8, BOOL |
 | Unique                    | N          |
