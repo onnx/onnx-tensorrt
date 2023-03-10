@@ -3,6 +3,26 @@
  */
 
 #include "ImporterContext.hpp"
+#include "NvInferVersion.h"
+#include <sstream>
+
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#if defined(__linux__)
+#include <link.h>
+#endif
+#else // defined(_WIN32)
+#include <windows.h>
+#endif // !defined(_WIN32)
+
+#define RT_ASSERT(cond)                                                                                                \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(cond))                                                                                                   \
+        {                                                                                                              \
+            throw std::runtime_error("Assertion " #cond " failed!");                                                   \
+        }                                                                                                              \
+    } while (0)
 
 namespace onnx2trt
 {
@@ -89,7 +109,7 @@ void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& 
     p.first->second = std::move(tensor);
 }
 
-void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& basename)
+void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     // No layer will be added for Constant nodes in ONNX.
     if (layer)
@@ -111,6 +131,138 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
             mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
         }
     }
+    if (node != nullptr)
+    {
+        processMetadata(*node, layer);
+    }
+}
+
+void ImporterContext::registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node)
+{
+    std::string const& basename = getNodeName(node);
+    registerLayer(layer, basename, &node);
+}
+
+namespace
+{
+
+//! Translates a "logical" library name into an OS-dependent DSO or DLL name
+std::string getOSLibraryName(char const* logicalName)
+{
+    std::stringstream libName;
+#if defined(_WIN32)
+    libName << logicalName << ".dll";
+#else
+    libName << "lib" << logicalName << ".so." << NV_TENSORRT_SONAME_MAJOR;
+#endif
+    return libName.str();
+}
+
+//! Platform-agnostic wrapper around dynamic libraries.
+class DynamicLibrary
+{
+public:
+    explicit DynamicLibrary(std::string const& name)
+        : mLibName{name}
+    {
+#if defined(_WIN32)
+        mHandle = LoadLibraryA(name.c_str());
+#else  // defined(_WIN32)
+        int32_t flags{RTLD_LAZY};
+        mHandle = dlopen(name.c_str(), flags);
+#endif // defined(_WIN32)
+
+        if (mHandle == nullptr)
+        {
+            std::string errorStr{};
+#if !defined(_WIN32)
+            errorStr = std::string{" due to "} + std::string{dlerror()};
+#endif
+            throw std::runtime_error("Unable to open library: " + name + errorStr);
+        }
+    }
+
+    DynamicLibrary(DynamicLibrary const&) = delete;
+    DynamicLibrary(DynamicLibrary const&&) = delete;
+
+    ~DynamicLibrary()
+    {
+        try
+        {
+#if defined(_WIN32)
+            RT_ASSERT(static_cast<bool>(FreeLibrary(static_cast<HMODULE>(mHandle))));
+#else
+            RT_ASSERT(dlclose(mHandle) == 0);
+#endif
+        }
+        catch (...)
+        {
+            std::cerr << "Unable to close library: " << mLibName << std::endl;
+        }
+    }
+
+    std::string getFullPath() const
+    {
+        RT_ASSERT(mHandle != nullptr);
+#if defined(__linux__)
+        link_map* linkMap = nullptr;
+        auto const err = dlinfo(mHandle, RTLD_DI_LINKMAP, &linkMap);
+        RT_ASSERT(err == 0 && linkMap != nullptr && linkMap->l_name != nullptr);
+        return std::string{linkMap->l_name};
+#elif defined(_WIN32)
+        constexpr int32_t kMAX_PATH_LEN{4096};
+        std::string path(kMAX_PATH_LEN, '\0'); // since C++11, std::string storage is guaranteed to be contiguous
+        auto const pathLen = GetModuleFileNameA(static_cast<HMODULE>(mHandle), &path[0], kMAX_PATH_LEN);
+        RT_ASSERT(GetLastError() == ERROR_SUCCESS);
+        path.resize(pathLen);
+        path.shrink_to_fit();
+        return path;
+#else
+        RT_ASSERT(!"Unsupported operation: getFullPath()");
+#endif
+    }
+
+private:
+    std::string mLibName{}; //!< Name of the DynamicLibrary
+    void* mHandle{};        //!< Handle to the DynamicLibrary
+};
+
+//! Translates an OS-dependent DSO/DLL name into a path on the filesystem
+std::string getOSLibraryPath(std::string const& osLibName)
+{
+    DynamicLibrary lib{osLibName};
+    return lib.getFullPath();
+}
+
+} // namespace
+
+void ImporterContext::addUsedVCPluginLibrary(
+    ::ONNX_NAMESPACE::NodeProto const& node, char const* pluginName, char const* pluginLib)
+{
+    auto* ctx = this; // For logging
+    auto osPluginLibName = getOSLibraryName(pluginLib);
+    LOG_VERBOSE("Node " << getNodeName(node) << " requires plugin " << pluginName << " which is provided by "
+                        << osPluginLibName);
+    mLogicalVCPluginLibraries.insert(osPluginLibName);
+}
+
+std::vector<std::string> ImporterContext::getUsedVCPluginLibraries()
+{
+    auto* ctx = this; // For logging
+#if defined(_WIN32) || defined(__linux__)
+    std::vector<std::string> ret;
+    ret.reserve(mLogicalVCPluginLibraries.size());
+    for (auto const& l : mLogicalVCPluginLibraries)
+    {
+        auto osLibPath = getOSLibraryPath(l);
+        LOG_VERBOSE("Library " << l << " located on filesystem as " << osLibPath);
+        ret.emplace_back(std::move(osLibPath));
+    }
+    return ret;
+#else
+    LOG_WARNING("getUsedVCPluginLibraries not implemented on platform!");
+    return {};
+#endif
 }
 
 } // namespace onnx2trt

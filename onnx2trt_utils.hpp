@@ -75,6 +75,7 @@ static std::ostream& operator<<(std::ostream& stream, const nvinfer1::DataType& 
     case nvinfer1::DataType::kUINT8: return stream << "uint8";
     case nvinfer1::DataType::kINT32: return stream << "int32";
     case nvinfer1::DataType::kBOOL: return stream << "bool";
+    case nvinfer1::DataType::kFP8: return stream << "float8";
     default: throw std::runtime_error("Unknown dtype");
     }
 }
@@ -270,12 +271,16 @@ nvinfer1::ITensor* greaterLessOrEqual(IImporterContext* ctx, const ::ONNX_NAMESP
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
 
+// Helper function to use optimized 3D instanceNorm plugin
+NodeImportResult instanceNormPluginHelper(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs);
+
 // Helper fucntion to create an iota fill given a set of dimensions and an axis
 nvinfer1::ITensor* iota(IImporterContext* ctx, ShapeTensor iotaDims, int32_t axis);
 
 // Helper function to load a creator from the registry
-nvinfer1::IPluginCreator* importPluginCreator(
-    const std::string& pluginName, const std::string& pluginVersion, const std::string& pluginNamespace = "");
+nvinfer1::IPluginCreator* importPluginCreator(IImporterContext* ctx, std::string const& pluginName,
+    std::string const& pluginVersion, std::string const& pluginNamespace = "");
 
 // Helper function to get a plugin from the PluginRegistry
 std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(const std::string& name,
@@ -290,6 +295,10 @@ NodeImportResult lstmLegacyImporter(
 
 // Helper function to create and fill a Dims object with defined values
 nvinfer1::Dims makeDims(int nbDims, int val);
+
+// Helper function to create normalization layers for GroupNorm and InstanceNorm
+NodeImportResult normalizationHelper(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs);
 
 // Helper function to parse activation values for LSTM nodes
 std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::ActivationType>& activationTypes,
@@ -455,4 +464,5 @@ float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContex
 // Helper function to validate input types for an ONNX node
 Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes);
 
+Status processMetadata(::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer);
 } // namespace onnx2trt
