@@ -289,10 +289,6 @@ std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(const std::stri
 // Helper function to determine if a transpose is required
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
 
-// Helper function to import LSTM ops through the legacy CUDNN path
-NodeImportResult lstmLegacyImporter(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs);
-
 // Helper function to create and fill a Dims object with defined values
 nvinfer1::Dims makeDims(int nbDims, int val);
 

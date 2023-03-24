@@ -2,6 +2,14 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 8.6 GA Release - 2023-5-1
+For more details, see the 8.6 GA release notes for the fixes since 8.6 EA.
+
+- Renamed `kVERSION_COMPATIBLE` flag to `kNATIVE_INSTANCENORM`
+- Added support for N-D `Trilu`
+- Removed old LSTM importer
+- Updated ONNX submodule to v1.13.1.
+
 # TensorRT 8.6 EA Release - 2023-3-13
 
 ## Added

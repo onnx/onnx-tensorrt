@@ -2342,7 +2342,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     constexpr int32_t NB_NON_STATE_INPUTS = 2; // First 2 inputs are trip count and condition respectively.
     constexpr int32_t NB_DISCARDED_OUTPUTS
         = 1; // First output is the updated value of the condition, and is ignored by the outer loop node.
-    constexpr int32_t DUMMY_SCAN_OUTPUT_LENGTH = 1;
+    constexpr int32_t DUMMY_SCAN_OUTPUT_LENGTH = 1024;
     ASSERT((inputs.size() >= 2) && "The Loop operator requires at least 2 inputs.", ErrorCode::kINVALID_NODE);
     OnnxAttrs attrs(node, ctx);
     int32_t const nbInputs = node.input().size();
@@ -4947,13 +4947,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Trilu)
     using eOp = nvinfer1::ElementWiseOperation;
     auto* data = &convertToTensor(inputs.at(0), ctx);
     auto const nbDims = data->getDimensions().nbDims;
-    ASSERT((nbDims == 2 || nbDims == 3) && "Trilu input must have 2 or 3 input dimensions!", ErrorCode::kINVALID_NODE);
+    ASSERT((nbDims >= 2) && "Trilu input must have at least 2 dimensions!", ErrorCode::kINVALID_NODE);
     OnnxAttrs attrs(node, ctx);
     int32_t const upper = attrs.get("upper", 0);
 
     // Input may be in a batch so we need to get NxM dimensions
-    int64_t const N = nbDims == 2 ? 0 : 1;
-    int64_t const M = nbDims == 2 ? 1 : 2;
+    int64_t const N = nbDims - 2;
+    int64_t const M = nbDims - 1;
 
     // Create iota dims of NxM
     const ShapeTensor iotadims
@@ -4975,11 +4975,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Trilu)
         cols = &elementwiseHelper(ctx, node, {cols, k}, eOp::kSUB).value().at(0).tensor();
     }
 
-    // Unsqueeze to broadcast rows/cols to 3D if necessary during next elementwise operation
-    if (nbDims == 3)
+    // Unsqueeze to broadcast rows/cols if necessary during next elementwise operation.
+    if (nbDims > 2)
     {
-        rows = unsqueezeTensor(ctx, node, *rows, {0});
-        cols = unsqueezeTensor(ctx, node, *cols, {0});
+        std::vector<int32_t> batchDims(nbDims - 2);
+        std::iota(batchDims.begin(), batchDims.end(), 0);
+        rows = unsqueezeTensor(ctx, node, *rows, batchDims);
+        cols = unsqueezeTensor(ctx, node, *cols, batchDims);
     }
 
     // For lower Trilus, use greaterOrEquals. For upper Trilus, use lessOrEquals
