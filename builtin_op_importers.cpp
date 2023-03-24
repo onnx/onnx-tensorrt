@@ -2204,11 +2204,11 @@ DEFINE_BUILTIN_OP_IMPORTER(ImageScaler)
 
 DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
 {
-    // Choose plugin implementation for non-VC engines, and native implementation
-    // for VC engines.
+    // Choose plugin implementation for non-VC and non-HC engines, and native implementation
+    // for VC and HC engines.
     auto flags = ctx->getFlags();
-    uint32_t vcFlag = 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kVERSION_COMPATIBLE);
-    if (flags & vcFlag)
+    uint32_t nativeInstanceNormFlag = 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM);
+    if (flags & nativeInstanceNormFlag)
     {
         return normalizationHelper(ctx, node, inputs);
     }
