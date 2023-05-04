@@ -80,7 +80,7 @@ constexpr inline int32_t EnumMax<ErrorCode>()
 
 //!
 //! \brief Represents one or more OnnxParserFlag values using binary OR
-//! operations, e.g., 1U << OnnxParserFlag::kVERSION_COMPATIBLE
+//! operations, e.g., 1U << OnnxParserFlag::kNATIVE_INSTANCENORM
 //!
 //! \see IParser::setFlags() and IParser::getFlags()
 //!
@@ -249,6 +249,26 @@ public:
     //!
     virtual void clearErrors() = 0;
 
+    virtual ~IParser() noexcept = default;
+
+    //!
+    //! \brief Query the plugin libraries needed to implement operations used by the parser in a version-compatible
+    //! engine.
+    //!
+    //! This provides a list of plugin libraries on the filesystem needed to implement operations
+    //! in the parsed network.  If you are building a version-compatible engine using this network,
+    //! provide this list to IBuilderConfig::setPluginsToSerialize to serialize these plugins along
+    //! with the version-compatible engine, or, if you want to ship these plugin libraries externally
+    //! to the engine, ensure that IPluginRegistry::loadLibrary is used to load these libraries in the
+    //! appropriate runtime before deserializing the corresponding engine.
+    //!
+    //! \param[out] nbPluginLibs Returns the number of plugin libraries in the array, or -1 if there was an error.
+    //! \return Array of `nbPluginLibs` C-strings describing plugin library paths on the filesystem if nbPluginLibs > 0,
+    //! or nullptr otherwise.  This array is owned by the IParser, and the pointers in the array are only valid until
+    //! the next call to parse(), supportsModel(), parseFromFile(), or parseWithWeightDescriptors().
+    //!
+    virtual char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept = 0;
+
     //!
     //! \brief Set the parser flags.
     //!
@@ -297,26 +317,6 @@ public:
     //! \return True if flag is set, false if unset.
     //!
     virtual bool getFlag(OnnxParserFlag onnxParserFlag) const noexcept = 0;
-
-    virtual ~IParser() noexcept = default;
-
-    //!
-    //! \brief Query the plugin libraries needed to implement operations used by the parser in a version-compatible
-    //! engine.
-    //!
-    //! This provides a list of plugin libraries on the filesystem needed to implement operations
-    //! in the parsed network.  If you are building a version-compatible engine using this network,
-    //! provide this list to IBuilderConfig::setPluginsToSerialize to serialize these plugins along
-    //! with the version-compatible engine, or, if you want to ship these plugin libraries externally
-    //! to the engine, ensure that IPluginRegistry::loadLibrary is used to load these libraries in the
-    //! appropriate runtime before deserializing the corresponding engine.
-    //!
-    //! \param[out] nbPluginLibs Returns the number of plugin libraries in the array, or -1 if there was an error.
-    //! \return Array of `nbPluginLibs` C-strings describing plugin library paths on the filesystem if nbPluginLibs > 0,
-    //! or nullptr otherwise.  This array is owned by the IParser, and the pointers in the array are only valid until
-    //! the next call to parse(), supportsModel(), parseFromFile(), or parseWithWeightDescriptors().
-    //!
-    virtual char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept = 0;
 };
 
 } // namespace nvonnxparser

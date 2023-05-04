@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the `main` branch is for the latest version of [TensorRT 8.6.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.6.0](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.6.0 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 8.6](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 8.6 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -65,10 +65,19 @@ Once you have cloned the repository, you can build the parser libraries and exec
 
 Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
 
-### Experimental Ops
-All experimental operators will be considered unsupported by the ONNX-TRT's `supportsModel()` function.
+### InstanceNormalizaiton Performance
 
-`NonMaxSuppression` is available as an experimental operator in TensorRT 8. It has the limitation that the output shape is always padded to length [`max_output_boxes_per_class`, 3], therefore some post processing is required to extract the valid indices.
+In TensorRT 8.6 there are two implementations of InstanceNormalization that may perform differently depending on various parameters. By default the parser will insert an InstanceNormalization plugin layer as it performs best for general use cases. Users that want to benchmark using the native TensorRT implementation of InstanceNorm can set the parser flag `kNATIVE_INSTANCENORM` prior to parsing the model. For building version compatible or hardware compatible engines, this flag must be set.
+
+C++ Example:
+
+    auto flag = 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM);
+    parser->setFlags(flag);
+
+Python Example:
+
+    flag = 1 << (int)(trt.OnnxParserFlag.NATIVE_INSTANCENORM)
+    parser.flags = flag
 
 ## Executable Usage
 
@@ -92,9 +101,9 @@ Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` 
 
     python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
 
-TensorRT 8.6.0 supports ONNX release 1.12.0. Install it with:
+TensorRT 8.6 supports ONNX release 1.13.1. Install it with:
 
-    python3 -m pip install onnx==1.12.0
+    python3 -m pip install onnx==1.13.1
 
 The ONNX-TensorRT backend can be installed by running:
 
