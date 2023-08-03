@@ -4,10 +4,10 @@
 
 #pragma once
 
+#include "onnx2trt.hpp"
 #include "ShapedWeights.hpp"
 #include "ShapeTensor.hpp"
 #include "Status.hpp"
-#include "trt_utils.hpp"
 
 #include <NvInfer.h>
 #include <onnx/onnx_pb.h>
@@ -71,11 +71,14 @@ static std::ostream& operator<<(std::ostream& stream, const nvinfer1::DataType& 
     {
     case nvinfer1::DataType::kFLOAT: return stream << "float32";
     case nvinfer1::DataType::kHALF: return stream << "float16";
+    case nvinfer1::DataType::kBF16: return stream << "bfloat16";
     case nvinfer1::DataType::kINT8: return stream << "int8";
     case nvinfer1::DataType::kUINT8: return stream << "uint8";
     case nvinfer1::DataType::kINT32: return stream << "int32";
+    case nvinfer1::DataType::kINT64: return stream << "int64";
     case nvinfer1::DataType::kBOOL: return stream << "bool";
     case nvinfer1::DataType::kFP8: return stream << "float8";
+
     default: throw std::runtime_error("Unknown dtype");
     }
 }
@@ -94,7 +97,7 @@ struct PluginDeleter
 int64_t volume(const nvinfer1::Dims& dims);
 
 // Helper function to get the size in bytes of an ONNX datatype
-int getDtypeSize(int32_t onnxDtype);
+int32_t getDtypeSize(int32_t onnxDtype);
 
 // Helper function to add a scalar into TRT through a constant layer.
 template <typename ScalarType>
@@ -121,6 +124,27 @@ inline nvinfer1::IConstantLayer* addConstant(
     nvinfer1::IConstantLayer* l = ctx->network()->addConstant(weights.shape, weights);
     ctx->network()->setWeightsName(weights, weights.getName());
     return l;
+}
+
+// Helper overloads for comparisons between dimensions.
+inline bool operator==(nvinfer1::Dims const& a, nvinfer1::Dims const& b)
+{
+    if (a.nbDims != b.nbDims)
+    {
+        return false;
+    }
+    for (int32_t i = 0; i < a.nbDims; ++i)
+    {
+        if (a.d[i] != b.d[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+inline bool operator!=(nvinfer1::Dims const& a, nvinfer1::Dims const& b)
+{
+    return !(a == b);
 }
 
 enum ScaleOp
@@ -181,7 +205,7 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype);
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
 
 // Helper function to convert ONNX padding into TRT padding. Will update startTensor and totalPaddingTensor by reference
-bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::vector<int32_t>& onnxPadding,
+bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::vector<int64_t>& onnxPadding,
     nvinfer1::ITensor*& startTensor, nvinfer1::ITensor*& totalPaddingTensor);
 
 // Helper function to check if all of the values in the shift tensor are zeros
@@ -241,10 +265,7 @@ float getActivationDefaultBeta(nvinfer1::ActivationType type);
 
 // Helper function to get the length of the specified axis
 nvinfer1::ITensor* getAxisLength(
-    IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape = nvinfer1::Dims{0});
-
-// Helper function to calculate the output size of a convolution node given its attributes
-int getConvOutputSize(int input_size, int filter_size, int stride, int dilation_rate, int total_padding);
+    IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int32_t axis, nvinfer1::Dims shape = nvinfer1::Dims{0});
 
 // Helper function to get the TRT datatype given an ONNX datatype
 const char* getDtypeName(int32_t onnxDtype);
@@ -258,15 +279,17 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
 // Helper function to get the scaling mode for TRT's scale layer
 nvinfer1::ScaleMode getScaleMode(nvinfer1::Dims const& weights_shape, nvinfer1::Dims const& tensor_shape);
 
-// Helper function to get a float representation of a FLOAT or FLOAT16 ONNX type.
-float getSingleValueAsFloat(void* data, bool fp16);
+// Helper function to get a float representation of weights containing a single value.
+float getSingleValueAsFloat(ShapedWeights const& weights);
 
 // Helper function to map ONNX Global Pooling ops into TensorRT.
-nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
+nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    nvinfer1::ITensor& tensor, nvinfer1::ReduceOperation op);
 
-// Helper function to create a greaterOrEqual or lessOrEqual operation. Provide `greater=true` for greaterOrEqual, `greater=false` for lessOrEqual
-nvinfer1::ITensor* greaterLessOrEqual(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB,
-    bool greater);
+// Helper function to create a greaterOrEqual or lessOrEqual operation. Provide `greater=true` for greaterOrEqual,
+// `greater=false` for lessOrEqual
+nvinfer1::ITensor* greaterLessOrEqual(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+    nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB, bool greater);
 
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
@@ -285,6 +308,9 @@ nvinfer1::IPluginCreator* importPluginCreator(IImporterContext* ctx, std::string
 // Helper function to get a plugin from the PluginRegistry
 std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(const std::string& name,
     nvinfer1::IPluginCreator* pluginCreator, const std::vector<nvinfer1::PluginField>& pluginFields);
+
+// Helper function to return the identity of a TensorOrWeights
+TensorOrWeights identity(IImporterContext* ctx, TensorOrWeights input);
 
 // Helper function to determine if a transpose is required
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
@@ -335,6 +361,8 @@ nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::
 nvinfer1::ITensor* transposeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm);
 
+::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataType dt);
+
 // Helper function to import ONNX unary ops into TRT
 NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, TensorOrWeights& input,
     nvinfer1::UnaryOperation op);
@@ -376,7 +404,7 @@ Status weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightV
 }
 
 template <typename T>
-ShapedWeights::DataType getShapeWeightsDataType()
+ShapedWeights::DataType getShapedWeightsDataType()
 {
     static const std::unordered_map<std::type_index, ::ONNX_NAMESPACE::TensorProto::DataType> tMap(
         {{std::type_index(typeid(bool)), ::ONNX_NAMESPACE::TensorProto::BOOL},
@@ -403,7 +431,7 @@ template <typename T>
 Status vectorToWeights(std::vector<T>& weightVector, TensorOrWeights* weights)
 {
     nvinfer1::Dims shape{1, {static_cast<int32_t>(weightVector.size())}};
-    ShapedWeights::DataType dtype = getShapeWeightsDataType<T>();
+    ShapedWeights::DataType dtype = getShapedWeightsDataType<T>();
     ASSERT(dtype != ::ONNX_NAMESPACE::TensorProto::UNDEFINED && "Unsupported datatype", ErrorCode::kINVALID_VALUE);
     *weights = ShapedWeights(dtype, weightVector.data(), shape);
     return Status(ErrorCode::kSUCCESS);
@@ -460,5 +488,30 @@ float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContex
 // Helper function to validate input types for an ONNX node
 Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes);
 
-Status processMetadata(::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer);
+Status processMetadata(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer);
+
+//! Helper function to process ellipsis and implicit output in Einsum
+//!
+//! \param inputTensors Vector of input tensors
+//! \param equation String of equation in Einsum. It will be modified in this function.
+//! \param withEllipsis Bool indicating whether the equation contains ellipsis.
+//!
+//! \brief For an Einsum equation with ellipsises or implicit output, this function does the following steps:
+//!        1. parse the equation into a vector of input strings and an output string;
+//!        2. infer and write output string if the equation has implicit output;
+//!        3. replace ellipsis with new subscripts for each input/output string when the equation contains ellipsis;
+//!        4. rebuild the einsum equation string with explicit output.
+//!
+Status processEllipsisAndImplicitOutput(
+    std::vector<nvinfer1::ITensor*> const& inputTensors, std::string& equation, bool const withEllipsis);
+
+//! Helper function to parse the Einsum layer with more than 2 inputs as a graph with multiple 2-input Einsum layers.
+//!
+//! \param equation It is intended to be a copy instead of a const reference.
+//!        It cannot be a const as it will be further edited in parseEinsumEquation() which requires string& equation.
+//!        It cannot be a reference as like an output of this function which it is not.
+//!
+nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation);
+
 } // namespace onnx2trt

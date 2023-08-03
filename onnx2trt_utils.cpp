@@ -3,8 +3,11 @@
  */
 
 #include "onnx2trt_utils.hpp"
-#include "OnnxAttrs.hpp"
 #include "NvInferSafeRuntime.h"
+#include "OnnxAttrs.hpp"
+#include "bfloat16.hpp"
+#include <ctype.h>
+#include <regex>
 #include <set>
 
 namespace onnx2trt
@@ -125,7 +128,7 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
 
     // We don't care about the TopK values, just the indices.
     nvinfer1::ITensor* indices = layer->getOutput(1);
-    indices->setType(nvinfer1::DataType::kINT32);
+    indices = castHelper(ctx, indices, nvinfer1::DataType::kINT64);
 
     // If selectLastIndex is true, the TopK operation was performed on reversed data on the provided axis.
     // Convert reversed indices back to forward indices by calculating the following:
@@ -147,18 +150,16 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
         std::vector<TensorOrWeights> newInputs{tensorDimOnAxis, indices, ones};
         indices = &elementwiseHelper(ctx, node, newInputs, nvinfer1::ElementWiseOperation::kSUB).value().at(0).tensor();
     }
-    if (keepdims)
+    // The default behavior of the TopK layer is to keepdims.
+    // Otherwise, we need to squeeze the axis dimension.
+    if (!keepdims)
     {
-        // The default behavior of the TopK layer is to keepdims.
-        return {{indices}};
-    }
-    else
-    {
-        // Otherwise, we need to squeeze the axis dimension
         std::vector<int32_t> axes{axis};
         indices = squeezeTensor(ctx, node, *indices, axes);
-        return {{indices}};
     }
+    // TensorRT doesn't support int64 for TopK indices
+    indices = castHelper(ctx, indices, nvinfer1::DataType::kINT64);
+    return {{indices}};
 }
 
 Status broadcastTensor(IImporterContext* ctx, nvinfer1::ITensor*& t, const int nbDims)
@@ -173,6 +174,7 @@ Status broadcastTensor(IImporterContext* ctx, nvinfer1::ITensor*& t, const int n
     {
         nvinfer1::IShuffleLayer* reshape
             = addShuffle(ctx, *t, concat(ctx, fillShapeVector(ctx, 1, shapeVector(nbDims - nbInputDims)), shapeOf(*t)));
+        ctx->registerLayer(reshape, "ONNXTRT_Broadcast", nullptr);
         t = reshape->getOutput(0);
     }
     return Status::success();
@@ -314,8 +316,8 @@ bool canUseNDResize(size_t const scaleSize, float const* scaleFactors, size_t co
 
 nvinfer1::ITensor* castHelper(IImporterContext* ctx, nvinfer1::ITensor* input, nvinfer1::DataType dtype)
 {
-    nvinfer1::IIdentityLayer* cast = ctx->network()->addIdentity(*input);
-    cast->setOutputType(0, dtype);
+    nvinfer1::ICastLayer* cast = ctx->network()->addCast(*input, dtype);
+    ctx->registerLayer(cast, "ONNXTRT_castHelper", nullptr);
     return cast->getOutput(0);
 }
 
@@ -352,10 +354,11 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
     case ::ONNX_NAMESPACE::TensorProto::INT8: *trt_dtype = nvinfer1::DataType::kINT8; break;
     case ::ONNX_NAMESPACE::TensorProto::UINT8: *trt_dtype = nvinfer1::DataType::kUINT8; break;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT16: *trt_dtype = nvinfer1::DataType::kHALF; break;
+    case ::ONNX_NAMESPACE::TensorProto::BFLOAT16: *trt_dtype = nvinfer1::DataType::kBF16; break;
     case ::ONNX_NAMESPACE::TensorProto::BOOL: *trt_dtype = nvinfer1::DataType::kBOOL; break;
     case ::ONNX_NAMESPACE::TensorProto::INT32: *trt_dtype = nvinfer1::DataType::kINT32; break;
-    // See convertOnnxWeights for sanity check if all values can be safetly downcasted to INT32
-    case ::ONNX_NAMESPACE::TensorProto::INT64: *trt_dtype = nvinfer1::DataType::kINT32; break;
+    case ::ONNX_NAMESPACE::TensorProto::INT64: *trt_dtype = nvinfer1::DataType::kINT64; break;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: *trt_dtype = nvinfer1::DataType::kFP8; break;
     default:
         std::cerr << "Unsupported ONNX data type: " << getDtypeName(onnx_dtype) << " (" << std::to_string(onnx_dtype)
                   << ")" << std::endl;
@@ -404,11 +407,11 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
     return int32Weights;
 }
 
-bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::vector<int32_t>& onnxPadding,
+bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::vector<int64_t>& onnxPadding,
     nvinfer1::ITensor*& startTensor, nvinfer1::ITensor*& totalPaddingTensor)
 {
-    std::vector<int32_t> start;
-    std::vector<int32_t> totalPadding;
+    std::vector<int64_t> start;
+    std::vector<int64_t> totalPadding;
     if (onnxPadding.size() % 2U != 0)
     {
         return false;
@@ -436,10 +439,10 @@ bool convertOnnxPadding(IImporterContext* ctx, int32_t nbInputDims, const std::v
     }
 
     startTensor
-        = addConstant(ctx, start, ::ONNX_NAMESPACE::TensorProto::INT32, nvinfer1::Dims{1, {nbInputDims}})->getOutput(0);
-    totalPaddingTensor
-        = addConstant(ctx, totalPadding, ::ONNX_NAMESPACE::TensorProto::INT32, nvinfer1::Dims{1, {nbInputDims}})
-              ->getOutput(0);
+        = addConstant(ctx, start, ::ONNX_NAMESPACE::TensorProto::INT64, nvinfer1::Dims{1, {nbInputDims}})->getOutput(0);
+    totalPaddingTensor = addConstant(ctx, totalPadding, ::ONNX_NAMESPACE::TensorProto::INT64,
+        nvinfer1::Dims{1,
+            {nbInputDims}})->getOutput(0);
     return startTensor && totalPaddingTensor;
 }
 
@@ -473,8 +476,9 @@ nvinfer1::ITensor* createZeroTensor(IImporterContext* ctx, nvinfer1::ITensor* da
         = addConstant(ctx, std::vector<float>{0.f}, ::ONNX_NAMESPACE::TensorProto::FLOAT, {0, {1}})->getOutput(0);
     zero = castHelper(ctx, zero, data->getType());
     broadcastTensors(ctx, zero, data);
-    zero = ctx->network()->addElementWise(*data, *zero, nvinfer1::ElementWiseOperation::kPROD)->getOutput(0);
-    return zero;
+    auto* zeroLayer = ctx->network()->addElementWise(*data, *zero, nvinfer1::ElementWiseOperation::kPROD);
+    ctx->registerLayer(zeroLayer, "ONNXTRT_createZeroTensor", nullptr);
+    return zeroLayer->getOutput(0);
 }
 
 template <typename DataType>
@@ -607,14 +611,7 @@ bool convertOnnxWeights(
         dataPtr = dataBuf.data();
 
         // Cast non-native TRT types to their corresponding proxy types
-        if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64)
-        {
-            // Cast INT64 weights to INT32.
-            dataPtr = convertINT64(reinterpret_cast<const int64_t*>(dataPtr), shape, ctx);
-            nbytes = nbytes / (sizeof(int64_t) / sizeof(int32_t));
-            onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
-        }
-        else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
+        if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
         {
             // Cast UINT8 weights to INT32.
             dataPtr = convertUINT8(reinterpret_cast<const uint8_t*>(dataPtr), shape, ctx);
@@ -655,21 +652,7 @@ bool convertOnnxWeights(
     // Weights information is within the TensorProto itself
 
     // Cast non-native TRT types to their corresponding proxy types
-    if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64)
-    {
-        if (onnxTensor.raw_data().size() > 0)
-        {
-            dataPtr = convertINT64(reinterpret_cast<const int64_t*>(onnxTensor.raw_data().data()), shape, ctx);
-            nbytes = onnxTensor.raw_data().size() / (sizeof(int64_t) / sizeof(int32_t));
-        }
-        else if (onnxTensor.int64_data().size() > 0)
-        {
-            dataPtr = convertINT64(onnxTensor.int64_data().data(), shape, ctx);
-            nbytes = onnxTensor.int64_data().size() * sizeof(int32_t);
-        }
-        onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
-    }
-    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
+    if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
     {
         if (onnxTensor.raw_data().size() > 0)
         {
@@ -700,7 +683,8 @@ bool convertOnnxWeights(
 
     // Check for supported types that can be found in the int32_data field in the TensorProto
     // https://github.com/onnx/onnx/blob/master/onnx/onnx.proto#L528
-    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT32 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT16
+    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT32 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64
+        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT16 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BFLOAT16
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT8 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BOOL)
     {
         if (onnxTensor.raw_data().size() > 0)
@@ -713,7 +697,9 @@ bool convertOnnxWeights(
             switch (onnxDtype)
             {
             case ::ONNX_NAMESPACE::TensorProto::INT32: dataPtr = (void*) (onnxTensor.int32_data().data()); break;
+            case ::ONNX_NAMESPACE::TensorProto::INT64: dataPtr = (void*) (onnxTensor.int64_data().data()); break;
             case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
+            case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
                 dataPtr = convertINT32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype, ctx);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT8:
@@ -727,7 +713,10 @@ bool convertOnnxWeights(
                                                          << ") when importing initializer: " << onnxTensor.name());
                 break;
             }
-            nbytes = onnxTensor.int32_data().size() * getDtypeSize(onnxDtype);
+
+            nbytes = onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64
+                ? onnxTensor.int64_data().size() * getDtypeSize(onnxDtype)
+                : onnxTensor.int32_data().size() * getDtypeSize(onnxDtype);
         }
     }
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT)
@@ -742,6 +731,12 @@ bool convertOnnxWeights(
             dataPtr = (void*) (onnxTensor.float_data().data());
             nbytes = onnxTensor.float_data().size() * sizeof(float);
         }
+    }
+    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN)
+    {
+        assert(onnxTensor.int32_data().size());
+        dataPtr = (void*) (onnxTensor.int32_data().data());
+        nbytes = onnxTensor.int32_data().size();
     }
     else
     {
@@ -775,6 +770,7 @@ nvinfer1::ITensor* convertToScalar(IImporterContext* ctx, nvinfer1::ITensor* inp
     }
     nvinfer1::IShuffleLayer* reshape = ctx->network()->addShuffle(*inpTensor);
     reshape->setReshapeDimensions(nvinfer1::Dims{0});
+    ctx->registerLayer(reshape, "ONNXTRT_convertToScalar", nullptr);
     // Do not need to call setZeroIsPlaceholder, since reshape dimensions are empty.
     return reshape->getOutput(0);
 }
@@ -927,13 +923,19 @@ nvinfer1::ITensor* flattenTensor(
     {
         ctx->registerLayer(flattenLayer, node);
     }
+    else
+    {
+        ctx->registerLayer(flattenLayer, "ONNXTRT_flattenTensor", nullptr);
+    }
     return flattenLayer->getOutput(0);
 }
 
 nvinfer1::ITensor* gatherDimension(IImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape)
 {
     auto& axisValue = *addConstantScalar(ctx, dim, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape)->getOutput(0);
-    return ctx->network()->addGather(*shapeTensor, axisValue, 0)->getOutput(0);
+    auto* layer = ctx->network()->addGather(*shapeTensor, axisValue, 0);
+    ctx->registerLayer(layer, "ONNXTRT_gatherDimension", nullptr);
+    return layer->getOutput(0);
 }
 
 // Helper function to generate padding values for convTranspose
@@ -1004,7 +1006,8 @@ float getActivationDefaultBeta(nvinfer1::ActivationType type)
     throw std::runtime_error{"Unrecognized activation type"};
 }
 
-nvinfer1::ITensor* getAxisLength(IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape)
+nvinfer1::ITensor* getAxisLength(
+    IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int32_t axis, nvinfer1::Dims shape)
 {
     // fast path for static dims
     auto dims = inpTensor->getDimensions();
@@ -1020,7 +1023,22 @@ nvinfer1::ITensor* getAxisLength(IImporterContext* ctx, nvinfer1::ITensor* inpTe
     }
 }
 
-int getConvOutputSize(int input_size, int filter_size, int stride, int dilation_rate, int total_padding);
+nvinfer1::ITensor* getAxisLengthInt64(
+    IImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape)
+{
+    // fast path for static dims
+    auto dims = inpTensor->getDimensions();
+    int32_t d = dims.d[axis];
+    if (d >= 0)
+    {
+        return addConstantScalar(ctx, d, ::ONNX_NAMESPACE::TensorProto_DataType_INT64, shape)->getOutput(0);
+    }
+    else
+    {
+        nvinfer1::ITensor* inpShape = ctx->network()->addShape(*inpTensor)->getOutput(0);
+        return gatherDimension(ctx, castHelper(ctx, inpShape, nvinfer1::DataType::kINT64), axis, shape);
+    }
+}
 
 const char* getDtypeName(int32_t onnxDtype)
 {
@@ -1036,6 +1054,7 @@ const char* getDtypeName(int32_t onnxDtype)
     case ::ONNX_NAMESPACE::TensorProto::STRING: return "STRING";
     case ::ONNX_NAMESPACE::TensorProto::BOOL: return "BOOL";
     case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return "FLOAT16";
+    case ::ONNX_NAMESPACE::TensorProto::BFLOAT16: return "BFLOAT16";
     case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return "DOUBLE";
     case ::ONNX_NAMESPACE::TensorProto::UINT32: return "UINT32";
     case ::ONNX_NAMESPACE::TensorProto::UINT64: return "UINT64";
@@ -1045,11 +1064,12 @@ const char* getDtypeName(int32_t onnxDtype)
     }
 }
 
-int getDtypeSize(int32_t onnxDtype)
+int32_t getDtypeSize(int32_t onnxDtype)
 {
     switch (onnxDtype)
     {
     case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return 2;
+    case ::ONNX_NAMESPACE::TensorProto::BFLOAT16: return 2;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT: return 4;
     case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return 8;
     case ::ONNX_NAMESPACE::TensorProto::COMPLEX64: return 8;
@@ -1064,6 +1084,7 @@ int getDtypeSize(int32_t onnxDtype)
     case ::ONNX_NAMESPACE::TensorProto::INT32: return 4;
     case ::ONNX_NAMESPACE::TensorProto::UINT64: return 8;
     case ::ONNX_NAMESPACE::TensorProto::INT64: return 8;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return 1;
     default: return -1;
     }
 }
@@ -1163,13 +1184,19 @@ void getKernelParams(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& o
     }
 }
 
-float getSingleValueAsFloat(void* data, bool fp16)
+float getSingleValueAsFloat(ShapedWeights const& weights)
 {
-    if (fp16)
+    assert(weights.count() == 1 && "Expected weights to contain only a single value");
+    switch (weights.type)
     {
-        return static_cast<float>(reinterpret_cast<half_float::half const*>(data)[0]);
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT: return static_cast<float const*>(weights.values)[0];
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
+        return static_cast<float>(static_cast<half_float::half const*>(weights.values)[0]);
+    case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
+        return static_cast<float>(static_cast<BFloat16 const*>(weights.values)[0]);
+    default: assert(false && "Unsupported type!"); return 0.F;
     }
-    return static_cast<float*>(data)[0];
+    return 0.F;
 }
 
 nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
@@ -1298,14 +1325,33 @@ nvinfer1::ITensor* iota(IImporterContext* ctx, ShapeTensor iotaDims, int32_t axi
 {
     std::vector<int32_t> deltaVals(iotaDims.size(), 0);
     deltaVals[axis] = 1;
-    auto* iota = ctx->network()->addFill({0,{0}}, nvinfer1::FillOperation::kLINSPACE);
+    auto* iota = ctx->network()->addFill({0, {0}}, nvinfer1::FillOperation::kLINSPACE, nvinfer1::DataType::kINT32);
     auto* alpha = addConstantScalar(ctx, 0, ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
-    auto* delta = addConstant(ctx, deltaVals, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {iotaDims.size()}})->getOutput(0);
+    auto* delta
+        = addConstant(ctx, deltaVals, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {iotaDims.size()}})->getOutput(0);
     iota->setInput(0, iotaDims.tensor(ctx));
     iota->setInput(1, *alpha);
     iota->setInput(2, *delta);
-    iota->setOutputType(0, nvinfer1::DataType::kINT32);
-    return iota->getOutput(0);
+    ctx->registerLayer(iota, "ONNXTRT_iota", nullptr);
+    return castHelper(ctx, iota->getOutput(0), nvinfer1::DataType::kINT64);
+}
+
+TensorOrWeights identity(IImporterContext* ctx, TensorOrWeights input)
+{
+    if (input.is_weights())
+    {
+        return input;
+    }
+    else
+    {
+        auto* layer = ctx->network()->addIdentity(input.tensor());
+        if (!layer)
+        {
+            return nullptr;
+        }
+        ctx->registerLayer(layer, "ONNXTRT_identity", nullptr);
+        return layer->getOutput(0);
+    }
 }
 
 bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm)
@@ -1415,9 +1461,76 @@ std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::Activat
     return tmpActs;
 }
 
+std::string normalizePath(std::string const& path)
+{
+    std::vector<std::string> normPath;
+    auto addToPath = [&normPath](std::string s) {
+        // Ignore all extra slashes, and current directory paths
+        if (s == "/" || s == "./")
+        {
+            return;
+        }
+        // Push back to normPath under the following circumstances
+        // 1. Current string is not "../" or
+        // 2. "../" if it's the first string or
+        // 3. "../" is the previous string in normPath
+        if (s != "../" || normPath.empty() || (!normPath.empty() && normPath.back() == "../"))
+        {
+            normPath.push_back(s);
+        }
+        // Remove previous entry since "../" was encountered.
+        else
+        {
+            normPath.pop_back();
+        }
+    };
+
+    size_t i = 0;
+    size_t n = path.size();
+    std::string sep = "/";
+
+    // Loop through path, split on all path seperator tokens, and append to normPath if applicable.
+    while (i < n)
+    {
+        auto slashPos = path.find(sep, i);
+        if (slashPos == std::string::npos)
+        {
+            addToPath(path.substr(i, n - i));
+            break;
+        }
+        else
+        {
+            addToPath(path.substr(i, slashPos - i + 1));
+            i = slashPos + 1;
+        }
+    }
+
+    // Build final output string
+    std::string out;
+    for (auto s : normPath)
+    {
+        out += s;
+    }
+    return out;
+}
+
 bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int64_t offset, int64_t length,
     std::vector<char>& weightsBuf, size_t& size)
 {
+    // Accessing parent directories (i.e. ../) is not allowed. Normalize path first.
+    std::string normalizedFile = normalizePath(file);
+    bool illegalDir{false};
+#ifdef _MSC_VER
+    illegalDir |= normalizedFile.find("..\\") != std::string::npos;
+#endif
+    illegalDir |= normalizedFile.find("../") != std::string::npos;
+
+    if (illegalDir)
+    {
+        LOG_ERROR("Relative paths to parent (../) are not allowed in ONNX external weights! Normalized path is: "
+            << normalizedFile);
+        return false;
+    }
     // The weight paths in the ONNX model are relative paths to the main ONNX file.
 #ifdef _MSC_VER
     size_t slash = path.rfind("\\");
@@ -1431,11 +1544,11 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
 #endif
     if (slash != std::string::npos)
     {
-        path.replace(slash + 1, path.size() - (slash + 1), file);
+        path.replace(slash + 1, path.size() - (slash + 1), normalizedFile);
     }
     else
     {
-        path = file;
+        path = normalizedFile;
     }
     std::ifstream relPathFile(path, std::ios::binary | std::ios::ate);
     if (!relPathFile)
@@ -1577,6 +1690,7 @@ nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tenso
     }
     layer->setReshapeDimensions(shape);
     layer->setZeroIsPlaceholder(false);
+    ctx->registerLayer(layer, "ONNXTRT_reshapeTensor", nullptr);
     return layer->getOutput(0);
 }
 
@@ -1646,12 +1760,12 @@ nvinfer1::ITensor* sliceAcrossAxis(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* data, const int axis)
 {
     ShapeTensor starts, sizes, strides;
-    ShapeTensor axisLength = ShapeTensor(*getAxisLength(ctx, data, axis, {1, {1}}));
+    ShapeTensor axisLength = ShapeTensor(*getAxisLengthInt64(ctx, data, axis, {1, {1}}));
     const int nbDims = data->getDimensions().nbDims;
 
     std::vector<int64_t> values(nbDims, 0);
     starts = ShapeTensor(1, std::move(values));
-    sizes = axis == 0 ? shapeVector(1) : ShapeTensor(*getAxisLength(ctx, data, 0, {1, {1}}));
+    sizes = axis == 0 ? shapeVector(1) : ShapeTensor(*getAxisLengthInt64(ctx, data, 0, {1, {1}}));
     strides = axis == 0 ? axisLength : shapeVector(1);
 
     // On axis dimension, set strides = lengthOfDim and sizes = 1
@@ -1664,7 +1778,7 @@ nvinfer1::ITensor* sliceAcrossAxis(
         }
         else
         {
-            ShapeTensor currLength = ShapeTensor(*getAxisLength(ctx, data, i, {1, {1}}));
+            ShapeTensor currLength = ShapeTensor(*getAxisLengthInt64(ctx, data, i, {1, {1}}));
             strides = concat(ctx, strides, shapeVector(1));
             sizes = concat(ctx, sizes, currLength);
         }
@@ -1692,6 +1806,10 @@ nvinfer1::ITensor* squeezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::
     if (regLayer)
     {
         ctx->registerLayer(squeezeLayer, node);
+    }
+    else
+    {
+        ctx->registerLayer(squeezeLayer, "ONNXTRT_squeezeTensor", nullptr);
     }
     return squeezeLayer->getOutput(0);
 }
@@ -1728,6 +1846,23 @@ nvinfer1::ITensor* transposeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
     return layer->getOutput(0);
 }
 
+::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataType dt)
+{
+    switch (dt)
+    {
+    case nvinfer1::DataType::kFLOAT: return ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    case nvinfer1::DataType::kHALF: return ::ONNX_NAMESPACE::TensorProto::FLOAT16;
+    case nvinfer1::DataType::kBF16: return ::ONNX_NAMESPACE::TensorProto::BFLOAT16;
+    case nvinfer1::DataType::kINT32: return ::ONNX_NAMESPACE::TensorProto::INT32;
+    case nvinfer1::DataType::kINT64: return ::ONNX_NAMESPACE::TensorProto::INT64;
+    case nvinfer1::DataType::kINT8: return ::ONNX_NAMESPACE::TensorProto::INT8;
+    case nvinfer1::DataType::kBOOL: return ::ONNX_NAMESPACE::TensorProto::BOOL;
+    case nvinfer1::DataType::kUINT8: return ::ONNX_NAMESPACE::TensorProto::UINT8;
+    case nvinfer1::DataType::kFP8: break;
+    }
+    return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
+}
+
 NodeImportResult unaryHelper(
     IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, TensorOrWeights& input, nvinfer1::UnaryOperation op)
 {
@@ -1744,6 +1879,7 @@ NodeImportResult unaryHelper(
         break;
     }
     case nvinfer1::UnaryOperation::kABS:
+    case nvinfer1::UnaryOperation::kSIGN:
     {
         validUnaryType = (inputType != nvinfer1::DataType::kBOOL && inputType != nvinfer1::DataType::kUINT8);
 	break;
@@ -1938,6 +2074,10 @@ nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
     {
         ctx->registerLayer(unsqueezeLayer, node);
     }
+    else
+    {
+        ctx->registerLayer(unsqueezeLayer, "ONNXTRT_unsqueezeTensor", nullptr);
+    }
     return unsqueezeLayer->getOutput(0);
 }
 
@@ -1948,17 +2088,22 @@ nvinfer1::ITensor* resizeShapeTensor(IImporterContext* ctx, nvinfer1::ITensor& i
     // scale weights (convert to tensor) or scale tensor -> elementwise mul -> transformation(floor, ceil, round) -> identity (cast to int) -> resize shape tensor
     //      input -> shapeof -> identity (cast to float) ->
     // clang-format on
-    auto* floatCast = ctx->network()->addIdentity(shapeOf(input).tensor(ctx));
-    floatCast->setOutputType(0, nvinfer1::DataType::kFLOAT);
+    auto* floatCast = ctx->network()->addCast(shapeOf(input).tensor(ctx), nvinfer1::DataType::kFLOAT);
+    ctx->registerLayer(floatCast, "ONNXTRT_resizeShapeTensor_floatCast", nullptr);
     auto* inputShapeTensor = floatCast->getOutput(0);
 
     auto& scaleTensor = convertToTensor(scales, ctx);
-    auto* prod = ctx->network()
-                     ->addElementWise(scaleTensor, *inputShapeTensor, nvinfer1::ElementWiseOperation::kPROD)
-                     ->getOutput(0);
-    auto* floor = ctx->network()->addUnary(*prod, nvinfer1::UnaryOperation::kFLOOR)->getOutput(0);
-    auto* intCast = ctx->network()->addIdentity(*floor);
-    intCast->setOutputType(0, nvinfer1::DataType::kINT32);
+    auto* prodLayer = ctx->network()
+                     ->addElementWise(scaleTensor, *inputShapeTensor, nvinfer1::ElementWiseOperation::kPROD);
+    ctx->registerLayer(prodLayer, "ONNXTRT_resizeShapeTensor_prod", nullptr);
+
+    auto* prod = prodLayer->getOutput(0);
+    auto* floorLayer = ctx->network()->addUnary(*prod, nvinfer1::UnaryOperation::kFLOOR);
+    ctx->registerLayer(floorLayer, "ONNXTRT_resizeShapeTensor_floor", nullptr);
+
+    auto* floor = floorLayer->getOutput(0);
+    auto* intCast = ctx->network()->addCast(*floor, nvinfer1::DataType::kINT32);
+    ctx->registerLayer(intCast, "ONNXTRT_resizeShapeTensor_intCast", nullptr);
     return intCast->getOutput(0);
 }
 
@@ -2106,7 +2251,11 @@ NodeImportResult addScatterLayer(IImporterContext* ctx, ::ONNX_NAMESPACE::NodePr
         }
     }
 
-    auto* layer = ctx->network()->addScatter(data, indices, updates, mode);
+    // TRT doesn't support int64 for indices
+    auto* cast = ctx->network()->addCast(indices, nvinfer1::DataType::kINT32);
+    auto* indicesInt32 = cast->getOutput(0);
+
+    auto* layer = ctx->network()->addScatter(data, *indicesInt32, updates, mode);
     layer->setAxis(axis);
     ctx->registerLayer(layer, node);
     return {{layer->getOutput(0)}};
@@ -2198,8 +2347,12 @@ std::string filterDocString(std::string const& docString)
     return filteredDocStream.str();
 }
 
-Status processMetadata(::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer)
+Status processMetadata(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer)
 {
+    // Create a docstring that that holds node metadata and assign it to the corresponding TRT layer.
+    // The format of the string is as follows:
+    // [ONNX Layer: <name> | property1 | property2 | property3 ...]
+
     std::string docString = node.doc_string();
     std::string filteredDocString = "[ONNX Layer: " + getNodeName(node);
 
@@ -2207,10 +2360,212 @@ Status processMetadata(::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer
     {
         filteredDocString += filterDocString(docString);
     }
+
+    // Get Local Function
+    if (!ctx->localFunctionStack().empty())
+    {
+        std::string localFunction = " | Local Function: " + ctx->localFunctionStack().back();
+        filteredDocString += localFunction;
+    }
+
     filteredDocString += "]";
 
     ASSERT((layer != nullptr) && "The layer object does not exist.", ErrorCode::kUNSUPPORTED_NODE);
     layer->setMetadata(filteredDocString.c_str());
     return Status::success();
 }
+
+//! Parse einsum equation into a vector of input strings and an output string.
+void parseEinsumEquation(
+    std::string& equation, std::vector<std::string>& inputSubscriptsVec, std::string& outputSubscripts)
+{
+    //! remove spaces
+    equation.erase(std::remove(equation.begin(), equation.end(), ' '), equation.end());
+
+    auto const& arrowIndex = equation.find("->");
+    std::string left{};
+    if (arrowIndex != std::string::npos)
+    {
+        constexpr uint32_t kARROW_SIZE = 2;
+        left = equation.substr(0, arrowIndex);
+        outputSubscripts = equation.substr(arrowIndex + kARROW_SIZE);
+    }
+    else
+    {
+        left = equation;
+        outputSubscripts.clear();
+    }
+    left.push_back(','); // Correctly handle trailing scalars in equations like ","
+    std::regex const regex(",");
+    std::sregex_token_iterator begin(left.begin(), left.end(), regex, -1);
+    std::copy(begin, std::sregex_token_iterator(), std::back_inserter(inputSubscriptsVec));
+}
+
+//! replace ellipsis with the same subscripts for each input/output subscript string.
+void replaceEllipsis(nvinfer1::ITensor* const inputTensor, bool const isInput,
+    std::map<char, int64_t> const& subscriptCount, std::string& substitution, std::string& subscripts)
+{
+    auto const& ellipsisIndex = subscripts.find("...");
+    if (ellipsisIndex != std::string::npos)
+    {
+        constexpr uint32_t kELLIPSIS_SIZE = 3;
+        std::string const& left = subscripts.substr(0, ellipsisIndex);
+        std::string const& right = subscripts.substr(ellipsisIndex + kELLIPSIS_SIZE);
+        if (substitution.empty() && isInput && inputTensor != nullptr) // First-time update substitution
+        {
+            nvinfer1::Dims inputDim = inputTensor->getDimensions();
+            int64_t const ellipsisDim = inputDim.nbDims - left.size() - right.size();
+            char c = 'a';
+            while (static_cast<int64_t>(substitution.size()) < ellipsisDim && c <= 'z')
+            {
+                if (!subscriptCount.count(c))
+                {
+                    substitution += c;
+                }
+                c++;
+            }
+        }
+        subscripts = left + substitution + right;
+    }
+}
+
+//! Rebuild einsum equation from input and output subscripts
+std::string rebuildEinsumEquation(
+    std::vector<std::string> const& inputSubscriptsVec, std::string const& outputSubscripts)
+{
+    std::string equation{};
+    for (auto& s : inputSubscriptsVec)
+    {
+        equation += s;
+        equation += ',';
+    }
+    if (!equation.empty())
+    {
+        equation.pop_back();
+    }
+    equation += "->";
+    equation += outputSubscripts;
+    return equation;
+}
+
+Status processEllipsisAndImplicitOutput(
+    std::vector<nvinfer1::ITensor*> const& inputTensors, std::string& equation, bool const withEllipsis)
+{
+    std::vector<std::string> inputSubscriptsVec{};
+    std::string outputSubscripts{};
+
+    parseEinsumEquation(equation, inputSubscriptsVec, outputSubscripts);
+
+    //! count subscripts
+    std::map<char, int64_t> subscriptCount;
+    for (auto& s : inputSubscriptsVec)
+    {
+        for (auto& c : s)
+        {
+            if (isalpha(c))
+            {
+                subscriptCount[c]++;
+            }
+        }
+    }
+
+    //! For implicit einsum, infer and write its outputSubscripts in equation
+    if (equation.find("->") == std::string::npos)
+    {
+        if (withEllipsis)
+        {
+            outputSubscripts
+                = "..."; // In implicit mode, the ellipsis dimensions are set to the beginning of the output.
+        }
+        for (auto& subscript : subscriptCount)
+        {
+            if (subscript.second == 1)
+            {
+                //! Implicitly, output subscripts are set to the alphabetically sorted sequence.
+                //! Here we use a sorted map of subscript to achieve it.
+                outputSubscripts += subscript.first;
+            }
+        }
+    }
+
+    //! Replace ellipsis with new subscripts.
+    if (withEllipsis)
+    {
+        std::string substitution{};
+        int64_t const inputSize = inputTensors.size();
+        for (int64_t i = 0; i < inputSize; ++i)
+        {
+            replaceEllipsis(inputTensors[i], true, subscriptCount, substitution, inputSubscriptsVec[i]);
+        }
+        replaceEllipsis(nullptr, false, subscriptCount, substitution, outputSubscripts);
+    }
+
+    //! Rebuild einsum equation.
+    equation = rebuildEinsumEquation(inputSubscriptsVec, outputSubscripts);
+
+    return Status::success();
+}
+
+//! Infer hiddent output subscripts when transforming einsum layer with more than 2 inputs into multiple 2-input einsum
+//! layers.
+std::string inferHiddenOutputSubscripts(std::vector<std::string> const& inputSubscriptsVec)
+{
+    std::map<char, int64_t> subscriptCount;
+    std::string outputSubscripts{};
+    for (auto const& s : inputSubscriptsVec)
+    {
+        for (auto const& c : s)
+        {
+            if (isalpha(c))
+            {
+                subscriptCount[c]++;
+            }
+        }
+    }
+    for (auto const& subscript : subscriptCount)
+    {
+        outputSubscripts += subscript.first;
+    }
+    return outputSubscripts;
+}
+
+nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation)
+{
+    assert(nbInputs > 0);
+    assert(inputs.size() == static_cast<size_t>(nbInputs));
+    assert(ctx != nullptr);
+    std::vector<std::string> inputSubscriptsVec{};
+    std::string outputSubscripts{};
+
+    parseEinsumEquation(equation, inputSubscriptsVec, outputSubscripts);
+
+    std::string leftSubscripts = inputSubscriptsVec[0];
+    nvinfer1::ITensor* leftInput = inputs[0];
+    assert(leftInput != nullptr);
+
+    for (int64_t i = 1; i < nbInputs - 1; ++i)
+    {
+        std::vector<nvinfer1::ITensor*> inputTensors{leftInput, inputs[i]};
+        std::vector<std::string> inputSubscripts{leftSubscripts, inputSubscriptsVec[i]};
+        std::string hiddenOutputSubscripts = inferHiddenOutputSubscripts(inputSubscripts);
+        std::string hiddenEquation = rebuildEinsumEquation(inputSubscripts, hiddenOutputSubscripts);
+
+        nvinfer1::IEinsumLayer* einsumLayer = ctx->network()->addEinsum(inputTensors.data(), 2, hiddenEquation.c_str());
+        ctx->registerLayer(einsumLayer, node);
+
+        leftSubscripts = hiddenOutputSubscripts;
+        leftInput = einsumLayer->getOutput(0);
+    }
+
+    assert(inputs[nbInputs - 1] != nullptr);
+    std::vector<nvinfer1::ITensor*> finalInputTensors{leftInput, inputs[nbInputs - 1]};
+    std::string finalEquation
+        = rebuildEinsumEquation({leftSubscripts, inputSubscriptsVec[nbInputs - 1]}, outputSubscripts);
+    nvinfer1::IEinsumLayer* einsumLayer = ctx->network()->addEinsum(finalInputTensors.data(), 2, finalEquation.c_str());
+    ctx->registerLayer(einsumLayer, node);
+
+    return einsumLayer;
+}
+
 } // namespace onnx2trt

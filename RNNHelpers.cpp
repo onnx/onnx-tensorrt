@@ -153,6 +153,9 @@ nvinfer1::ITensor* getRaggedMask(IImporterContext* ctx, const ::ONNX_NAMESPACE::
         counter = addLoopCounter(ctx, loop, 0);
     }
 
+    // ONNX spec currently requires seqLens to be int32
+    counter = castHelper(ctx, counter, nvinfer1::DataType::kINT32);
+
     // Create Mask
     nvinfer1::ITensor* seqMask;
     if (reverse)

@@ -2,6 +2,14 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 9.0 EA Release - 2023-8-4
+For more details, see the 9.0 EA release notes for the fixes since 8.6 GA.
+
+- Added support for INT64 data type. The ONNX parser no longer automatically casts INT64 to INT32.
+- Added support for ONNX local functions when parsing ONNX models with the ONNX parser. 
+- Breaking API Change: In TensorRT 9.0, due to the introduction of INT64 as a supported data type, ONNX models with INT64 I/O require INT64 bindings. Note that prior to this release, such models required INT32 bindings.
+- Updated ONNX submodule to v1.14.0.
+
 # TensorRT 8.6 GA Release - 2023-5-1
 For more details, see the 8.6 GA release notes for the fixes since 8.6 EA.
 

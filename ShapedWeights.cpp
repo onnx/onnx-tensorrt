@@ -4,7 +4,6 @@
 
 #include "ShapedWeights.hpp"
 #include "onnx2trt_utils.hpp"
-#include "trt_utils.hpp"
 #include <cstdint>
 #include <cstring>
 

@@ -213,6 +213,9 @@ ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTenso
 //! Cast to int32_t shape tensor.
 ShapeTensor castToInt32(IImporterContext* ctx, ShapeTensor const& x);
 
+//! Cast to int64_t shape tensor.
+ShapeTensor castToInt64(IImporterContext* ctx, ShapeTensor const& x);
+
 //! Return gather(concat(x,y),subscripts)
 inline ShapeTensor interlace(
     IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, const ShapeTensor& subscripts)

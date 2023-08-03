@@ -59,7 +59,7 @@ Status setTensorLocations(
 // Helper for deserializing INetwork
 template <typename T>
 Status setStringMap(
-    IImporterContext* ctx, std::vector<std::string> const& tensors, std::vector<T> const& data, string_map<T>& map)
+    IImporterContext* ctx, std::vector<std::string> const& tensors, std::vector<T> const& data, StringMap<T>& map)
 {
     ASSERT((tensors.size() >= data.size())
             && "The size of tensors misaligns with the size of the attribute trt_outputs_range_min/max.",
@@ -105,6 +105,144 @@ static std::string makeErrorExplanation(std::exception const& e, std::string con
     return result.str();
 }
 
+Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, bool deserializingINetwork)
+{
+    StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
+    std::string const& nodeName = getNodeName(node);
+    std::string const& nodeType = node.op_type();
+    LOG_VERBOSE("Parsing node: " << nodeName << " [" << nodeType << "]");
+
+    // Assemble node inputs. These may come from outside the subgraph.
+    std::vector<TensorOrWeights> nodeInputs;
+    std::ostringstream ssInputs{};
+    ssInputs << nodeName << " [" << nodeType << "] inputs: ";
+    for (auto const& inputName : node.input())
+    {
+        // Empty input names indicate optional inputs which have not been supplied.
+        if (inputName.empty())
+        {
+            // Push back null input as place holder.
+            nodeInputs.emplace_back(nullptr);
+            ssInputs << "[optional input, not set], ";
+        }
+        else
+        {
+            LOG_VERBOSE("Searching for input: " << inputName);
+            ASSERT( (ctx->tensors().count(inputName)) && "Node input was not registered.", ErrorCode::kINVALID_GRAPH);
+            nodeInputs.push_back(ctx->tensors().at(inputName));
+            ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "["
+                        << nodeInputs.back().getType() << "]"
+                        << "], ";
+        }
+    }
+    LOG_VERBOSE(ssInputs.str());
+
+    // Dispatch to appropriate converter.
+    NodeImporter const* importFunc{nullptr};
+    if (opImporters.count(nodeType))
+    {
+        importFunc = &opImporters.at(nodeType);
+    }
+    else if (ctx->localFunctions().count(nodeType))
+    {
+        LOG_INFO("Found regisitered local function: " << nodeType << ". Importing as a local function.");
+        importFunc = &opImporters.at("LocalFunctionImporter");
+    }
+    else
+    {
+        LOG_INFO("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
+        importFunc = &opImporters.at("FallbackPluginImporter");
+    }
+    std::vector<TensorOrWeights> outputs;
+
+    try
+    {
+        GET_VALUE((*importFunc)(ctx, node, nodeInputs), &outputs);
+    }
+    catch (std::exception const& e)
+    {
+        return MAKE_ERROR(makeErrorExplanation(e, nodeName), ErrorCode::kINVALID_NODE);
+    }
+    if (ctx->hasError())
+    {
+        return MAKE_ERROR(makeErrorExplanation(ctx, nodeName), ErrorCode::kINVALID_NODE);
+    }
+
+    for (auto const& output : outputs)
+    {
+        if (output.is_tensor())
+        {
+            // check that we can resolve output dims
+            // in the future we may have a network/layer.validate() which will help with that as well
+            output.tensor().getDimensions();
+
+            if (ctx->hasError())
+            {
+                return MAKE_ERROR(makeErrorExplanation(ctx, nodeName), ErrorCode::kINVALID_NODE);
+            }
+        }
+    }
+
+    if (deserializingINetwork)
+    {
+        OnnxAttrs attrs(node, ctx);
+
+        // Tensor locations, dynamic ranges and layer precisions will be set after parsing the network
+        std::vector<std::string> outputsLocation = attrs.get<std::vector<std::string>>("trt_outputs_loc", {});
+        std::vector<std::string> outputsVec(node.output().begin(), node.output().end());
+        std::vector<std::string> layerName{nodeName};
+        CHECK(setTensorLocations(ctx, outputsVec, outputsLocation));
+
+        auto outputsRangeMin = attrs.get<std::vector<float>>("trt_outputs_range_min", {});
+        CHECK(setStringMap<float>(ctx, outputsVec, outputsRangeMin, ctx->tensorRangeMins()));
+        auto outputsRangeMax = attrs.get<std::vector<float>>("trt_outputs_range_max", {});
+        CHECK(setStringMap<float>(ctx, outputsVec, outputsRangeMax, ctx->tensorRangeMaxes()));
+
+        if (attrs.count("trt_layer_precision"))
+        {
+            std::vector<nvinfer1::DataType> layerPrecision{attrs.get<nvinfer1::DataType>("trt_layer_precision")};
+            CHECK(setStringMap<nvinfer1::DataType>(ctx, layerName, layerPrecision, ctx->layerPrecisions()));
+        }
+    }
+
+    ASSERT((node.output().size() <= static_cast<int32_t>(outputs.size()))
+            && "Node has more output tensors than TRT expected.",
+        ErrorCode::kINVALID_GRAPH);
+
+    // Set output names and register outputs with the context.
+    std::ostringstream ssOutputs{};
+    ssOutputs << nodeName << " [" << node.op_type() << "] outputs: ";
+    for (int32_t i = 0; i < node.output().size(); ++i)
+    {
+        auto const& outputName = node.output(i);
+        auto& output = outputs.at(i);
+        ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]"
+                    << "], ";
+        // Note: This condition is to allow ONNX outputs to be ignored
+        // Always register output weights (even empty ones) as it may be mapped to an unused input
+        if ((output || output.is_weights()) && !outputName.empty())
+        {
+            ctx->registerTensor(std::move(output), outputName);
+        }
+        // UINT8 is only allowed as network inputs and outputs. Therefore any node that produces an UINT8-typed
+        // output that is not also a graph output is unsupported.
+        if (output.getType() == "UINT8")
+        {
+            bool legalUINT8 = false;
+            for (auto const& graphOutput : ctx->getGraphOutputNames())
+            {
+                if (graphOutput.name() == outputName)
+                {
+                    legalUINT8 = true;
+                }
+            }
+            ASSERT(legalUINT8 && "TensorRT does not support UINT8 types for intermediate tensors!", ErrorCode::kUNSUPPORTED_NODE);
+        }
+    }
+    LOG_VERBOSE(ssOutputs.str());
+    return Status::success();
+}
+
 Status parseGraph(
     IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork, int* currentNode)
 {
@@ -116,145 +254,24 @@ Status parseGraph(
         ASSERT(convertOnnxWeights(initializer, &weights, ctx) && "Failed to import initializer.", ErrorCode::kUNSUPPORTED_NODE);
         ctx->registerTensor(TensorOrWeights{std::move(weights)}, initializer.name());
     }
+    // Keep track of graph outputs in the context to validate UINT8 nodes
+    for (const auto& output : graph.output())
+    {
+        ctx->getGraphOutputNames().push_back(output);
+    }
 
     std::vector<size_t> topoOrder;
     ASSERT(toposort(graph.node(), &topoOrder) && "Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH);
 
-    string_map<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
     for (auto const& nodeIndex : topoOrder)
     {
         if (currentNode)
         {
             *currentNode = nodeIndex;
         }
-        auto const& node = graph.node(nodeIndex);
-        std::string const& nodeName = getNodeName(node);
-        LOG_VERBOSE("Parsing node: " << nodeName << " [" << node.op_type() << "]");
-
-        // Assemble node inputs. These may come from outside the subgraph.
-        std::vector<TensorOrWeights> nodeInputs;
-        std::ostringstream ssInputs{};
-        ssInputs << nodeName << " [" << node.op_type() << "] inputs: ";
-        for (auto const& inputName : node.input())
-        {
-            // Empty input names indicate optional inputs which have not been supplied.
-            if (inputName.empty())
-            {
-                // Push back null input as place holder.
-                nodeInputs.emplace_back(nullptr);
-                ssInputs << "[optional input, not set], ";
-            }
-            else
-            {
-                LOG_VERBOSE("Searching for input: " << inputName);
-                ASSERT( (ctx->tensors().count(inputName)) && "Node input was not registered.", ErrorCode::kINVALID_GRAPH);
-                nodeInputs.push_back(ctx->tensors().at(inputName));
-                ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "["
-                         << nodeInputs.back().getType() << "]"
-                         << "], ";
-            }
-        }
-        LOG_VERBOSE(ssInputs.str());
-
-        // Dispatch to appropriate converter.
-        NodeImporter const* importFunc{nullptr};
-        if (opImporters.count(node.op_type()))
-        {
-            importFunc = &opImporters.at(node.op_type());
-        }
-        else
-        {
-            LOG_INFO("No importer registered for op: " << node.op_type() << ". Attempting to import as plugin.");
-            importFunc = &opImporters.at("FallbackPluginImporter");
-        }
-        std::vector<TensorOrWeights> outputs;
-
-        try
-        {
-            GET_VALUE((*importFunc)(ctx, node, nodeInputs), &outputs);
-        }
-        catch (std::exception const& e)
-        {
-            return MAKE_ERROR(makeErrorExplanation(e, nodeName), ErrorCode::kINVALID_NODE);
-        }
-        if (ctx->hasError())
-        {
-            return MAKE_ERROR(makeErrorExplanation(ctx, nodeName), ErrorCode::kINVALID_NODE);
-        }
-
-        for (auto const& output : outputs)
-        {
-            if (output.is_tensor())
-            {
-                // check that we can resolve output dims
-                // in the future we may have a network/layer.validate() which will help with that as well
-                output.tensor().getDimensions();
-
-                if (ctx->hasError())
-                {
-                    return MAKE_ERROR(makeErrorExplanation(ctx, nodeName), ErrorCode::kINVALID_NODE);
-                }
-            }
-        }
-
-        if (deserializingINetwork)
-        {
-            OnnxAttrs attrs(node, ctx);
-
-            // Tensor locations, dynamic ranges and layer precisions will be set after parsing the network
-            std::vector<std::string> outputsLocation = attrs.get<std::vector<std::string>>("trt_outputs_loc", {});
-            std::vector<std::string> outputsVec(node.output().begin(), node.output().end());
-            std::vector<std::string> layerName{nodeName};
-            CHECK(setTensorLocations(ctx, outputsVec, outputsLocation));
-
-            auto outputsRangeMin = attrs.get<std::vector<float>>("trt_outputs_range_min", {});
-            CHECK(setStringMap<float>(ctx, outputsVec, outputsRangeMin, ctx->tensorRangeMins()));
-            auto outputsRangeMax = attrs.get<std::vector<float>>("trt_outputs_range_max", {});
-            CHECK(setStringMap<float>(ctx, outputsVec, outputsRangeMax, ctx->tensorRangeMaxes()));
-
-            if (attrs.count("trt_layer_precision"))
-            {
-                std::vector<nvinfer1::DataType> layerPrecision{attrs.get<nvinfer1::DataType>("trt_layer_precision")};
-                CHECK(setStringMap<nvinfer1::DataType>(ctx, layerName, layerPrecision, ctx->layerPrecisions()));
-            }
-        }
-
-        ASSERT((node.output().size() <= static_cast<int32_t>(outputs.size()))
-                && "Node has more output tensors than TRT expected.",
-            ErrorCode::kINVALID_GRAPH);
-
-        // Set output names and register outputs with the context.
-        std::ostringstream ssOutputs{};
-        ssOutputs << nodeName << " [" << node.op_type() << "] outputs: ";
-        for (int32_t i = 0; i < node.output().size(); ++i)
-        {
-            auto const& outputName = node.output(i);
-            auto& output = outputs.at(i);
-            ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]"
-                      << "], ";
-            // Note: This condition is to allow ONNX outputs to be ignored
-            // Always register output weights (even empty ones) as it may be mapped to an unused input
-            if ((output || output.is_weights()) && !outputName.empty())
-            {
-                ctx->registerTensor(std::move(output), outputName);
-            }
-            // UINT8 is only allowed as network inputs and outputs. Therefore any node that produces an UINT8-typed
-            // output that is not also a graph output is unsupported.
-            if (output.getType() == "UINT8")
-            {
-                bool legalUINT8 = false;
-                for (auto const& graphOutput : graph.output())
-                {
-                    if (graphOutput.name() == outputName)
-                    {
-                        legalUINT8 = true;
-                    }
-                }
-                ASSERT(legalUINT8 && "TensorRT does not support UINT8 types for intermediate tensors!", ErrorCode::kUNSUPPORTED_NODE);
-            }
-        }
-        LOG_VERBOSE(ssOutputs.str());
+        CHECK(parseNode(ctx, graph.node(nodeIndex), deserializingINetwork));
     }
+
     return Status::success();
 }
 
@@ -301,7 +318,7 @@ static Status setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension
 }
 
 Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
-    string_map<TensorOrWeights>* tensors)
+    StringMap<TensorOrWeights>* tensors)
 {
     // The weights come from the Initializer list in onnx graph
     // Initializers are not really network inputs, so they need to be excluded.
@@ -325,6 +342,15 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
     }
 
     return setDimensionNames(ctx, namedDims);
+}
+
+Status importLocalFunctions(ImporterContext* ctx, ::ONNX_NAMESPACE::ModelProto const& model)
+{
+    for (auto const& localFunction : model.functions())
+    {
+        ctx->localFunctions().insert({localFunction.name(), localFunction});
+    }
+    return Status::success();
 }
 
 Status deserialize_onnx_model(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
@@ -570,6 +596,9 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
         mImporterCtx.registerTensor(TensorOrWeights{}, output.name());
     }
 
+    // Import LocalFunctions
+    CHECK(importLocalFunctions(&mImporterCtx, model));
+
     // Propagate OnnxParserFlags down to the importer context.
     mImporterCtx.setFlags(getFlags());
 
@@ -629,8 +658,8 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
     if (model.producer_name() == "TensorRT")
     {
         // iterate over all tensors in the network and add them to "tensors" map
-        string_map<nvinfer1::ITensor*> tensors;
-        string_map<nvinfer1::ILayer*> layers;
+        StringMap<nvinfer1::ITensor*> tensors;
+        StringMap<nvinfer1::ILayer*> layers;
         for (int32_t idx = 0; idx < mImporterCtx.network()->getNbInputs(); ++idx)
         {
             nvinfer1::ITensor* tensor = mImporterCtx.network()->getInput(idx);
@@ -685,11 +714,16 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
                 tensors.at(tensor.first)->setDynamicRange(tensor.second, ctx->tensorRangeMaxes().at(tensor.first));
             }
         }
-        // Set precisions for all layers
-        for (auto const& layer : ctx->layerPrecisions())
+        // Avoid setting layer precision while using strong typing.
+        if (!ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED))
         {
-            ASSERT( (layers.count(layer.first) > 0) && "The layer does not have an assigned precision.", nvonnxparser::ErrorCode::kINVALID_GRAPH);
-            layers.at(layer.first)->setPrecision(layer.second);
+            // Set precisions for all layers.
+            for (auto const& layer : ctx->layerPrecisions())
+            {
+                ASSERT((layers.count(layer.first) > 0) && "The layer does not have an assigned precision.",
+                    nvonnxparser::ErrorCode::kINVALID_GRAPH);
+                layers.at(layer.first)->setPrecision(layer.second);
+            }
         }
     }
 
@@ -766,8 +800,7 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity)
                 {
                     ::ONNX_NAMESPACE::NodeProto const& node = onnx_model.graph().node(error->node());
                     LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \"" << node.output(0) << "\"" << "]:");
-                    LOG_ERROR("--- Begin node ---");
-                    LOG_ERROR(pretty_print_onnx_to_string(node));
+                    LOG_ERROR("--- Begin node ---" << "\n" << pretty_print_onnx_to_string(node));
                     LOG_ERROR("--- End node ---");
                 }
                 LOG_ERROR("ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"

@@ -82,6 +82,15 @@ public:
     // Returns a list of strings corresponding to paths to the used VC plugins on disk.  May throw on error.
     virtual std::vector<std::string> getUsedVCPluginLibraries() = 0;
 
+    //! Returns a map of FunctionProto names : Function protos.
+    virtual StringMap<::ONNX_NAMESPACE::FunctionProto>& localFunctions() = 0;
+
+    //! Return current list of local functions
+    virtual std::vector<std::string>& localFunctionStack() = 0;
+
+    //! Return output names of the ONNX graph
+    virtual std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames() = 0;
+
 protected:
     virtual ~IImporterContext() {}
 };
