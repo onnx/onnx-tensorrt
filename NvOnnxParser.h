@@ -89,9 +89,9 @@ using OnnxParserFlags = uint32_t;
 enum class OnnxParserFlag : int32_t
 {
     //! Parse the ONNX model into the INetworkDefinition with the intention of using TensorRT's native layer
-    //! implementation over the plugin implementation for InstanceNormalization nodes. This flag is planned to be
-    //! deprecated in TensorRT 8.7 and removed in TensorRT 9.0. This flag is required when building version-compatible
-    //! or hardware-compatible engines. There may be performance degradations when this flag is enabled.
+    //! implementation over the plugin implementation for InstanceNormalization nodes.
+    //! This flag is required when building version-compatible or hardware-compatible engines.
+    //! There may be performance degradations when this flag is enabled.
     kNATIVE_INSTANCENORM = 0
 };
 
@@ -223,7 +223,7 @@ public:
     //!
     //!\brief destroy this object
     //!
-    //! \warning deprecated and planned on being removed in TensorRT 10.0
+    //! \warning deprecated
     //!
     TRT_DEPRECATED virtual void destroy() = 0;
 

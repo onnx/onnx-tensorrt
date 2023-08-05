@@ -27,9 +27,9 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 #--------------------------------------------------
 # Version information
 #--------------------------------------------------
-set(ONNX2TRT_MAJOR 8)
-set(ONNX2TRT_MINOR 6)
-set(ONNX2TRT_PATCH 1)
+set(ONNX2TRT_MAJOR 9)
+set(ONNX2TRT_MINOR 0)
+set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------
@@ -49,6 +49,7 @@ set(IMPORTER_SOURCES
   RNNHelpers.cpp
   OnnxAttrs.cpp
   ConditionalHelpers.cpp
+  bfloat16.cpp
 )
 
 if (BUILD_ONNXIFI)

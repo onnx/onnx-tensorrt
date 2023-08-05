@@ -20,6 +20,12 @@ int OnnxAttrs::get<int>(const std::string& key) const
 }
 
 template <>
+int64_t OnnxAttrs::get<int64_t>(const std::string& key) const
+{
+    return this->at(key)->i();
+}
+
+template <>
 bool OnnxAttrs::get<bool>(const std::string& key) const
 {
     int value = this->at(key)->i();

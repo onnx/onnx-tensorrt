@@ -65,12 +65,6 @@ void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& 
         }
         else if (tensor.is_weights())
         {
-            auto const& weights = tensor.weights();
-            if (tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
-            {
-                tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
-                    convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, this), weights.shape};
-            }
             // It may be possible for nested subgraphs to have different values for the same initializer.
             // For multiple name scopes - use unique name to keep track of weights.
             if (!mBaseNameScopeStack.empty())
@@ -118,7 +112,14 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
         std::string const& uniqueName = generateUniqueName(mLayerNames, name);
 
         auto* ctx = this; // To enable logging.
-        LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
+        if (node != nullptr)
+        {
+            LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
+        }
+        else
+        {
+            LOG_VERBOSE("Registering layer: " << uniqueName << " required by ONNX-TRT");
+        }
 
         layer->setName(uniqueName.c_str());
         if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
@@ -133,7 +134,7 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
     }
     if (node != nullptr)
     {
-        processMetadata(*node, layer);
+        processMetadata(this, *node, layer);
     }
 }
 

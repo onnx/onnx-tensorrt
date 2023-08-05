@@ -8,10 +8,11 @@
 #include "NvInferPlugin.h"
 #include "NvOnnxParser.h"
 #include "builtin_op_importers.hpp"
-#include "utils.hpp"
 
 namespace onnx2trt
 {
+
+Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, bool deserializingINetwork = false);
 
 Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork = false,
     int32_t* currentNode = nullptr);
@@ -19,7 +20,7 @@ Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gra
 class ModelImporter : public nvonnxparser::IParser
 {
 protected:
-    string_map<NodeImporter> _op_importers;
+    StringMap<NodeImporter> _op_importers;
     virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model);
 
 private:

@@ -114,6 +114,15 @@ class ImporterContext final : public IImporterContext
     //!
     std::vector<StringMap<std::pair<bool, TensorOrWeights>>> mBaseNameScopeStack;
 
+    //! Map holding FunctionProtos
+    StringMap<::ONNX_NAMESPACE::FunctionProto> mLocalFunctions;
+
+    //! Vector to hold current local function names
+    std::vector<std::string> mLocalFunctionStack;
+
+    //! Vector to hold expected graph outputs
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphOutputNames;
+
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
@@ -123,6 +132,7 @@ public:
     }
     nvinfer1::INetworkDefinition* network() override
     {
+        assert(mNetwork != nullptr);
         return mNetwork;
     }
     StringMap<TensorOrWeights>& tensors() override
@@ -321,6 +331,18 @@ public:
     void setConvertDoubleOutOfBoundsLogged(bool logged)
     {
         mConvertDoubleOutOfBoundsLogged = logged;
+    }
+    StringMap<::ONNX_NAMESPACE::FunctionProto>& localFunctions() override
+    {
+        return mLocalFunctions;
+    }
+    std::vector<std::string>& localFunctionStack() override
+    {
+        return mLocalFunctionStack;
+    }
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames() override
+    {
+        return mGraphOutputNames;
     }
 
 private:
