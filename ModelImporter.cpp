@@ -337,6 +337,10 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
             nvinfer1::ITensor* tensor_ptr{nullptr};
             CHECK(importInput(ctx, input, &tensor_ptr, namedDims));
             tensor = tensor_ptr;
+            if (tensor_ptr->getType() == nvinfer1::DataType::kINT64)
+            {
+                LOG_WARNING("Make sure input " << input.name() << " has Int64 binding.");
+            }
         }
         ctx->registerTensor(std::move(tensor), input.name());
     }
@@ -636,11 +640,16 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
                     && "Failed to convert ONNX date type to TensorRT data type.",
                 ErrorCode::kUNSUPPORTED_NODE);
             // For INT32 data type, output type must match tensor type
-            ASSERT( (output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
-                    || output_trt_dtype == nvinfer1::DataType::kINT32) && "For INT32 tensors, the output type must also be INT32.",
+            ASSERT((output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
+                       || output_trt_dtype == nvinfer1::DataType::kINT32)
+                    && "For INT32 tensors, the output type must also be INT32.",
                 ErrorCode::kUNSUPPORTED_NODE);
             // Note: Without this, output type is always float32
             output_tensor_ptr->setType(output_trt_dtype);
+            if (output_trt_dtype == nvinfer1::DataType::kINT64)
+            {
+                LOG_WARNING("Make sure output " << output.name() << " has Int64 binding.");
+            }
         }
     }
     // Return user-requested output tensors
@@ -714,7 +723,7 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
                 tensors.at(tensor.first)->setDynamicRange(tensor.second, ctx->tensorRangeMaxes().at(tensor.first));
             }
         }
-        // Avoid setting layer precision while using strong typing.
+        // Avoid setting layer precision if graph is strongly typed.
         if (!ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED))
         {
             // Set precisions for all layers.

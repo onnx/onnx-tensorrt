@@ -85,8 +85,8 @@ public:
     //! Returns a map of FunctionProto names : Function protos.
     virtual StringMap<::ONNX_NAMESPACE::FunctionProto>& localFunctions() = 0;
 
-    //! Return current list of local functions
-    virtual std::vector<std::string>& localFunctionStack() = 0;
+    //! Return current list of local functions and corresponding attributes
+    virtual std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>>& localFunctionStack() = 0;
 
     //! Return output names of the ONNX graph
     virtual std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames() = 0;
