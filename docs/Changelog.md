@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 9.0 GA Release - 2023-9-5
+For more details, see the 9.0 GA release notes for the fixes since 9.0 EA.
+
+- Added support for FP8 and BF16 datatypes.
+- Fixed a bug that previously caused `If` nodes to fail import due to branch output size mismatch
+- Improved support for importing ONNX Local Functions
+
 # TensorRT 9.0 EA Release - 2023-8-4
 For more details, see the 9.0 EA release notes for the fixes since 8.6 GA.
 

@@ -403,6 +403,8 @@ Status weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightV
     return Status(ErrorCode::kSUCCESS);
 }
 
+NodeImportResult staticSliceImporter(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ITensor& data);
+
 template <typename T>
 ShapedWeights::DataType getShapedWeightsDataType()
 {
@@ -484,6 +486,9 @@ private:
 
 // Helper function to convert weightValues' type from fp16 to fp32
 float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
+
+// Helper function to get fp32 representation of fp16 or fp32 weights
+float* getFP32Values(ShapedWeights const& w, IImporterContext* ctx);
 
 // Helper function to validate input types for an ONNX node
 Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes);

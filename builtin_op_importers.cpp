@@ -256,15 +256,10 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     auto const variance = inputs.at(4).weights();
 
     // get the values of constant inputs and cast them to float32
-    auto const getValuesFP32 = [&](ShapedWeights const& w) -> float const* {
-        return (w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT) ? static_cast<float*>(w.values)
-                                                                : convertFP16Data(w.values, w.shape, ctx);
-    };
-
-    float const* scaleValues = getValuesFP32(scale);
-    float const* biasValues = getValuesFP32(bias);
-    float const* meanValues = getValuesFP32(mean);
-    float const* varianceValues = getValuesFP32(variance);
+    float const* scaleValues = getFP32Values(scale, ctx);
+    float const* biasValues = getFP32Values(bias, ctx);
+    float const* meanValues = getFP32Values(mean, ctx);
+    float const* varianceValues = getFP32Values(variance, ctx);
 
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
 
@@ -562,6 +557,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Concat)
 DEFINE_BUILTIN_OP_IMPORTER(Constant)
 {
     OnnxAttrs attrs(node, ctx);
+
     // Having the trt_outputs_range_min attributes means it's from
     // serialized iNetworkDefinition.
     if (!attrs.get<std::vector<float>>("trt_outputs_range_min", {}).empty())
@@ -1185,7 +1181,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
 
     std::string nodeName = getNodeName(node);
     // Input 0 is the data to quantize or dequantize.
-    nvinfer1::ITensor& dataInput = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* dataInput = &convertToTensor(inputs.at(0), ctx);
 
     // Input 1 initializes the layer's scale weights.
     nvinfer1::ITensor* scaleInput = nullptr;
@@ -1278,7 +1274,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
     }
 
     OnnxAttrs attrs(node, ctx);
-    int32_t const nbDims = dataInput.getDimensions().nbDims;
+    int32_t const nbDims = dataInput->getDimensions().nbDims;
     int32_t axis = attrs.get<int32_t>("axis", nbDims);
     CHECK(convertAxis(axis, nbDims));
 
@@ -1292,7 +1288,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
             axis = 0;
         }
         // Ensure that number of scale-coefficients is equal to the number of output channels.
-        int64_t K = dataInput.getDimensions().d[axis];
+        int64_t const K = dataInput->getDimensions().d[axis];
         ASSERT(K == scaleSize && "The number of scales is not equal to the number of output channels.",
             nvonnxparser::ErrorCode::kINVALID_NODE);
     }
@@ -1302,6 +1298,12 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         // Currently axis is ignored by TRT, but it is required here by addScaleNd (for computing nbSpatialDims). Set to
         // a sane default depending on rank the input tensor.
         axis = nbDims <= 1 ? 0 : 1;
+    }
+
+    // TRT does not support scalar data input for Q/DQ layers, convert 0-D tensor to 1-D first.
+    if (nbDims == 0)
+    {
+        dataInput = reshapeTensor(ctx, *dataInput, nvinfer1::Dims{1, {1}});
     }
 
     nvinfer1::ILayer* layer = nullptr;
@@ -1316,7 +1318,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         if (stronglyTyped)
         {
             // Input type is inferred. Layer output type is specified with scaleType.
-            nvinfer1::IDequantizeLayer* dq = ctx->network()->addDequantize(dataInput, *scaleInput, scaleType);
+            nvinfer1::IDequantizeLayer* dq = ctx->network()->addDequantize(*dataInput, *scaleInput, scaleType);
             ASSERT(dq && "Failed to create Dequantize layer.", ErrorCode::kUNSUPPORTED_NODE);
             dq->setAxis(axis);
             layer = dq;
@@ -1324,7 +1326,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         else
         {
             // Use legacy API for weakly typed network.
-            nvinfer1::IDequantizeLayer* dq = ctx->network()->addDequantize(dataInput, *scaleInput);
+            nvinfer1::IDequantizeLayer* dq = ctx->network()->addDequantize(*dataInput, *scaleInput);
             ASSERT(dq && "Failed to create Dequantize layer.", ErrorCode::kUNSUPPORTED_NODE);
             dq->setAxis(axis);
             layer = dq;
@@ -1339,8 +1341,13 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         // Add and configure a QuantizeLayer.
         if (stronglyTyped)
         {
+            if (ctx->getOpsetVersion() < 19 && scaleInput->getType() != dataInput->getType())
+            {
+                // Ensure that Q scale type matches input type.
+                scaleInput = ctx->network()->addCast(*scaleInput, dataInput->getType())->getOutput(0);
+            }
             // Input type is inferred. Layer output type is specified with chosenDataType.
-            nvinfer1::IQuantizeLayer* q = ctx->network()->addQuantize(dataInput, *scaleInput, chosenDataType);
+            nvinfer1::IQuantizeLayer* q = ctx->network()->addQuantize(*dataInput, *scaleInput, chosenDataType);
             ASSERT(q && "Failed to create Quantize layer.", ErrorCode::kUNSUPPORTED_NODE);
             q->setAxis(axis);
             layer = q;
@@ -1348,7 +1355,7 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         else
         {
             // Use legacy API for weakly typed network.
-            nvinfer1::IQuantizeLayer* q = ctx->network()->addQuantize(dataInput, *scaleInput);
+            nvinfer1::IQuantizeLayer* q = ctx->network()->addQuantize(*dataInput, *scaleInput);
             ASSERT(q && "Failed to create Quantize layer.", ErrorCode::kUNSUPPORTED_NODE);
             q->setAxis(axis);
             layer = q;
@@ -2284,8 +2291,8 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
     conditional->setCondition(*condTensor);
 
     std::vector<nvinfer1::ILayer*> thenLayers, elseLayers;
-    StringMap<TensorOrWeights> thenSubgraphTensors;
-    StringMap<TensorOrWeights> elseSubgraphTensors;
+    std::vector<TensorOrWeights> thenSubgraphTensors;
+    std::vector<TensorOrWeights> elseSubgraphTensors;
     CHECK(importSubgraph(ctx, thenGraph, thenLayers, thenSubgraphTensors));
     CHECK(importSubgraph(ctx, elseGraph, elseLayers, elseSubgraphTensors));
 
@@ -2293,8 +2300,19 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
     InputsMap inputsMap;
     CHECK(addIfInputLayers(ctx, conditional, inputsMap, thenLayers));
     CHECK(addIfInputLayers(ctx, conditional, inputsMap, elseLayers));
-    CHECK(addIfOutputLayers(ctx, conditional, thenGraph, thenLayers, thenSubgraphTensors, elseGraph, elseLayers,
-        elseSubgraphTensors, graphOutputs));
+
+    ASSERT(thenSubgraphTensors.size() == elseSubgraphTensors.size()
+            && "Found different number of output tensors in If conditional subgraphs!",
+        ErrorCode::kUNSUPPORTED_NODE);
+
+    for (size_t i = 0; i < thenSubgraphTensors.size(); i++)
+    {
+        auto* thenOut = &convertToTensor(thenSubgraphTensors[i], ctx);
+        auto* elseOut = &convertToTensor(elseSubgraphTensors[i], ctx);
+        auto* outputLayer = conditional->addOutput(*thenOut, *elseOut);
+        ctx->registerLayer(outputLayer, std::string(conditional->getName()) + "_OutputLayer", nullptr);
+        graphOutputs.emplace_back(outputLayer->getOutput(0));
+    }
 
     return {graphOutputs};
 }
@@ -2322,6 +2340,18 @@ DEFINE_BUILTIN_OP_IMPORTER(ImageScaler)
 
 DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
 {
+    auto inputDataType = inputs.at(0).getDataType();
+    auto scaleDataType = inputs.at(1).getDataType();
+    auto biasDataType = inputs.at(2).getDataType();
+
+    ASSERT((inputDataType == DataType::kFLOAT || inputDataType == DataType::kHALF)
+            && "Inputs must be either FLOAT or FLOAT16.",
+        ErrorCode::kINVALID_NODE);
+
+    ASSERT((inputDataType == scaleDataType && scaleDataType == biasDataType)
+            && "Inputs must be either all FLOAT or all FLOAT16.",
+        ErrorCode::kINVALID_NODE);
+
     // Choose plugin implementation for non-VC and non-HC engines, and native implementation
     // for VC and HC engines.
     auto flags = ctx->getFlags();
@@ -2481,8 +2511,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     {
         // Some convertors will use INT_MAX to signify "use cond input as loop termination". From TRT's perspective,
         // we can just treat these cases as an empty tripLimit.
-        bool const isMaxTripCount = inputs[0].is_weights()
-            && static_cast<int32_t*>(inputs[0].weights().values)[0] == std::numeric_limits<int32_t>::max();
+        bool const isMaxTripCount = inputs[0].is_weights() && inputs[0].isInt64()
+            && static_cast<int64_t*>(inputs[0].weights().values)[0]
+                >= static_cast<int64_t>(std::numeric_limits<int32_t>::max());
         if (!isMaxTripCount)
         {
             tripLimit = convertToScalar(ctx, &convertToTensor(inputs[0], ctx));
@@ -3275,6 +3306,14 @@ DEFINE_BUILTIN_OP_IMPORTER(NonMaxSuppression)
     if (inputs.size() >= 3 && !inputs.at(2).isNullTensor())
     {
         maxOutputBoxesPerClassTensorPtr = convertToScalar(inputs.at(2), ctx);
+        // Consider when user chooses int64 max as input, which is reasonable. We need to convert it to int32 max first.
+        nvinfer1::ITensor* int32Max
+            = addConstantScalar(ctx, std::numeric_limits<int32_t>::max(), ::ONNX_NAMESPACE::TensorProto::INT64)
+                  ->getOutput(0);
+        maxOutputBoxesPerClassTensorPtr
+            = ctx->network()
+                  ->addElementWise(*maxOutputBoxesPerClassTensorPtr, *int32Max, nvinfer1::ElementWiseOperation::kMIN)
+                  ->getOutput(0);
         maxOutputBoxesPerClassTensorPtr = castHelper(ctx, maxOutputBoxesPerClassTensorPtr, DataType::kINT32);
         ASSERT(maxOutputBoxesPerClassTensorPtr != nullptr && "The max_output_boxes_per_class tensor must be 0D",
             ErrorCode::kUNSUPPORTED_NODE);
@@ -3775,27 +3814,28 @@ DEFINE_BUILTIN_OP_IMPORTER(Range)
     {
         layer->setAlpha(start[0]);
         layer->setBeta(delta[0]);
-
-        if (!start.isFloat())
-        {
-            // Set output type to INT32 for ranges that should be INT32, since TRT only accepts
-            // double type for setAlpha and setBeta
-            layer->setToType(DataType::kINT32);
-        }
+    }
+    else if (inputs.at(0).is_weights() && inputs.at(2).is_weights() && isInt32)
+    {
+        // For constant int32 start and delta, we can set to layer params directly. 
+        // This might not be required if TRT-20829 is done.
+        layer->setAlpha(inputs.at(0).weights().at<int32_t>(0));
+        layer->setBeta(inputs.at(2).weights().at<int32_t>(0));
     }
     else
     {
         layer->setInput(1, start.tensor(ctx));
         auto* delta1D = &convertTo1D(ctx, delta).tensor(ctx);
         layer->setInput(2, *delta1D);
-        if (isInt32)
-        {
-            layer->setToType(DataType::kINT32);
-        }
-        else if (isInt64)
-        {
-            layer->setToType(DataType::kINT64);
-        }
+    }
+
+    if (isInt32)
+    {
+        layer->setToType(DataType::kINT32);
+    }
+    else if (isInt64)
+    {
+        layer->setToType(DataType::kINT64);
     }
 
     RETURN_FIRST_OUTPUT(layer);
@@ -4015,8 +4055,26 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 
             if (inputs.size() == 4 && !inputs.at(3).isNullTensor())
             {
-                auto* resizeShape = &convertToTensor(inputs.at(3), ctx);
-                layer->setInput(1, *resizeShape);
+                if (inputs.at(3).is_weights())
+                {
+                    ShapedWeights sizeWeights = inputs.at(3).weights();
+                    ASSERT((sizeWeights.shape.nbDims == 1 && sizeWeights.shape.d[0] == inputRank)
+                            && "The shape of sizes must align with input data.",
+                        ErrorCode::kINVALID_NODE);
+                    int32_t* sizeValues
+                        = convertINT64(static_cast<int64_t*>(sizeWeights.values), {1, {inputRank}}, ctx);
+                    nvinfer1::Dims resizeShape{inputRank, {}};
+                    for (int32_t i = 0; i < inputRank; i++)
+                    {
+                        resizeShape.d[i] = sizeValues[i];
+                    }
+                    layer->setOutputDimensions(resizeShape);
+                }
+                else
+                {
+                    auto* resizeShape = &convertToTensor(inputs.at(3), ctx);
+                    layer->setInput(1, *resizeShape);
+                }
                 layer->setResizeMode(resizeMode);
                 RETURN_FIRST_OUTPUT(layer);
             }
@@ -4662,6 +4720,19 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
     // If opset version >= 10 slice parameters are weights instead of attributes.
     if (ctx->getOpsetVersion() >= 10)
     {
+        auto isWeightsOrEmpty = [&inputs, &nbInputs](int32_t index)
+        {
+            return nbInputs <= index || inputs.at(index).is_weights();
+        };
+
+        auto isInt32 = inputs.at(1).isInt32();
+
+        // Fast path for all INT32 constants. Required for safety engines that do not support INT64.
+        if (isInt32 && isWeightsOrEmpty(1) && isWeightsOrEmpty(2) && isWeightsOrEmpty(3) && isWeightsOrEmpty(4) && !isDynamic(data.getDimensions()))
+        {
+            return staticSliceImporter(ctx, node, inputs, data);
+        }
+
         ASSERT((nbInputs >= 3 && nbInputs <= 5) && "Post-opset 10 Slice operator requires 3 - 5 inputs.",
             ErrorCode::kUNSUPPORTED_NODE);
         nvinfer1::ITensor* input1 = castHelper(ctx, &convertToTensor(inputs.at(1), ctx), DataType::kINT64);
@@ -5570,11 +5641,11 @@ DEFINE_BUILTIN_OP_IMPORTER(NonZero)
 {
     nvinfer1::ITensor* x = &convertToTensor(inputs.at(0), ctx);
     auto const t = x->getType();
-    ASSERT((t == DataType::kFLOAT || t == DataType::kHALF || t == DataType::kBF16 || t == DataType::kINT32 || t == DataType::kINT8 || t == DataType::kBOOL)
-        && "Only FLOAT32, FLOAT16, BFLOAT16, INT32, INT8 or BOOL input is supported for the NonZero operator in this version of TensorRT", ErrorCode::kUNSUPPORTED_NODE);
+    ASSERT((t == DataType::kFLOAT || t == DataType::kHALF || t == DataType::kBF16 || t == DataType::kINT32 || t == DataType::kINT64 || t == DataType::kINT8 || t == DataType::kBOOL)
+        && "Only FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, INT8 or BOOL input is supported for the NonZero operator in this version of TensorRT", ErrorCode::kUNSUPPORTED_NODE);
     auto* layer = ctx->network()->addNonZero(*x);
     ctx->registerLayer(layer, node);
-    RETURN_FIRST_OUTPUT(layer);
+    return {{castHelper(ctx, layer->getOutput(0), DataType::kINT64)}};
 }
 
 // Any ops that are not supported will attempt to import as plugins.
@@ -5638,8 +5709,23 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
         ASSERT(ctx->tensors().count(insideScopeName) && "Could not find mapping of local function input!", ErrorCode::kINVALID_NODE);
     }
 
-    // Push current function name to top of stack in order to properly set layer metadata
-    ctx->localFunctionStack().push_back(node.op_type());
+    // Create attribute map for the local function instance. Attributes can have default values (from the parent FunctionProto)
+    // or local values (from the NodeProto instance of the Function).
+    
+    StringMap<::ONNX_NAMESPACE::AttributeProto const*> attrMap;
+    // Add local values first as they override any default values.
+    for (auto const& attr : node.attribute())
+    {
+        attrMap.insert({attr.name(), &attr});
+    }
+    // Add default values
+    for (auto const& attr : function.attribute_proto())
+    {
+        attrMap.insert({attr.name(), &attr});
+    }
+
+    // Push current function name to top of stack in order to properly set layer metadata and track attributes
+    ctx->localFunctionStack().push_back({node.op_type(), attrMap});
     for (auto const& node : function.node())
     {
         CHECK(onnx2trt::parseNode(ctx, node));

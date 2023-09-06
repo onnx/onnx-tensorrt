@@ -369,15 +369,6 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
 
 int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImporterContext* ctx)
 {
-    auto ctxImpl = static_cast<ImporterContext*>(ctx);
-    if (!ctxImpl->isConvertINT64Logged())
-    {
-        LOG_WARNING(
-            "Your ONNX model has been generated with INT64 weights, while TensorRT does not natively support INT64. "
-            "Attempting to cast down to INT32.");
-        ctxImpl->setConvertINT64Logged(true);
-    }
-
     const size_t nbWeights = volume(shape);
     int32_t* int32Weights{
         reinterpret_cast<int32_t*>(ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, shape).values)};
@@ -398,10 +389,9 @@ int32_t* convertINT64(const int64_t* weightValues, nvinfer1::Dims shape, IImport
             int32Weights[i] = static_cast<int32_t>(weightValues[i]);
         }
     }
-    if (outOfBounds && !ctxImpl->isConvertINT64OutOfBoundsLogged())
+    if (outOfBounds)
     {
         LOG_WARNING("One or more weights outside the range of INT32 was clamped");
-        ctxImpl->setConvertINT64OutOfBoundsLogged(true);
     }
 
     return int32Weights;
@@ -1256,6 +1246,82 @@ std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(const std::stri
     return std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter>{pluginCreator->createPlugin(name.c_str(), &fc)};
 }
 
+NodeImportResult staticSliceImporter(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ITensor& data)
+{
+
+    auto const nbInputs = inputs.size();
+    nvinfer1::Dims inputDims = data.getDimensions();
+    auto const nbDims = inputDims.nbDims;
+
+    // Create start, sizes, and steps with default values
+    nvinfer1::Dims starts{nbDims, {}};
+    nvinfer1::Dims sizes{nbDims, {}};
+    nvinfer1::Dims steps{nbDims, {}};
+
+    for (int32_t i = 0; i < nbDims; i++)
+    {
+        starts.d[i] = 0;
+        sizes.d[i] = inputDims.d[i];
+        steps.d[i] = 1;
+    }
+
+    // Default axes / steps values
+    std::vector<int32_t> defaultAxes(nbDims);
+    std::iota(defaultAxes.begin(), defaultAxes.end(), 0);
+    std::vector<int32_t> defaultSteps(nbDims, 1);
+
+    // Get int32 pointer representation of ONNX provided values
+    int32_t* startVals = static_cast<int32_t*>(inputs.at(1).weights().values);
+    int32_t* endVals =  static_cast<int32_t*>(inputs.at(2).weights().values);
+    int32_t* axesVals = nbInputs > 3 ? static_cast<int32_t*>(inputs.at(3).weights().values) : defaultAxes.data();
+    int32_t* stepVals = nbInputs > 4 ? static_cast<int32_t*>(inputs.at(4).weights().values) : defaultSteps.data();
+
+    // Handle non-standard values for slice
+    // Start values must in range of [0, dims.d[i]] for + steps, [0, dims.d[i] - 1] for - steps
+    auto convertStarts = [](int32_t start, int32_t upper, int32_t stepSign)
+    {
+        int32_t newStarts = start < 0 ? start + upper : start;
+        newStarts = std::min(std::max(newStarts, 0), upper + stepSign);
+        return newStarts;
+    };
+
+    // End values must in range of [0, dims.d[i]] for + steps, [-1, dims.d[i]] for - steps
+    auto convertEnds = [](int32_t end, int32_t upper, int32_t stepSign)
+    {
+        int32_t newEnds = end < 0 ? end + upper : end;
+        newEnds = std::min(std::max(newEnds, stepSign), upper);
+        return newEnds;
+    };
+    // Axes values must in range of [0, nbDims]
+    auto convertAxes = [&nbDims](int32_t axis)
+    {
+        return axis < 0 ? axis + nbDims : axis;
+    };
+
+    // Since axes can be sparse, get the expected number of provided values
+    auto const nbValues = inputs.at(1).shape().d[0];
+
+    for (int32_t i = 0; i < nbValues; i++)
+    {
+        auto axesIndex = convertAxes(axesVals[i]);
+        // Modify starts
+        int32_t stepSign = stepVals[i] < 0 ? -1 : 0;
+        starts.d[axesIndex] = convertStarts(startVals[i], inputDims.d[axesIndex], stepSign);
+        // Modify ends
+        int32_t modifiedEnds = convertEnds(endVals[i], inputDims.d[axesIndex], stepSign);
+        steps.d[axesIndex] = stepVals[i];
+        // Perform ceil integer division of (ends - starts) / steps to compute sizes.
+        // Note ceil(x/y) = (x+y-1) / y for postive x & y, and ceil(x/y) = (x+y+1)/y for negative x&y
+        // Negative sizes indicates an empty slice, so clamp to 0
+        sizes.d[axesIndex] = std::max((modifiedEnds - starts.d[axesIndex] + steps.d[axesIndex] - (steps.d[axesIndex] > 0 ? 1 : -1)) / steps.d[axesIndex], 0);
+    }
+
+    auto* slice = ctx->network()->addSlice(data, starts, sizes, steps);
+    ASSERT(slice && "Failed to import static slice node!", ErrorCode::kUNSUPPORTED_NODE);
+    ctx->registerLayer(slice, node);
+    return {{slice->getOutput(0)}};
+}
+
 bool isDynamic(const nvinfer1::Dims& shape)
 {
     return std::any_of(shape.d, shape.d + shape.nbDims, [](int dim) { return dim < 0; });
@@ -1293,9 +1359,14 @@ NodeImportResult instanceNormPluginHelper(
     std::string const pluginName = "InstanceNormalization_TRT";
     std::string const pluginVersion = "1";
     std::vector<nvinfer1::PluginField> f;
+
+    // get the values of constant inputs and cast them to float32
+    float const* scaleValues = getFP32Values(scale_weights, ctx);
+    float const* biasValues = getFP32Values(bias_weights, ctx);
+
     f.emplace_back("epsilon", &epsilon, nvinfer1::PluginFieldType::kFLOAT32, 1);
-    f.emplace_back("scales", scale_weights.values, nvinfer1::PluginFieldType::kFLOAT32, scale_weights.count());
-    f.emplace_back("bias", bias_weights.values, nvinfer1::PluginFieldType::kFLOAT32, bias_weights.count());
+    f.emplace_back("scales", scaleValues, nvinfer1::PluginFieldType::kFLOAT32, scale_weights.count());
+    f.emplace_back("bias", biasValues, nvinfer1::PluginFieldType::kFLOAT32, bias_weights.count());
     f.emplace_back("relu", &relu, nvinfer1::PluginFieldType::kINT32, 1);
     f.emplace_back("alpha", &alpha, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
@@ -2306,6 +2377,14 @@ float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContex
     return newWeights;
 }
 
+float* getFP32Values(ShapedWeights const& w, IImporterContext* ctx)
+{
+    assert((w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT || w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
+        && "Conversion only valid from FLOAT or FLOAT16");
+    return (w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT) ? static_cast<float*>(w.values)
+                                                            : convertFP16Data(w.values, w.shape, ctx);
+}
+
 std::string filterDocString(std::string const& docString)
 {
     auto splitString = [](auto const& docString) {
@@ -2364,7 +2443,8 @@ Status processMetadata(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const&
     // Get Local Function
     if (!ctx->localFunctionStack().empty())
     {
-        std::string localFunction = " | Local Function: " + ctx->localFunctionStack().back();
+        // Log name only
+        std::string localFunction = " | Local Function: " + ctx->localFunctionStack().back().first;
         filteredDocString += localFunction;
     }
 
