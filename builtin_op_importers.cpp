@@ -1357,7 +1357,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Dropout)
     {
         // Add identity layer twice for both Dropout outputs: (output + mask)
         std::vector<TensorOrWeights> outputs;
-        outputs.push_back(inputs.at(0));
+        outputs.push_back(identity(ctx, inputs.at(0)));
 
         // Add mask tensor, which is the same shape as the input tensor
         auto& inputTensor = inputs.at(0).tensor();
