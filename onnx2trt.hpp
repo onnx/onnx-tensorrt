@@ -27,9 +27,13 @@ class IImporterContext;
 //         Can't use ::onnx::NodeProto
 //         Can't use std::function
 typedef ValueOrStatus<std::vector<TensorOrWeights>> NodeImportResult;
-typedef std::function<NodeImportResult(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs)>
+typedef std::function<NodeImportResult(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)>
     NodeImporter;
+
+typedef std::function<void(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,
+    size_t const nodeIndex)>
+    OpStaticErrorChecker;
 
 template <typename T>
 using StringMap = std::unordered_map<std::string, T>;
@@ -85,8 +89,8 @@ public:
     //! Returns a map of FunctionProto names : Function protos.
     virtual StringMap<::ONNX_NAMESPACE::FunctionProto>& localFunctions() = 0;
 
-    //! Return current list of local functions
-    virtual std::vector<std::string>& localFunctionStack() = 0;
+    //! Return current list of local functions and corresponding attributes
+    virtual std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>>& localFunctionStack() = 0;
 
     //! Return output names of the ONNX graph
     virtual std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames() = 0;

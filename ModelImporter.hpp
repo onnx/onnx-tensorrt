@@ -8,14 +8,16 @@
 #include "NvInferPlugin.h"
 #include "NvOnnxParser.h"
 #include "builtin_op_importers.hpp"
+#include "builtin_op_static_checkers.hpp"
 
 namespace onnx2trt
 {
 
-Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, bool deserializingINetwork = false);
+Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    bool deserializingINetwork = false);
 
-Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork = false,
-    int32_t* currentNode = nullptr);
+Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
+    bool deserializingINetwork = false, int32_t* currentNode = nullptr);
 
 class ModelImporter : public nvonnxparser::IParser
 {

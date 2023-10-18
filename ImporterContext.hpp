@@ -7,7 +7,6 @@
 #include "onnx2trt.hpp"
 #include "onnx2trt_utils.hpp"
 #include "onnxErrorRecorder.hpp"
-#include "onnx/common/stl_backports.h"
 #include <list>
 #include <string>
 #include <unordered_map>
@@ -117,8 +116,8 @@ class ImporterContext final : public IImporterContext
     //! Map holding FunctionProtos
     StringMap<::ONNX_NAMESPACE::FunctionProto> mLocalFunctions;
 
-    //! Vector to hold current local function names
-    std::vector<std::string> mLocalFunctionStack;
+    //! Vector to hold current local function names and attributes
+    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>> mLocalFunctionStack;
 
     //! Vector to hold expected graph outputs
     std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphOutputNames;
@@ -127,7 +126,7 @@ public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
         , mLogger(logger)
-        , mErrorWrapper(ONNX_NAMESPACE::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
+        , mErrorWrapper(std::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
     {
     }
     nvinfer1::INetworkDefinition* network() override
@@ -336,7 +335,7 @@ public:
     {
         return mLocalFunctions;
     }
-    std::vector<std::string>& localFunctionStack() override
+    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>>& localFunctionStack() override
     {
         return mLocalFunctionStack;
     }

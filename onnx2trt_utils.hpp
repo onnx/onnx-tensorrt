@@ -155,14 +155,14 @@ enum ScaleOp
 };
 
 // Helper function to import ONNX activation nodes into TRT
-NodeImportResult activationHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+NodeImportResult activationHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ActivationType op, float* alpha = nullptr, float* beta = nullptr);
 
 // Add clipping to a tensor if clip is a valid value.
 nvinfer1::ITensor* addClip(IImporterContext* ctx, nvinfer1::ITensor* input, float clip);
 
 // Helper function to import ArgMax and ArgMin nodes into TRT
-NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op);
 
 //! If t has rank less than nbDims, reshape it to have nbDims by prepending ones to its dimensions.
@@ -222,8 +222,8 @@ bool convertOnnxWeights(
     const ::ONNX_NAMESPACE::TensorProto& onnxTensor, onnx2trt::ShapedWeights* weights, IImporterContext* ctx);
 
 // Helper function to convert multi input convolution
-NodeImportResult convMultiInput(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs);
+NodeImportResult convMultiInput(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+    std::vector<TensorOrWeights>& inputs);
 
 // Helper function to convert a 1D tensor into a scalar
 nvinfer1::ITensor* convertToScalar(IImporterContext* ctx, nvinfer1::ITensor* inpTensor);
@@ -241,7 +241,7 @@ int divCeil(int n, int d);
 bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op);
 
 // Helper function to import an ONNX elementwise op into TRT
-NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     const std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper function to flatten a tensor on a given axis
@@ -289,14 +289,14 @@ nvinfer1::ITensor* globalPoolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::
 // Helper function to create a greaterOrEqual or lessOrEqual operation. Provide `greater=true` for greaterOrEqual,
 // `greater=false` for lessOrEqual
 nvinfer1::ITensor* greaterLessOrEqual(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
-    nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB, bool greater);
+    size_t const nodeIdx, nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB, bool greater);
 
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(const nvinfer1::Dims& shape);
 
 // Helper function to use optimized 3D instanceNorm plugin
-NodeImportResult instanceNormPluginHelper(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs);
+NodeImportResult instanceNormPluginHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
 
 // Helper fucntion to create an iota fill given a set of dimensions and an axis
 nvinfer1::ITensor* iota(IImporterContext* ctx, ShapeTensor iotaDims, int32_t axis);
@@ -319,8 +319,8 @@ bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation cons
 nvinfer1::Dims makeDims(int nbDims, int val);
 
 // Helper function to create normalization layers for GroupNorm and InstanceNorm
-NodeImportResult normalizationHelper(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights>& inputs);
+NodeImportResult normalizationHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
 
 // Helper function to parse activation values for LSTM nodes
 std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::ActivationType>& activationTypes,
@@ -331,20 +331,20 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
     std::vector<char>& weightsBuf, size_t& size);
 
 // Helper function to map various ONNX pooling ops into TensorRT.
-NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::PoolingType type);
 
 // Helper function to import reduce ops into TRT
-NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, TensorOrWeights input,
-    nvinfer1::ReduceOperation operation, TensorOrWeights inputAxes = TensorOrWeights());
+NodeImportResult reduceTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    TensorOrWeights input, nvinfer1::ReduceOperation operation, TensorOrWeights inputAxes = TensorOrWeights());
 
 // Helper function to shape a Tensor given a new shape
 nvinfer1::ITensor* reshapeTensor(IImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 
 // Helper function to map attributes to a TRT scale layer
-NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& tensor_,
-    nvinfer1::ScaleMode mode, const nvinfer1::Weights& shift, const nvinfer1::Weights& scale,
-    const nvinfer1::Weights& power, const char* shiftName, const char* scaleName);
+NodeImportResult scaleHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+    nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode, const nvinfer1::Weights& shift,
+    const nvinfer1::Weights& scale, const nvinfer1::Weights& power, const char* shiftName, const char* scaleName);
 
 // Helper function to set an ONNX attribute
 void setAttr(
@@ -364,8 +364,8 @@ nvinfer1::ITensor* transposeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
 ::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataType dt);
 
 // Helper function to import ONNX unary ops into TRT
-NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, TensorOrWeights& input,
-    nvinfer1::UnaryOperation op);
+NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+    TensorOrWeights& input, nvinfer1::UnaryOperation op);
 
 // Helper function to unsqueeze tensors on a given set of axes
 nvinfer1::ITensor* unsqueezeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
@@ -402,6 +402,9 @@ Status weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightV
     }
     return Status(ErrorCode::kSUCCESS);
 }
+
+NodeImportResult staticSliceImporter(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs, nvinfer1::ITensor& data);
 
 template <typename T>
 ShapedWeights::DataType getShapedWeightsDataType()
@@ -456,11 +459,12 @@ ShapeTensor axesToInterlaceSubscripts(const ShapeTensor& axes, int nbDims);
 nvinfer1::ITensor* addSoftmax(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor& input);
 
 //! Helper function to import ONNX scatter nodes into TRT
-NodeImportResult addScatterLayer(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
+NodeImportResult addScatterLayer(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+    std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
 
 //! Helper function to calculate mod(A, B), A & B are integers
-nvinfer1::IElementWiseLayer* modWithIntegerInputs(IImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1, bool fmod);
+nvinfer1::IElementWiseLayer* modWithIntegerInputs(
+    IImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1, bool fmod);
 
 //! Helper function to calculate mod(A, B), A & B are floating point numbers
 nvinfer1::IElementWiseLayer* modWithFPInputs(IImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1, nvinfer1::ITensor* divResult, bool sameSign);
@@ -484,6 +488,9 @@ private:
 
 // Helper function to convert weightValues' type from fp16 to fp32
 float* convertFP16Data(void* weightValues, nvinfer1::Dims shape, IImporterContext* ctx);
+
+// Helper function to get fp32 representation of fp16 or fp32 weights
+float* getFP32Values(ShapedWeights const& w, IImporterContext* ctx);
 
 // Helper function to validate input types for an ONNX node
 Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes);

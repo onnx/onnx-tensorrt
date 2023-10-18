@@ -28,7 +28,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 9)
-set(ONNX2TRT_MINOR 0)
+set(ONNX2TRT_MINOR 1)
 set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
@@ -40,14 +40,15 @@ set(IMPORTER_SOURCES
   NvOnnxParser.cpp
   ModelImporter.cpp
   builtin_op_importers.cpp
-  onnx2trt_utils.cpp
-  onnxErrorRecorder.cpp
+  builtin_op_static_checkers.cpp
   ImporterContext.cpp
+  onnx2trt_utils.cpp
   ShapedWeights.cpp
   ShapeTensor.cpp
   LoopHelpers.cpp
   RNNHelpers.cpp
   OnnxAttrs.cpp
+  onnxErrorRecorder.cpp
   ConditionalHelpers.cpp
   bfloat16.cpp
 )
@@ -116,11 +117,18 @@ set_target_properties(nvonnxparser PROPERTIES
   SOVERSION ${ONNX2TRT_MAJOR}
   LINK_DEPENDS ${PARSER_LINKER_SCRIPT}
   LINK_FLAGS "-Wl,--version-script=${PARSER_LINKER_SCRIPT}"
+  ARCHIVE_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
+  LIBRARY_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
 )
 add_library(nvonnxparser_static STATIC ${IMPORTER_SOURCES})
 target_include_directories(nvonnxparser_static PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
 target_link_libraries(nvonnxparser_static PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
-
+set_target_properties(nvonnxparser_static PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
+  LIBRARY_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
+)
 # --------------------------------
 # Onnxifi library
 # --------------------------------

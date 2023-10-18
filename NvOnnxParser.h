@@ -64,7 +64,12 @@ enum class ErrorCode : int
     kINVALID_GRAPH = 5,
     kINVALID_NODE = 6,
     kUNSUPPORTED_GRAPH = 7,
-    kUNSUPPORTED_NODE = 8
+    kUNSUPPORTED_NODE = 8,
+    kUNSUPPORTED_NODE_ATTR = 9,
+    kUNSUPPORTED_NODE_INPUT = 10,
+    kUNSUPPORTED_NODE_DATATYPE = 11,
+    kUNSUPPORTED_NODE_DYNAMIC = 12,
+    kUNSUPPORTED_NODE_SHAPE = 13
 };
 
 //!
@@ -75,7 +80,7 @@ enum class ErrorCode : int
 template <>
 constexpr inline int32_t EnumMax<ErrorCode>()
 {
-    return 9;
+    return 14;
 }
 
 //!
@@ -115,29 +120,37 @@ class IParserError
 {
 public:
     //!
-    //!\brief the error code
+    //!\brief the error code.
     //!
     virtual ErrorCode code() const = 0;
     //!
-    //!\brief description of the error
+    //!\brief description of the error.
     //!
-    virtual const char* desc() const = 0;
+    virtual char const* desc() const = 0;
     //!
-    //!\brief source file in which the error occurred
+    //!\brief source file in which the error occurred.
     //!
-    virtual const char* file() const = 0;
+    virtual char const* file() const = 0;
     //!
-    //!\brief source line at which the error occurred
+    //!\brief source line at which the error occurred.
     //!
     virtual int line() const = 0;
     //!
-    //!\brief source function in which the error occurred
+    //!\brief source function in which the error occurred.
     //!
-    virtual const char* func() const = 0;
+    virtual char const* func() const = 0;
     //!
-    //!\brief index of the ONNX model node in which the error occurred
+    //!\brief index of the ONNX model node in which the error occurred.
     //!
     virtual int node() const = 0;
+    //!
+    //!\brief name of the node in which the error occurred.
+    //!
+    virtual char const* nodeName() const = 0;
+    //!
+    //!\brief name of the node operation in which the error occurred.
+    //!
+    virtual char const* nodeOperator() const = 0;
 
 protected:
     virtual ~IParserError() {}

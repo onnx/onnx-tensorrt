@@ -35,14 +35,39 @@
         }                                                                                                              \
     } while (0)
 
-#define MAKE_INPUT_ERROR(desc, code, name) Status((code), (desc), name, __LINE__, __func__)
+#define MAKE_NODE_ERROR(desc, code, node, index)                                                                       \
+    onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
 
-#define ASSERT_INPUT(condition, error_code, name)                                                                      \
+#define ASSERT_NODE(condition, desc, node, index, error_code)                                                          \
     do                                                                                                                 \
     {                                                                                                                  \
         if (!(condition))                                                                                              \
         {                                                                                                              \
-            return MAKE_INPUT_ERROR("Assertion failed: " #condition, (error_code), (name));                            \
+            std::string error = std::string("Assertion failed:  " #condition) + ". " + desc;                           \
+            return MAKE_NODE_ERROR((error), (error_code), node, index);                                                \
+        }                                                                                                              \
+    } while (0)
+
+#define MAKE_STATIC_ERROR(desc, code, node, index)                                                                     \
+    onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
+
+#define STATIC_CHECK(condition, error_code, node, error_list, index)                                                   \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(condition))                                                                                              \
+        {                                                                                                              \
+            error_list.push_back(MAKE_STATIC_ERROR(#condition, (error_code), node, index));                            \
+        }                                                                                                              \
+    } while (0)
+
+#define MAKE_INPUT_ERROR(desc, code, name) Status((code), (desc), name, __LINE__, __func__)
+
+#define CHECK_INPUT(condition, error_code, name, error_list)                                                           \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(condition))                                                                                              \
+        {                                                                                                              \
+            error_list.push_back(MAKE_INPUT_ERROR("Assertion failed: " #condition, (error_code), (name)));             \
         }                                                                                                              \
     } while (0)
 
@@ -92,34 +117,36 @@ class Status : public nvonnxparser::IParserError
     int _line;
     std::string _func;
     int _node;
+    std::string _nodeName;
+    std::string _nodeOperator;
 
 public:
     static Status success()
     {
         return Status(ErrorCode::kSUCCESS);
     }
-    Status()
-    {
-    }
+    Status() {}
     explicit Status(ErrorCode code, std::string desc = "", std::string file = "", int line = 0, std::string func = "",
-        int node = -1)
+        int node = -1, std::string nodeName = "", std::string nodeOperator = "")
         : _code(code)
         , _desc(desc)
         , _file(file)
         , _line(line)
         , _func(func)
         , _node(node)
+        , _nodeName(nodeName)
+        , _nodeOperator(nodeOperator)
     {
     }
     ErrorCode code() const override
     {
         return _code;
     }
-    const char* desc() const override
+    char const* desc() const override
     {
         return _desc.c_str();
     }
-    const char* file() const override
+    char const* file() const override
     {
         return _file.c_str();
     }
@@ -127,7 +154,7 @@ public:
     {
         return _line;
     }
-    const char* func() const override
+    char const* func() const override
     {
         return _func.c_str();
     }
@@ -146,6 +173,14 @@ public:
     void setNode(int node)
     {
         _node = node;
+    }
+    char const* nodeName() const override
+    {
+        return _nodeName.c_str();
+    }
+    char const* nodeOperator() const override
+    {
+        return _nodeOperator.c_str();
     }
 };
 

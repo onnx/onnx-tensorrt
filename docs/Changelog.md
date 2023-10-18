@@ -2,6 +2,20 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 9.1 GA Release - 2023-10-18
+For more details, see the 9.1 GA release notes for the fixes since 9.0 GA.
+
+- Added new `ErrorCode` enums to improve error logging
+- Added new members to `IParserError` to improve error logging 
+- Added static checkers when parsing nodes, resulting better reporting of errors
+
+# TensorRT 9.0 GA Release - 2023-9-5
+For more details, see the 9.0 GA release notes for the fixes since 9.0 EA.
+
+- Added support for FP8 and BF16 datatypes.
+- Fixed a bug that previously caused `If` nodes to fail import due to branch output size mismatch
+- Improved support for importing ONNX Local Functions
+
 # TensorRT 9.0 EA Release - 2023-8-4
 For more details, see the 9.0 EA release notes for the fixes since 8.6 GA.
 
@@ -201,4 +215,3 @@ See the 8.2 EA release notes for new features added in TensorRT 8.2.
 ## Removed
 - Removed deprecated docker files.
 - Removed deprecated `setup.py`.
-

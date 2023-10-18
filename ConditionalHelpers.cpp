@@ -75,7 +75,7 @@ Status addConditionalInputLayer(IImporterContext* ctx, nvinfer1::IIfConditional*
 // Take a snapshot of the network before and after parsing the subgraph and return a list
 // of newly added network layers.
 Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& subgraph,
-    std::vector<nvinfer1::ILayer*>& newLayers, StringMap<TensorOrWeights>& subgraphTensors)
+    std::vector<nvinfer1::ILayer*>& newLayers, std::vector<TensorOrWeights>& subgraphTensors)
 {
     auto net = ctx->network();
     int32_t beforeSubgraph = net->getNbLayers();
@@ -83,12 +83,13 @@ Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const&
     // Establish scope for names local to the subgraph.
     NameScope nameScope(*ctx);
 
-    CHECK(onnx2trt::parseGraph(ctx, subgraph));
+    std::vector<Status> errors{};
+    CHECK(onnx2trt::parseGraph(ctx, subgraph, errors));
 
     for (int32_t i = 0; i < subgraph.output_size(); ++i)
     {
         std::string name = subgraph.output(i).name();
-        subgraphTensors.emplace(std::make_pair(name, ctx->tensors().at(name)));
+        subgraphTensors.push_back(ctx->tensors().at(name));
     }
 
     for (int32_t i = beforeSubgraph; i < net->getNbLayers(); i++)
@@ -142,81 +143,6 @@ Status addIfInputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditi
         addConditionalInputIfNeeded(ctx, conditional, inputsMap, *layer, subgraphInputsMap);
     }
 
-    return Status::success();
-}
-
-// Add an IConditionalOutputLayer to `layer`'s outputs.
-Status addIfOutputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional,
-    ::ONNX_NAMESPACE::GraphProto const& thenGraph, std::vector<nvinfer1::ILayer*> const& thenLayers,
-    StringMap<TensorOrWeights> const& thenSubgraphTensors, ::ONNX_NAMESPACE::GraphProto const& elseGraph,
-    std::vector<nvinfer1::ILayer*> const& elseLayers, StringMap<TensorOrWeights> const& elseSubgraphTensors,
-    std::vector<TensorOrWeights>& graphOutputs)
-{
-    // Reported outputs are outputs that the ONNX model reports as subgraph outputs.  This list is
-    // not sufficient because it may produce names that are not fully compatible with TensorRT's naming.
-    // We use this list to help find the subgraph (SG) output tensors.
-    auto getReportedOutputs
-        = [&ctx](const ::ONNX_NAMESPACE::GraphProto& body, std::vector<std::string>& reportedOutputs) {
-              // Assuming that the subgraph was imported already, we can iterate on its output tensors.
-              const auto nbOutputs = body.output_size();
-              for (auto i = 0; i < nbOutputs; i++)
-              {
-                  reportedOutputs.emplace_back(body.output(i).name());
-              }
-          };
-
-    std::unordered_map<nvinfer1::ITensor*, std::set<int32_t>> thenOutputs;
-    std::unordered_map<nvinfer1::ITensor*, std::set<int32_t>> elseOutputs;
-
-    std::vector<std::string> thenReportedOutputs;
-    getReportedOutputs(thenGraph, thenReportedOutputs);
-    getSubgraphOutputs(thenLayers, thenOutputs, thenReportedOutputs);
-    std::vector<std::string> elseReportedOutputs;
-    getReportedOutputs(elseGraph, elseReportedOutputs);
-    getSubgraphOutputs(elseLayers, elseOutputs, elseReportedOutputs);
-
-    // Retrieve the output tensors of a subgraph (tensors exiting the subgraph).
-    auto getSubgraphOutputTensors
-        = [](IImporterContext* ctx, std::vector<nvinfer1::ITensor*>& sgOutputs, SubgraphPortsMap& subgraphOutputs,
-              ::ONNX_NAMESPACE::GraphProto const& subgraph, std::vector<nvinfer1::ILayer*> subgraphLayers,
-              StringMap<TensorOrWeights> const& subgraphTensors) {
-              for (auto const& pair : subgraphOutputs)
-              {
-                  sgOutputs.push_back(pair.first);
-              }
-
-              if (sgOutputs.empty())
-              {
-                  // No new layers, so we can't deduce the outputs and have to use what ONNX tells us.
-                  const int32_t nbOutputs = subgraph.output_size();
-                  for (int32_t outIdx = 0; outIdx < nbOutputs; outIdx++)
-                  {
-                      const auto thenName = subgraph.output(outIdx).name();
-                      TensorOrWeights tw = subgraphTensors.at(thenName);
-                      auto* thenTensor = &convertToTensor(tw, ctx);
-                      sgOutputs.push_back(thenTensor);
-                  }
-              }
-          };
-
-    std::vector<nvinfer1::ITensor*> thenOutputTensors;
-    getSubgraphOutputTensors(ctx, thenOutputTensors, thenOutputs, thenGraph, thenLayers, thenSubgraphTensors);
-
-    std::vector<nvinfer1::ITensor*> elseSGOutputTensors;
-    getSubgraphOutputTensors(ctx, elseSGOutputTensors, elseOutputs, elseGraph, elseLayers, elseSubgraphTensors);
-
-    ASSERT(thenOutputTensors.size() == elseSGOutputTensors.size()
-            && "The then/else branches of an If operator must have the same number of outputs.",
-        ErrorCode::kINVALID_NODE);
-
-    // Add an ConditionalOutputLayer with one output and two inputs
-    // (one from the thenGraph and another from the elseGraph).
-    for (size_t i = 0; i < elseSGOutputTensors.size(); i++)
-    {
-        auto* outputLayer = conditional->addOutput(*thenOutputTensors[i], *elseSGOutputTensors[i]);
-        ctx->registerLayer(outputLayer, std::string(conditional->getName()) + "_OutputLayer", nullptr);
-        graphOutputs.emplace_back(outputLayer->getOutput(0));
-    }
     return Status::success();
 }
 

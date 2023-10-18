@@ -7,63 +7,84 @@
 #include "onnx2trt_utils.hpp"
 #include <onnx/onnx_pb.h>
 
-template <>
-float OnnxAttrs::get<float>(const std::string& key) const
+bool isExternalAttribute(std::string const& key, onnx2trt::IImporterContext* ctx)
 {
-    return this->at(key)->f();
+    return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().second.count(key);
 }
 
 template <>
-int OnnxAttrs::get<int>(const std::string& key) const
+float OnnxAttrs::get<float>(std::string const& key) const
 {
-    return this->at(key)->i();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->f() : this->at(key)->f();
 }
 
 template <>
-int64_t OnnxAttrs::get<int64_t>(const std::string& key) const
+int32_t OnnxAttrs::get<int32_t>(std::string const& key) const
 {
-    return this->at(key)->i();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
 }
 
 template <>
-bool OnnxAttrs::get<bool>(const std::string& key) const
+int64_t OnnxAttrs::get<int64_t>(std::string const& key) const
 {
-    int value = this->at(key)->i();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
+}
+
+template <>
+bool OnnxAttrs::get<bool>(std::string const& key) const
+{
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    int64_t value = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
     assert(value == bool(value));
-    return bool(value);
+    return static_cast<bool>(value);
 }
 
 template <>
-std::string OnnxAttrs::get<std::string>(const std::string& key) const
+std::string OnnxAttrs::get<std::string>(std::string const& key) const
 {
-    return this->at(key)->s();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->s() : this->at(key)->s();
 }
 
 template <>
-std::vector<int> OnnxAttrs::get<std::vector<int>>(const std::string& key) const
+std::vector<int32_t> OnnxAttrs::get<std::vector<int32_t>>(std::string const& key) const
 {
-    auto attr = this->at(key)->ints();
-    return std::vector<int>(attr.begin(), attr.end());
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->ints() : this->at(key)->ints();
+    return std::vector<int32_t>(attr.begin(), attr.end());
 }
 
 template <>
-std::vector<int64_t> OnnxAttrs::get<std::vector<int64_t>>(const std::string& key) const
+std::vector<int64_t> OnnxAttrs::get<std::vector<int64_t>>(std::string const& key) const
 {
-    auto attr = this->at(key)->ints();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->ints() : this->at(key)->ints();
     return std::vector<int64_t>(attr.begin(), attr.end());
 }
 
 template <>
-std::vector<float> OnnxAttrs::get<std::vector<float>>(const std::string& key) const
+std::vector<float> OnnxAttrs::get<std::vector<float>>(std::string const& key) const
 {
-    auto attr = this->at(key)->floats();
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->floats() : this->at(key)->floats();
     return std::vector<float>(attr.begin(), attr.end());
 }
 
 template <>
-nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(const std::string& key) const
+nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(std::string const& key) const
 {
-    auto values = this->get<std::vector<int>>(key);
+    auto values = this->get<std::vector<int32_t>>(key);
     nvinfer1::Dims dims;
     dims.nbDims = values.size();
     std::copy(values.begin(), values.end(), dims.d);
@@ -72,7 +93,7 @@ nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(const std::string& key) const
 }
 
 template <>
-nvinfer1::DimsHW OnnxAttrs::get<nvinfer1::DimsHW>(const std::string& key) const
+nvinfer1::DimsHW OnnxAttrs::get<nvinfer1::DimsHW>(std::string const& key) const
 {
     nvinfer1::Dims dims = this->get<nvinfer1::Dims>(key);
     assert(dims.nbDims == 2);
@@ -80,13 +101,13 @@ nvinfer1::DimsHW OnnxAttrs::get<nvinfer1::DimsHW>(const std::string& key) const
 }
 
 template <>
-nvinfer1::Permutation OnnxAttrs::get<nvinfer1::Permutation>(const std::string& key) const
+nvinfer1::Permutation OnnxAttrs::get<nvinfer1::Permutation>(std::string const& key) const
 {
-    auto values = this->get<std::vector<int>>(key);
+    auto values = this->get<std::vector<int32_t>>(key);
     nvinfer1::Permutation perm;
     std::copy(values.begin(), values.end(), perm.order);
     // Fill unused values with identity permutation
-    for (int i = values.size(); i < nvinfer1::Dims::MAX_DIMS; ++i)
+    for (int32_t i = values.size(); i < nvinfer1::Dims::MAX_DIMS; ++i)
     {
         perm.order[i] = i;
     }
@@ -94,9 +115,13 @@ nvinfer1::Permutation OnnxAttrs::get<nvinfer1::Permutation>(const std::string& k
 }
 
 template <>
-onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(const std::string& key) const
+onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(std::string const& key) const
 {
-    ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = this->at(key)->t();
+    // Check for reference attribute in parent function
+    std::string extName = this->at(key)->ref_attr_name();
+    bool isExtAttr = isExternalAttribute(extName, mCtx);
+
+    ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->t() : this->at(key)->t();
     onnx2trt::ShapedWeights weights;
     bool success = convertOnnxWeights(onnx_weights_tensor, &weights, mCtx);
     if (!success)
@@ -107,7 +132,7 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(const std::strin
 }
 
 template <>
-nvinfer1::DataType OnnxAttrs::get<nvinfer1::DataType>(const std::string& key) const
+nvinfer1::DataType OnnxAttrs::get<nvinfer1::DataType>(std::string const& key) const
 {
     ::ONNX_NAMESPACE::TensorProto::DataType onnx_dtype
         = static_cast<::ONNX_NAMESPACE::TensorProto::DataType>(this->at(key)->i());
@@ -120,7 +145,7 @@ nvinfer1::DataType OnnxAttrs::get<nvinfer1::DataType>(const std::string& key) co
 }
 
 template <>
-std::vector<nvinfer1::DataType> OnnxAttrs::get<std::vector<nvinfer1::DataType>>(const std::string& key) const
+std::vector<nvinfer1::DataType> OnnxAttrs::get<std::vector<nvinfer1::DataType>>(std::string const& key) const
 {
     auto attr = this->at(key)->ints();
     auto onnx_dtypes = std::vector<int64_t>(attr.begin(), attr.end());
@@ -137,7 +162,7 @@ std::vector<nvinfer1::DataType> OnnxAttrs::get<std::vector<nvinfer1::DataType>>(
     return dtypes;
 }
 
-inline nvinfer1::ActivationType activationStringToEnum(const std::string& type)
+inline nvinfer1::ActivationType activationStringToEnum(std::string const& type)
 {
     if (type == "Relu")
     {
@@ -183,7 +208,7 @@ inline nvinfer1::ActivationType activationStringToEnum(const std::string& type)
 }
 
 template <>
-nvinfer1::ActivationType OnnxAttrs::get<nvinfer1::ActivationType>(const std::string& key) const
+nvinfer1::ActivationType OnnxAttrs::get<nvinfer1::ActivationType>(std::string const& key) const
 {
     const std::string type = this->get<std::string>(key);
     return activationStringToEnum(type);
@@ -191,7 +216,7 @@ nvinfer1::ActivationType OnnxAttrs::get<nvinfer1::ActivationType>(const std::str
 
 template <>
 std::vector<nvinfer1::ActivationType> OnnxAttrs::get<std::vector<nvinfer1::ActivationType>>(
-    const std::string& key) const
+    std::string const& key) const
 {
     const auto strings = this->at(key)->strings();
     std::vector<nvinfer1::ActivationType> actTypes;
@@ -203,13 +228,13 @@ std::vector<nvinfer1::ActivationType> OnnxAttrs::get<std::vector<nvinfer1::Activ
 }
 
 template <>
-const ::ONNX_NAMESPACE::GraphProto& OnnxAttrs::get<const ::ONNX_NAMESPACE::GraphProto&>(const std::string& key) const
+const ::ONNX_NAMESPACE::GraphProto& OnnxAttrs::get<const ::ONNX_NAMESPACE::GraphProto&>(std::string const& key) const
 {
     return this->at(key)->g();
 }
 
 template <>
-nvinfer1::RNNOperation OnnxAttrs::get<nvinfer1::RNNOperation>(const std::string& key) const
+nvinfer1::RNNOperation OnnxAttrs::get<nvinfer1::RNNOperation>(std::string const& key) const
 {
     std::string op = this->get<std::string>(key);
     if (op == std::string("relu"))
@@ -232,7 +257,7 @@ nvinfer1::RNNOperation OnnxAttrs::get<nvinfer1::RNNOperation>(const std::string&
 }
 
 template <>
-nvinfer1::RNNInputMode OnnxAttrs::get<nvinfer1::RNNInputMode>(const std::string& key) const
+nvinfer1::RNNInputMode OnnxAttrs::get<nvinfer1::RNNInputMode>(std::string const& key) const
 {
     std::string mode = this->get<std::string>(key);
     if (mode == std::string("skip"))
@@ -247,7 +272,7 @@ nvinfer1::RNNInputMode OnnxAttrs::get<nvinfer1::RNNInputMode>(const std::string&
 }
 
 template <>
-nvinfer1::RNNDirection OnnxAttrs::get<nvinfer1::RNNDirection>(const std::string& key) const
+nvinfer1::RNNDirection OnnxAttrs::get<nvinfer1::RNNDirection>(std::string const& key) const
 {
     std::string direction = this->get<std::string>(key);
     if (direction == std::string("unidirection"))
@@ -262,14 +287,14 @@ nvinfer1::RNNDirection OnnxAttrs::get<nvinfer1::RNNDirection>(const std::string&
 }
 
 template <>
-std::vector<std::string> OnnxAttrs::get<std::vector<std::string>>(const std::string& key) const
+std::vector<std::string> OnnxAttrs::get<std::vector<std::string>>(std::string const& key) const
 {
     auto attr = this->at(key)->strings();
     return std::vector<std::string>(attr.begin(), attr.end());
 }
 
 template <>
-nvinfer1::ScaleMode OnnxAttrs::get<nvinfer1::ScaleMode>(const std::string& key) const
+nvinfer1::ScaleMode OnnxAttrs::get<nvinfer1::ScaleMode>(std::string const& key) const
 {
     std::string s = this->get<std::string>(key);
     if (s == "uniform")
@@ -288,7 +313,7 @@ nvinfer1::ScaleMode OnnxAttrs::get<nvinfer1::ScaleMode>(const std::string& key) 
 }
 
 template <>
-nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(const std::string& key) const
+nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(std::string const& key) const
 {
     std::string s = this->get<std::string>(key);
     if (s == "none")
@@ -307,7 +332,7 @@ nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(const std::s
 }
 
 template <>
-nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(const std::string& key) const
+nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(std::string const& key) const
 {
     const auto& mode = this->get<std::string>(key);
     if (mode == "nearest")
@@ -323,7 +348,7 @@ nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(const std::string& key
 
 template <>
 nvinfer1::ResizeCoordinateTransformation OnnxAttrs::get<nvinfer1::ResizeCoordinateTransformation>(
-    const std::string& key) const
+    std::string const& key) const
 {
     const auto& transformation = this->get<std::string>(key);
     if (transformation == "align_corners")
@@ -342,7 +367,7 @@ nvinfer1::ResizeCoordinateTransformation OnnxAttrs::get<nvinfer1::ResizeCoordina
 }
 
 template <>
-nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(const std::string& key) const
+nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(std::string const& key) const
 {
     const auto& selector = this->get<std::string>(key);
     if (selector == "formula")
@@ -357,7 +382,7 @@ nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(const std::str
 }
 
 template <>
-nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(const std::string& key) const
+nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(std::string const& key) const
 {
     const auto& roundMode = this->get<std::string>(key);
     if (roundMode == "half_up")

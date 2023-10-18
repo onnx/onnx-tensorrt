@@ -105,7 +105,8 @@ static std::string makeErrorExplanation(std::exception const& e, std::string con
     return result.str();
 }
 
-Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, bool deserializingINetwork)
+Status parseNode(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, bool deserializingINetwork)
 {
     StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
     std::string const& nodeName = getNodeName(node);
@@ -128,11 +129,12 @@ Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
         else
         {
             LOG_VERBOSE("Searching for input: " << inputName);
-            ASSERT( (ctx->tensors().count(inputName)) && "Node input was not registered.", ErrorCode::kINVALID_GRAPH);
+            ASSERT_NODE((ctx->tensors().count(inputName)), "Node input was not registered.", node, nodeIdx,
+                ErrorCode::kINVALID_GRAPH);
             nodeInputs.push_back(ctx->tensors().at(inputName));
-            ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "["
-                        << nodeInputs.back().getType() << "]"
-                        << "], ";
+            ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "[" << nodeInputs.back().getType()
+                     << "]"
+                     << "], ";
         }
     }
     LOG_VERBOSE(ssInputs.str());
@@ -157,7 +159,7 @@ Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
 
     try
     {
-        GET_VALUE((*importFunc)(ctx, node, nodeInputs), &outputs);
+        GET_VALUE((*importFunc)(ctx, node, nodeIdx, nodeInputs), &outputs);
     }
     catch (std::exception const& e)
     {
@@ -205,9 +207,8 @@ Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
         }
     }
 
-    ASSERT((node.output().size() <= static_cast<int32_t>(outputs.size()))
-            && "Node has more output tensors than TRT expected.",
-        ErrorCode::kINVALID_GRAPH);
+    ASSERT_NODE((node.output().size() <= static_cast<int32_t>(outputs.size())),
+        "Node has more output tensors than TRT expected.", node, nodeIdx, ErrorCode::kINVALID_GRAPH);
 
     // Set output names and register outputs with the context.
     std::ostringstream ssOutputs{};
@@ -236,15 +237,54 @@ Status parseNode(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
                     legalUINT8 = true;
                 }
             }
-            ASSERT(legalUINT8 && "TensorRT does not support UINT8 types for intermediate tensors!", ErrorCode::kUNSUPPORTED_NODE);
+            ASSERT_NODE(legalUINT8, "TensorRT does not support UINT8 types for intermediate tensors!", node, nodeIdx,
+                ErrorCode::kUNSUPPORTED_NODE);
         }
     }
     LOG_VERBOSE(ssOutputs.str());
     return Status::success();
 }
 
-Status parseGraph(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork, int* currentNode)
+void parseNodeStaticCheck(
+    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
+{
+    StringMap<OpStaticErrorChecker> const& opCheckers = getOpStaticErrorCheckerMap();
+    StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
+    std::string const& nodeName = getNodeName(node);
+    std::string const& nodeType = node.op_type();
+    LOG_VERBOSE("Static check for parsing node: " << nodeName << " [" << nodeType << "]");
+
+    // Dispatch to appropriate static error checker.
+    OpStaticErrorChecker const* checkerFunc{nullptr};
+    if (opImporters.count(nodeType))
+    {
+        if (!opCheckers.count(nodeType))
+        {
+            std::string errorMsg = "No static checker was found for " + nodeType;
+            errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
+            return;
+        }
+        checkerFunc = &opCheckers.at(nodeType);
+    }
+    else if (opCheckers.count(nodeType))
+    {
+        checkerFunc = &opCheckers.at(nodeType);
+    }
+    else if (ctx->localFunctions().count(nodeType))
+    {
+        LOG_INFO("Found regisitered local function: " << nodeType << ". Checking as a local function.");
+        checkerFunc = &opCheckers.at("LocalFunctionImporter");
+    }
+    else
+    {
+        LOG_INFO("No checker registered for op: " << nodeType << ". Attempting to check as plugin.");
+        checkerFunc = &opCheckers.at("FallbackPluginImporter");
+    }
+    (*checkerFunc)(ctx, node, errors, nodeIndex);
+}
+
+Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
+    bool deserializingINetwork, int* currentNode)
 {
     // Import initializers.
     for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
@@ -269,25 +309,44 @@ Status parseGraph(
         {
             *currentNode = nodeIndex;
         }
-        CHECK(parseNode(ctx, graph.node(nodeIndex), deserializingINetwork));
+        parseNodeStaticCheck(ctx, graph.node(nodeIndex), errors, nodeIndex);
+        if (errors.size() == 0)
+        {
+            // At most one dynamic error will be returned.
+            auto status = parseNode(ctx, graph.node(nodeIndex), nodeIndex, deserializingINetwork);
+            if (status.is_error())
+            {
+                errors.push_back(status);
+            }
+        }
     }
-
+    if (errors.size() != 0)
+    {
+        auto result = errors.back();
+        errors.pop_back(); // this error will be added back to the list in ModelImporter::parseWithWeightDescriptors.
+        return result;
+    }
     return Status::success();
 }
 
-Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const& input, nvinfer1::ITensor** tensor,
-    std::vector<NamedDimension>& namedDims)
+std::vector<Status> importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const& input,
+    nvinfer1::ITensor** tensor, std::vector<NamedDimension>& namedDims)
 {
+    std::vector<Status> errorList{};
     auto const& onnxDtype = input.type().tensor_type();
-    nvinfer1::DataType trtDtype;
-    ASSERT_INPUT(convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX date type to TensorRT data type.", ErrorCode::kUNSUPPORTED_NODE, input.name());
+    nvinfer1::DataType trtDtype{nvinfer1::DataType::kFLOAT};
+    CHECK_INPUT(
+        convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX date type to TensorRT data type.",
+        ErrorCode::kUNSUPPORTED_NODE, input.name(), errorList);
     nvinfer1::Dims trt_dims;
     size_t const oldNbNamedDimensions = namedDims.size();
-    ASSERT_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims, namedDims) && "Failed to convert ONNX dimensions to TensorRT dimensions.", ErrorCode::kUNSUPPORTED_GRAPH, input.name());
+    CHECK_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims, namedDims)
+            && "Failed to convert ONNX dimensions to TensorRT dimensions.",
+        ErrorCode::kUNSUPPORTED_GRAPH, input.name(), errorList);
     nvinfer1::ITensor* userInput = ctx->getUserInput(input.name().c_str());
     if (userInput)
     {
-        ASSERT_INPUT(userInput && "User input is missing.", ErrorCode::kINVALID_VALUE, input.name());
+        CHECK_INPUT(userInput && "User input is missing.", ErrorCode::kINVALID_VALUE, input.name(), errorList);
         // Intentionally don't check dimensions/dtype here so that users can change the input shape/type if
         // they want to. However, equalities implied by dimension names are nonetheless respected.
         *tensor = userInput;
@@ -296,8 +355,12 @@ Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const&
     {
         LOG_VERBOSE(
             "Adding network input: " << input.name() << " with dtype: " << trtDtype << ", dimensions: " << trt_dims);
-        *tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims);
-        ASSERT_INPUT(*tensor && "Failed to add input to the network.", ErrorCode::kUNSUPPORTED_NODE, input.name());
+        if (errorList.empty())
+        {
+            *tensor = ctx->network()->addInput(input.name().c_str(), trtDtype, trt_dims);
+            CHECK_INPUT(*tensor && "Failed to add input to the network.", ErrorCode::kUNSUPPORTED_NODE, input.name(),
+                errorList);
+        }
     }
 
     // Fill in field `tensor` for any dimensions that had names in the ONNX.
@@ -305,7 +368,7 @@ Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const&
     {
         namedDims[i].tensor = *tensor;
     }
-    return Status::success();
+    return errorList;
 }
 
 static Status setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
@@ -318,7 +381,7 @@ static Status setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension
 }
 
 Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
-    StringMap<TensorOrWeights>* tensors)
+    StringMap<TensorOrWeights>* tensors, std::vector<Status>& errors)
 {
     // The weights come from the Initializer list in onnx graph
     // Initializers are not really network inputs, so they need to be excluded.
@@ -329,18 +392,28 @@ Status importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& gr
     }
 
     std::vector<NamedDimension> namedDims;
+    std::vector<Status> statusList{};
     for (::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input())
     {
         TensorOrWeights tensor;
         if (!initializers.count(input.name()))
         {
             nvinfer1::ITensor* tensor_ptr{nullptr};
-            CHECK(importInput(ctx, input, &tensor_ptr, namedDims));
+            std::vector<Status> status = importInput(ctx, input, &tensor_ptr, namedDims);
+            statusList.insert(statusList.end(), status.begin(), status.end());
             tensor = tensor_ptr;
+            if (statusList.empty() && tensor_ptr->getType() == nvinfer1::DataType::kINT64)
+            {
+                LOG_WARNING("Make sure input " << input.name() << " has Int64 binding.");
+            }
         }
         ctx->registerTensor(std::move(tensor), input.name());
     }
-
+    if (!statusList.empty())
+    {
+        errors.insert(errors.end(), statusList.begin(), statusList.end());
+        return statusList[0];
+    }
     return setDimensionNames(ctx, namedDims);
 }
 
@@ -603,8 +676,8 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
     mImporterCtx.setFlags(getFlags());
 
     mCurrentNode = -1;
-    CHECK(importInputs(&mImporterCtx, graph, &mImporterCtx.tensors()));
-    CHECK(parseGraph(&mImporterCtx, graph, model.producer_name() == "TensorRT", &mCurrentNode));
+    importInputs(&mImporterCtx, graph, &mImporterCtx.tensors(), mErrors);
+    CHECK(parseGraph(&mImporterCtx, graph, mErrors, model.producer_name() == "TensorRT", &mCurrentNode));
 
     mCurrentNode = -1;
     // Mark outputs defined in the ONNX model (unless tensors are user-requested)
@@ -636,11 +709,16 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
                     && "Failed to convert ONNX date type to TensorRT data type.",
                 ErrorCode::kUNSUPPORTED_NODE);
             // For INT32 data type, output type must match tensor type
-            ASSERT( (output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
-                    || output_trt_dtype == nvinfer1::DataType::kINT32) && "For INT32 tensors, the output type must also be INT32.",
+            ASSERT((output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
+                       || output_trt_dtype == nvinfer1::DataType::kINT32)
+                    && "For INT32 tensors, the output type must also be INT32.",
                 ErrorCode::kUNSUPPORTED_NODE);
             // Note: Without this, output type is always float32
             output_tensor_ptr->setType(output_trt_dtype);
+            if (output_trt_dtype == nvinfer1::DataType::kINT64)
+            {
+                LOG_WARNING("Make sure output " << output.name() << " has Int64 binding.");
+            }
         }
     }
     // Return user-requested output tensors
@@ -714,7 +792,7 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
                 tensors.at(tensor.first)->setDynamicRange(tensor.second, ctx->tensorRangeMaxes().at(tensor.first));
             }
         }
-        // Avoid setting layer precision while using strong typing.
+        // Avoid setting layer precision if graph is strongly typed.
         if (!ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED))
         {
             // Set precisions for all layers.

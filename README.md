@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the `main` branch is for the latest version of [TensorRT 9.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 8.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 9.0](https://developer.nvidia.com/tensorrt)
- - [TensorRT 9.0 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 9.1](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 9.1 open source libaries] (https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -97,9 +97,9 @@ Refer to the link or run `polygraphy run -h` for more information on CLI options
 
 ### Python Modules
 
-Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. 
+Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files.
 
-TensorRT 9.0 supports ONNX release 1.14.0. Install it with:
+TensorRT 9.1 supports ONNX release 1.14.0. Install it with:
 
     python3 -m pip install onnx==1.14.0
 
