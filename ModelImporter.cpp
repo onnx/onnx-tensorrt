@@ -450,7 +450,7 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
         //     2. The importer function did not throw an assertion
         bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
         bool unsuccessfulParse = node_idx == error_node;
-        if (!unsupportedDDS && !unsupportedInput && !unsuccessfulParse)
+        if (!unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
