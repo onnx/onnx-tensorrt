@@ -4,7 +4,7 @@
 
 Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/tensorrt).
 
-See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
+See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/tensorrt/api/index.html).
 
 For the list of recent changes, see the [changelog](docs/Changelog.md).
 
@@ -83,7 +83,7 @@ Python Example:
 
 There are currently two officially supported tools for users to quickly check if an ONNX model can parse and build into a TensorRT engine from an ONNX file.
 
-For C++ users, there is the [trtexec](https://github.com/NVIDIA/TensorRT/tree/main/samples/opensource/trtexec) binary that is typically found in the `<tensorrt_root_dir>/bin` directory. The basic command of running an ONNX model is:
+For C++ users, there is the [trtexec](https://github.com/NVIDIA/TensorRT/tree/release/8.6/samples/trtexec) binary that can be compiled from the README in the link. The basic command of running an ONNX model is:
 
 `trtexec --onnx=model.onnx`
 
