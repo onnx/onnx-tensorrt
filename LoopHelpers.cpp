@@ -13,7 +13,8 @@ nvinfer1::ITensor* addLoopCounter(IImporterContext* ctx, nvinfer1::ILoop* loop, 
     nvinfer1::ITensor* initialTensor
         = addConstantScalar(ctx, initial, ::ONNX_NAMESPACE::TensorProto::INT64, nvinfer1::Dims{1, 1})->getOutput(0);
     nvinfer1::ITensor* one
-        = addConstantScalar(ctx, 1, ::ONNX_NAMESPACE::TensorProto::INT64, nvinfer1::Dims{1, 1})->getOutput(0);
+        = addConstantScalar(ctx, static_cast<int64_t>(1), ::ONNX_NAMESPACE::TensorProto::INT64, nvinfer1::Dims{1, 1})
+              ->getOutput(0);
 
     auto counter = loop->addRecurrence(*initialTensor);
     nvinfer1::ITensor* addOne = ctx->network()

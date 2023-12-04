@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 9.1 supports operators up to Opset 19. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 9.2 supports operators up to Opset 19. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, UINT8, and BOOL
 
@@ -80,7 +80,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | HannWindow                | N          |
 | HardSwish                 | Y          | FP32, FP16, BF16, FP8, INT8 |
 | HardSigmoid               | Y          | FP32, FP16, BF16, FP8, INT8 |
-| Hardmax                   | N          |
+| Hardmax                   | Y          | FP32, FP16, BF16 | `axis` dimension of input must be a build-time constant
 | Identity                  | Y          | FP32, FP16, BF16, INT32, INT64, FP8, INT8, BOOL |
 | If                        | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | Output tensors of the two conditional branches must have broadcastable shapes, and must have different names
 | ImageScaler               | Y          | FP32, FP16, BF16|
@@ -116,7 +116,7 @@ See below for the support matrix of ONNX operators in ONNX-TensorRT.
 | NonMaxSuppression         | Y          | FP32, FP16 |
 | NonZero                   | Y          | FP32, FP16
 | Not                       | Y          | BOOL |
-| OneHot                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
+| OneHot                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `depth` must be a build-time constant
 | Optional                  | N          |
 | OptionalGetElement        | N          |
 | OptionalHasElement        | N          |

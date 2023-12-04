@@ -38,13 +38,14 @@
 #define MAKE_NODE_ERROR(desc, code, node, index)                                                                       \
     onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
 
-#define ASSERT_NODE(condition, desc, node, index, error_code)                                                          \
+#define ASSERT_NODE(condition, msg, node, index, error_code)                                                           \
     do                                                                                                                 \
     {                                                                                                                  \
         if (!(condition))                                                                                              \
         {                                                                                                              \
-            std::string error = std::string("Assertion failed:  " #condition) + ". " + desc;                           \
-            return MAKE_NODE_ERROR((error), (error_code), node, index);                                                \
+            std::stringstream error;                                                                                   \
+            error << "Assertion failed: " << #condition << ": " << msg;                                                \
+            return MAKE_NODE_ERROR((error.str()), (error_code), node, index);                                          \
         }                                                                                                              \
     } while (0)
 
