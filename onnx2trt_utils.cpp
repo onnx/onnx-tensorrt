@@ -813,7 +813,47 @@ int divCeil(int n, int d)
     return (n - 1) / d + 1;
 }
 
-bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op)
+std::string getTrtDtypeName(nvinfer1::DataType TrtDtype)
+{
+    switch (TrtDtype)
+    {
+    case nvinfer1::DataType::kFLOAT: return "FLOAT";
+    case nvinfer1::DataType::kHALF: return "HALF";
+    case nvinfer1::DataType::kINT8: return "INT8";
+    case nvinfer1::DataType::kINT32: return "INT32";
+    case nvinfer1::DataType::kBOOL: return "BOOL";
+    case nvinfer1::DataType::kUINT8: return "UINT8";
+    case nvinfer1::DataType::kFP8: return "FP8";
+    case nvinfer1::DataType::kBF16: return "BF16";
+    case nvinfer1::DataType::kINT64: return "INT64";
+    default: return "<UNKNOWN>";
+    }
+}
+
+std::string getElementWiseOpName(nvinfer1::ElementWiseOperation op)
+{
+    switch (op)
+    {
+    case nvinfer1::ElementWiseOperation::kSUM: return "SUM";
+    case nvinfer1::ElementWiseOperation::kPROD: return "PROD";
+    case nvinfer1::ElementWiseOperation::kMAX: return "MAX";
+    case nvinfer1::ElementWiseOperation::kMIN: return "MIN";
+    case nvinfer1::ElementWiseOperation::kSUB: return "SUB";
+    case nvinfer1::ElementWiseOperation::kDIV: return "DIV";
+    case nvinfer1::ElementWiseOperation::kPOW: return "POW";
+    case nvinfer1::ElementWiseOperation::kFLOOR_DIV: return "FLOOR_DIV";
+    case nvinfer1::ElementWiseOperation::kAND: return "AND";
+    case nvinfer1::ElementWiseOperation::kOR: return "OR";
+    case nvinfer1::ElementWiseOperation::kXOR: return "XOR";
+    case nvinfer1::ElementWiseOperation::kEQUAL: return "EQUAL";
+    case nvinfer1::ElementWiseOperation::kGREATER: return "GREATER";
+    case nvinfer1::ElementWiseOperation::kLESS: return "LESS";
+    default: return "<UNKNOWN>";
+    }
+}
+
+Status elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op,
+    ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx)
 {
     switch (op)
     {
@@ -821,10 +861,11 @@ bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1
     case nvinfer1::ElementWiseOperation::kAND:
     case nvinfer1::ElementWiseOperation::kOR:
     case nvinfer1::ElementWiseOperation::kXOR:
-        if (!std::all_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) { return input.isBool(); }))
-        {
-            return false;
-        }
+        ASSERT_NODE(
+            std::all_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) { return input.isBool(); }),
+            "Elementwise layer only supports operator " + getElementWiseOpName(op)
+                + " and the given inputs with type BOOL.",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         break;
     // These operations do not support boolean types
     case nvinfer1::ElementWiseOperation::kDIV:
@@ -836,30 +877,29 @@ bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1
     case nvinfer1::ElementWiseOperation::kPROD:
     case nvinfer1::ElementWiseOperation::kSUB:
     case nvinfer1::ElementWiseOperation::kSUM:
-        if (std::any_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) { return input.isBool(); }))
-        {
-            return false;
-        }
+        ASSERT_NODE(
+            !std::any_of(inputs.begin(), inputs.end(), [](const TensorOrWeights& input) { return input.isBool(); }),
+            "Elementwise layer does not support operator " + getElementWiseOpName(op)
+                + " and the given inputs with type BOOL.",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         break;
     // Pow does not support bool or INT32 types
     case nvinfer1::ElementWiseOperation::kPOW:
-        if (std::any_of(inputs.begin(), inputs.end(),
-                [](const TensorOrWeights& input) { return input.isBool() || input.isInt32(); }))
-        {
-            return false;
-        }
+        ASSERT_NODE(!std::any_of(inputs.begin(), inputs.end(),
+                        [](const TensorOrWeights& input) { return input.isBool() || input.isInt32(); }),
+            "Elementwise layer does not support operator POW with the given inputs of type BOOL or INT32.", node,
+            nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         break;
     // Equal supports all types.
-    case nvinfer1::ElementWiseOperation::kEQUAL:
-        break;
+    case nvinfer1::ElementWiseOperation::kEQUAL: break;
     }
-    return true;
+    return Status::success();
 }
 
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     const std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op)
 {
-    ASSERT((!inputs.empty()) && "Inputs vector is empty.", ErrorCode::kINVALID_NODE);
+    ASSERT_NODE((!inputs.empty()), "Inputs vector is empty.", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
     std::vector<nvinfer1::ITensor*> inputTensors;
     int maxNbDims = -1;
@@ -874,13 +914,13 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
 
         // Broadcast all input tensors to size of maxNbDims
         broadcastTensor(ctx, tensor_ptr, maxNbDims);
-        ASSERT_NODE(tensor_ptr->getDimensions().nbDims == maxNbDims, "Failed to broadcast tensors elementwise!", node,
-            nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT_NODE(tensor_ptr->getDimensions().nbDims == maxNbDims,
+            "The number of dimensions should remain the same adding inputs: " << tensor_ptr->getDimensions().nbDims
+                                                                              << " != " << maxNbDims << ".",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         inputTensors.push_back(tensor_ptr);
     }
-    ASSERT_NODE(elementwiseCheck(inputs, binary_op),
-        "Elementwise layer does not support the given inputs and operator.", node, nodeIdx,
-        ErrorCode::kUNSUPPORTED_NODE);
+    CHECK(elementwiseCheck(inputs, binary_op, node, nodeIdx));
 
     // Use the first tensor input as the base for the elementwise operation
     nvinfer1::ITensor* combined = inputTensors.at(0);
@@ -893,8 +933,9 @@ NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::Node
     {
         nvinfer1::ITensor* tensor = inputTensors.at(i);
         ASSERT_NODE((tensor->getDimensions().nbDims == combined->getDimensions().nbDims),
-            "The number of dimensions should remain the same adding inputs.", node, nodeIdx,
-            ErrorCode::kUNSUPPORTED_NODE);
+            "The number of dimensions should remain the same adding inputs: "
+                << tensor->getDimensions().nbDims << " != " << combined->getDimensions().nbDims << ".",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         auto* layer = ctx->network()->addElementWise(*combined, *tensor, binary_op);
         ASSERT_NODE(layer, "Failed to create Elementwise layer!", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         ctx->registerLayer(layer, node);
@@ -1024,7 +1065,8 @@ nvinfer1::ITensor* getAxisLengthInt64(
     int32_t d = dims.d[axis];
     if (d >= 0)
     {
-        return addConstantScalar(ctx, d, ::ONNX_NAMESPACE::TensorProto_DataType_INT64, shape)->getOutput(0);
+        return addConstantScalar(ctx, static_cast<int64_t>(d), ::ONNX_NAMESPACE::TensorProto_DataType_INT64, shape)
+            ->getOutput(0);
     }
     else
     {
@@ -1399,7 +1441,7 @@ NodeImportResult instanceNormPluginHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> const axes{3};
         tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
-        ASSERT_NODE(tensorPtr, "Failed to unsqueeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT_NODE(tensorPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
     return {{tensorPtr}};
@@ -1410,7 +1452,7 @@ nvinfer1::ITensor* iota(IImporterContext* ctx, ShapeTensor iotaDims, int32_t axi
     std::vector<int32_t> deltaVals(iotaDims.size(), 0);
     deltaVals[axis] = 1;
     auto* iota = ctx->network()->addFill({0, {0}}, nvinfer1::FillOperation::kLINSPACE, nvinfer1::DataType::kINT32);
-    auto* alpha = addConstantScalar(ctx, 0, ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
+    auto* alpha = addConstantScalar(ctx, static_cast<int32_t>(0), ::ONNX_NAMESPACE::TensorProto::INT32)->getOutput(0);
     auto* delta
         = addConstant(ctx, deltaVals, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {iotaDims.size()}})->getOutput(0);
     iota->setInput(0, iotaDims.tensor(ctx));
@@ -1483,7 +1525,9 @@ NodeImportResult normalizationHelper(IImporterContext* ctx, const ::ONNX_NAMESPA
     int32_t nbGroups = attrs.get("num_groups", 1);
 
     auto nbDims = input->getDimensions().nbDims;
-    ASSERT_NODE(nbDims >= 3, "Input to normalization should be at least 3D!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    ASSERT_NODE(nbDims >= 3,
+        "Input to normalization should be at least 3D, the actual number of dimensions is " << nbDims << ".", node,
+        nodeIdx, ErrorCode::kINVALID_NODE);
 
     // Need to broadcast scale and bias to the input shape. Note that normal broadcasting rules cannot be applied
     // as scale and bias are 1D and need to be broadcasted to shape [1, S, 1, 1, ...].
@@ -1945,6 +1989,38 @@ nvinfer1::ITensor* transposeTensor(IImporterContext* ctx, const ::ONNX_NAMESPACE
     return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
 }
 
+std::string getUnaryOpName(nvinfer1::UnaryOperation op)
+{
+    switch (op)
+    {
+    case nvinfer1::UnaryOperation::kEXP: return "EXP";
+    case nvinfer1::UnaryOperation::kLOG: return "LOG";
+    case nvinfer1::UnaryOperation::kSQRT: return "SQRT";
+    case nvinfer1::UnaryOperation::kRECIP: return "RECIP";
+    case nvinfer1::UnaryOperation::kABS: return "ABS";
+    case nvinfer1::UnaryOperation::kNEG: return "NEG";
+    case nvinfer1::UnaryOperation::kSIN: return "SIN";
+    case nvinfer1::UnaryOperation::kCOS: return "COS";
+    case nvinfer1::UnaryOperation::kTAN: return "TAN";
+    case nvinfer1::UnaryOperation::kSINH: return "SINH";
+    case nvinfer1::UnaryOperation::kCOSH: return "COSH";
+    case nvinfer1::UnaryOperation::kASIN: return "ASIN";
+    case nvinfer1::UnaryOperation::kACOS: return "ACOS";
+    case nvinfer1::UnaryOperation::kATAN: return "ATAN";
+    case nvinfer1::UnaryOperation::kASINH: return "ASINH";
+    case nvinfer1::UnaryOperation::kACOSH: return "ACOSH";
+    case nvinfer1::UnaryOperation::kATANH: return "ATANH";
+    case nvinfer1::UnaryOperation::kCEIL: return "CEIL";
+    case nvinfer1::UnaryOperation::kFLOOR: return "FLOOR";
+    case nvinfer1::UnaryOperation::kERF: return "ERF";
+    case nvinfer1::UnaryOperation::kNOT: return "NOT";
+    case nvinfer1::UnaryOperation::kSIGN: return "SIGN";
+    case nvinfer1::UnaryOperation::kROUND: return "ROUND";
+    case nvinfer1::UnaryOperation::kISINF: return "ISINF";
+    default: return "<UNKNOWN>";
+    }
+}
+
 NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
     TensorOrWeights& input, nvinfer1::UnaryOperation op)
 {
@@ -1995,8 +2071,9 @@ NodeImportResult unaryHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::Node
     }
 
     ASSERT_NODE(validUnaryType,
-        "This version of TensorRT does not support the given operator with the given input data type.", node, nodeIdx,
-        ErrorCode::kUNSUPPORTED_NODE);
+        "This version of TensorRT does not support the given operator " + getUnaryOpName(op)
+            + " with the given input data type " + getTrtDtypeName(inputType) + ".",
+        node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::IUnaryLayer* layer = ctx->network()->addUnary(*tensorPtr, op);
     ctx->registerLayer(layer, node);
@@ -2125,7 +2202,7 @@ NodeImportResult convMultiInput(IImporterContext* ctx, const ::ONNX_NAMESPACE::N
         // Un-expand spatial dims back to 1D
         const std::vector<int> axes{3};
         output_tensor_ptr = squeezeTensor(ctx, node, *output_tensor_ptr, axes);
-        ASSERT_NODE(output_tensor_ptr, "Failed to unsqueeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT_NODE(output_tensor_ptr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
     return {{output_tensor_ptr}};
@@ -2319,20 +2396,26 @@ NodeImportResult addScatterLayer(IImporterContext* ctx, ::ONNX_NAMESPACE::NodePr
 
         // Ranks must all be the same
         ASSERT_NODE(dataDims.nbDims == indicesDims.nbDims && dataDims.nbDims == updatesDims.nbDims,
-            "Input dimensions to ScatterElements must have the same rank!", node, nodeIdx,
-            ErrorCode::kUNSUPPORTED_NODE);
+            "Input dimensions to ScatterElements must have the same rank! data rank =  "
+                << dataDims.nbDims << ", indices rank = " << indicesDims.nbDims
+                << ", updates rank = " << updatesDims.nbDims << ".",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
         // Corresponding dimensions of indices and updates must be <= data
         for (int32_t i = 0; i < dataDims.nbDims; ++i)
         {
             if (indicesDims.d[i] != -1 && dataDims.d[i] != -1)
             {
-                ASSERT_NODE(indicesDims.d[i] <= dataDims.d[i], "Indices dimensions must be less than data dimensions!",
+                ASSERT_NODE(indicesDims.d[i] <= dataDims.d[i],
+                    "Indices dimensions must be less than data dimensions! indices dimension = "
+                        << indicesDims.d[i] << ", data dimension = " << dataDims.d[i] << " on index " << i << ".",
                     node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
             }
             if (updatesDims.d[i] != -1 && dataDims.d[i] != -1)
             {
-                ASSERT_NODE(updatesDims.d[i] <= dataDims.d[i], "Updates dimensions must be less than data dimensions!",
+                ASSERT_NODE(updatesDims.d[i] <= dataDims.d[i],
+                    "Updates dimensions must be less than data dimensions! updates dimension = "
+                        << updatesDims.d[i] << ", data dimension = " << dataDims.d[i] << " on index " << i << ".",
                     node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
             }
         }

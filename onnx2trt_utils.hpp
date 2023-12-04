@@ -12,6 +12,7 @@
 #include <NvInfer.h>
 #include <onnx/onnx_pb.h>
 
+#include "bfloat16.hpp"
 #include "half.h"
 #include <cstring> // For std::memcpy
 #include <iostream>
@@ -99,11 +100,38 @@ int64_t volume(const nvinfer1::Dims& dims);
 // Helper function to get the size in bytes of an ONNX datatype
 int32_t getDtypeSize(int32_t onnxDtype);
 
+template <typename T>
+ShapedWeights::DataType getShapedWeightsDataType()
+{
+    static const std::unordered_map<std::type_index, ::ONNX_NAMESPACE::TensorProto::DataType> tMap({
+        {std::type_index(typeid(bool)), ::ONNX_NAMESPACE::TensorProto::BOOL},
+        {std::type_index(typeid(int8_t)), ::ONNX_NAMESPACE::TensorProto::INT8},
+        {std::type_index(typeid(uint8_t)), ::ONNX_NAMESPACE::TensorProto::UINT8},
+        {std::type_index(typeid(int16_t)), ::ONNX_NAMESPACE::TensorProto::INT16},
+        {std::type_index(typeid(uint16_t)), ::ONNX_NAMESPACE::TensorProto::UINT16},
+        {std::type_index(typeid(int32_t)), ::ONNX_NAMESPACE::TensorProto::INT32},
+        {std::type_index(typeid(uint32_t)), ::ONNX_NAMESPACE::TensorProto::UINT32},
+        {std::type_index(typeid(int64_t)), ::ONNX_NAMESPACE::TensorProto::INT64},
+        {std::type_index(typeid(uint64_t)), ::ONNX_NAMESPACE::TensorProto::UINT64},
+        {std::type_index(typeid(float)), ::ONNX_NAMESPACE::TensorProto::FLOAT},
+        {std::type_index(typeid(double)), ::ONNX_NAMESPACE::TensorProto::DOUBLE},
+        {std::type_index(typeid(half_float::half)), ::ONNX_NAMESPACE::TensorProto::FLOAT16},
+        {std::type_index(typeid(BFloat16)), ::ONNX_NAMESPACE::TensorProto::BFLOAT16},
+    });
+
+    if (tMap.find(std::type_index(typeid(T))) != tMap.end())
+    {
+        return tMap.at(std::type_index(typeid(T)));
+    }
+    return ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+}
+
 // Helper function to add a scalar into TRT through a constant layer.
 template <typename ScalarType>
 inline nvinfer1::IConstantLayer* addConstantScalar(
     IImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{0})
 {
+    assert(getShapedWeightsDataType<ScalarType>() == type);
     assert(volume(shape) == 1 && "Cannot add constant scalar with a shape that has volume > 1");
     ShapedWeights scalarWeights = ctx->createTempWeights(type, shape);
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
@@ -117,6 +145,7 @@ template <typename ScalarType>
 inline nvinfer1::IConstantLayer* addConstant(
     IImporterContext* ctx, const std::vector<ScalarType>& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
 {
+    assert(getShapedWeightsDataType<ScalarType>() == type);
     assert(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided");
     assert(sizeof(ScalarType) == getDtypeSize(type) && "ONNX dtype does not have the same size as the value type");
     ShapedWeights weights = ctx->createTempWeights(type, shape);
@@ -238,14 +267,16 @@ nvinfer1::ITensor* convertToScalar(TensorOrWeights& input, IImporterContext* ctx
 int divCeil(int n, int d);
 
 // Helper function to check that the input data types for an elementwise operation are supported
-bool elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op);
+Status elementwiseCheck(const std::vector<TensorOrWeights>& inputs, const nvinfer1::ElementWiseOperation op,
+    ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx);
 
 // Helper function to import an ONNX elementwise op into TRT
 NodeImportResult elementwiseHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     const std::vector<TensorOrWeights>& inputs, nvinfer1::ElementWiseOperation binary_op);
 
 // Helper function to flatten a tensor on a given axis
-nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor& tensor, int axis = 0, bool regLayer = false);
+nvinfer1::ITensor* flattenTensor(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    nvinfer1::ITensor& tensor, int axis = 0, bool regLayer = false);
 
 // Gathers the specified dimension from a shape tensor. e.g. gatherDimension(shape=(7, 6, 5), dim=2) would return 5.
 // shape specifies the shape of the returned Tensor. Must have a volume of 1.
@@ -406,29 +437,6 @@ Status weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightV
 NodeImportResult staticSliceImporter(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs, nvinfer1::ITensor& data);
 
-template <typename T>
-ShapedWeights::DataType getShapedWeightsDataType()
-{
-    static const std::unordered_map<std::type_index, ::ONNX_NAMESPACE::TensorProto::DataType> tMap(
-        {{std::type_index(typeid(bool)), ::ONNX_NAMESPACE::TensorProto::BOOL},
-            {std::type_index(typeid(int8_t)), ::ONNX_NAMESPACE::TensorProto::INT8},
-            {std::type_index(typeid(uint8_t)), ::ONNX_NAMESPACE::TensorProto::UINT8},
-            {std::type_index(typeid(int16_t)), ::ONNX_NAMESPACE::TensorProto::INT16},
-            {std::type_index(typeid(uint16_t)), ::ONNX_NAMESPACE::TensorProto::UINT16},
-            {std::type_index(typeid(int32_t)), ::ONNX_NAMESPACE::TensorProto::INT32},
-            {std::type_index(typeid(uint32_t)), ::ONNX_NAMESPACE::TensorProto::UINT32},
-            {std::type_index(typeid(int64_t)), ::ONNX_NAMESPACE::TensorProto::INT64},
-            {std::type_index(typeid(uint64_t)), ::ONNX_NAMESPACE::TensorProto::UINT64},
-            {std::type_index(typeid(float)), ::ONNX_NAMESPACE::TensorProto::FLOAT},
-            {std::type_index(typeid(double)), ::ONNX_NAMESPACE::TensorProto::DOUBLE}});
-
-    if (tMap.find(std::type_index(typeid(T))) != tMap.end())
-    {
-        return tMap.at(std::type_index(typeid(T)));
-    }
-    return ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
-}
-
 // Helper function to convert a vector object into a ShapedWeights object
 template <typename T>
 Status vectorToWeights(std::vector<T>& weightVector, TensorOrWeights* weights)
@@ -520,5 +528,7 @@ Status processEllipsisAndImplicitOutput(
 //!
 nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation);
+
+std::string getTrtDtypeName(nvinfer1::DataType TrtDtype);
 
 } // namespace onnx2trt

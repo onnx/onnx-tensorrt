@@ -2,6 +2,12 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 9.2 GA Release - 2023-12-4
+For more details, see the 9.2 GA release notes for the fixes since 9.1 GA.
+
+- Added support for `Hardmax`
+- Fixed type inference for few operators to use native ONNX types
+
 # TensorRT 9.1 GA Release - 2023-10-18
 For more details, see the 9.1 GA release notes for the fixes since 9.0 GA.
 

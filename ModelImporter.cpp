@@ -208,7 +208,9 @@ Status parseNode(
     }
 
     ASSERT_NODE((node.output().size() <= static_cast<int32_t>(outputs.size())),
-        "Node has more output tensors than TRT expected.", node, nodeIdx, ErrorCode::kINVALID_GRAPH);
+        "Node has more output tensors than TRT expected, expected output size is "
+            << outputs.size() << ", actual output size is " << node.output().size() << ".",
+        node, nodeIdx, ErrorCode::kINVALID_GRAPH);
 
     // Set output names and register outputs with the context.
     std::ostringstream ssOutputs{};

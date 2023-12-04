@@ -350,6 +350,8 @@ DEFINE_OP_CHECKER(GRU)
     }
 }
 
+DEFINE_OP_EMPTY_CHECKER(Hardmax)
+
 DEFINE_OP_EMPTY_CHECKER(HardSigmoid)
 
 DEFINE_OP_EMPTY_CHECKER(Identity)
@@ -826,11 +828,6 @@ DEFINE_OP_CHECKER(DeformConv)
 }
 
 DEFINE_OP_CHECKER(Det)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(Hardmax)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
