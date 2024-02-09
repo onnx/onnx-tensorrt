@@ -2,7 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
-# TensorRT 9.2 GA Release - 2023-12-4
+# TensorRT 9.3 GA Release - 2024-2-8
+For more details, see the 9.3 GA release notes for the fixes since 9.2 GA.
+
+- Added native support for `INT32` and `INT64` types for `ArgMin` and `ArgMax` nodes
+- Fixed check for valid `zero_point` values in `QuantizeLinear` and `DequantizeLinear` nodes
+
+# TensorRT 9.2 GA Release - 2023-11-8
 For more details, see the 9.2 GA release notes for the fixes since 9.1 GA.
 
 - Added support for `Hardmax`

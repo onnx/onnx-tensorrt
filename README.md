@@ -48,8 +48,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 9.2](https://developer.nvidia.com/tensorrt)
- - [TensorRT 9.2 open source libaries] (https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 9.3](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 9.3 open source libaries] (https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -99,7 +99,7 @@ Refer to the link or run `polygraphy run -h` for more information on CLI options
 
 Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files.
 
-TensorRT 9.2 supports ONNX release 1.14.0. Install it with:
+TensorRT 9.3 supports ONNX release 1.14.0. Install it with:
 
     python3 -m pip install onnx==1.14.0
 

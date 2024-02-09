@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 9.2 supports operators up to Opset 19. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
+TensorRT 9.3 supports operators up to Opset 19. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/master/docs/Operators.md)
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, UINT8, and BOOL
 

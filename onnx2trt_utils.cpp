@@ -66,15 +66,6 @@ NodeImportResult argMinMaxHelper(IImporterContext* ctx, const ::ONNX_NAMESPACE::
     CHECK(notInvalidType(inputs.at(0), {"UINT8"}));
     nvinfer1::ITensor* tensor = &convertToTensor(inputs.at(0), ctx);
 
-    bool needCast = tensor->getType() == nvinfer1::DataType::kINT32;
-    if (needCast)
-    {
-        LOG_WARNING(
-            "TensorRT is using FLOAT32 precision to run an INT32 ArgMax / ArgMin. Rounding errors may occur for large "
-            "integer values");
-        tensor = castHelper(ctx, tensor, nvinfer1::DataType::kFLOAT);
-    }
-
     // Get attributes.
     OnnxAttrs attrs(node, ctx);
     int32_t keepdims = attrs.get("keepdims", 1);
