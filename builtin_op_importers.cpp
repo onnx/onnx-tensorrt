@@ -1344,21 +1344,17 @@ NodeImportResult QuantDequantLinearHelper(IImporterContext* ctx, ::ONNX_NAMESPAC
         {
             if (newConstantInput(2))
             {
-                //TRT-20277: after enabling ConstantInt8Validator to support Int8+Q, this constraint can be changed to allow Int8 zeropoint
-                //Right now, zero point is allowed to be only 0, hence there is no real usage of it, so no functionality change is expected
-                if (chosenDataType == DataType::kINT8 && isDQ)
-                {
-                    // Zero-point verification.
-                    auto zeroPoint = inputs.at(2).weights();
-                    ASSERT_NODE(shiftIsAllZeros(zeroPoint),
-                        "TensorRT only supports symmetric quantization. The zero point for the "
-                        "QuantizeLinear/DequantizeLinear operator must be all zeros.",
-                        node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
-                    // Convert the zero-point to float because TRT uses float for zero-point.
-                    auto fpZeroPoint = createZeroShifts(zeroPoint, ::ONNX_NAMESPACE::TensorProto::FLOAT, ctx);
-                    fpZeroPoint.setName(zeroPoint.getName());
-                    zeroPointInput = addConstantLayer(*ctx->network(), fpZeroPoint);
-                }
+                // Make sure that zero points are all zeros.
+                auto zeroPoint = inputs.at(2).weights();
+                ASSERT_NODE(shiftIsAllZeros(zeroPoint),
+                    "TensorRT only supports symmetric quantization. The zero point for the "
+                    "QuantizeLinear/DequantizeLinear operator must be all zeros.",
+                    node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+
+                // Convert the zero-point to float because TRT uses float for zero-point.
+                auto fpZeroPoint = createZeroShifts(zeroPoint, ::ONNX_NAMESPACE::TensorProto::FLOAT, ctx);
+                fpZeroPoint.setName(zeroPoint.getName());
+                zeroPointInput = addConstantLayer(*ctx->network(), fpZeroPoint);
             }
             else
             {
