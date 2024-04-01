@@ -3,8 +3,9 @@
  */
 
 #include "ShapeTensor.hpp"
+#include "Status.hpp"
 #include "TensorOrWeights.hpp"
-#include "onnx2trt_utils.hpp"
+#include "importerUtils.hpp"
 #include <algorithm>
 #include <functional>
 
@@ -45,7 +46,7 @@ ShapeTensor::ShapeTensor(int32_t rank_, std::vector<float>&& values_)
     assert(mValues.size() == 0 && "non-empty floating-point shape tensor with known values not supported");
 }
 
-ShapeTensor::ShapeTensor(IImporterContext* ctx, TensorOrWeights& t)
+ShapeTensor::ShapeTensor(ImporterContext* ctx, TensorOrWeights& t)
     : mDepth(0)
     , mIsFloat(t.isFp32())
 {
@@ -170,7 +171,7 @@ bool ShapeTensor::isAll(int64_t x) const
     return allValuesKnown() && std::all_of(begin(), end(), [x](int64_t y) { return x == y; });
 }
 
-nvinfer1::ITensor& ShapeTensor::tensor(IImporterContext* ctx) const
+nvinfer1::ITensor& ShapeTensor::tensor(ImporterContext* ctx) const
 {
     assert(mDepth >= 0 && "undefined tensor");
     assert(mDepth <= 2);
@@ -182,11 +183,11 @@ nvinfer1::ITensor& ShapeTensor::tensor(IImporterContext* ctx) const
             // Create constant
             const nvinfer1::Dims dims{rank(), {size()}};
             // Must create temp weights in the parser in order to keep ownership of weights.
-            auto shapeWeights = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, dims);
+            auto shapeWeights = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, dims);
             std::memcpy(shapeWeights.values, mValues.data(), mValues.size() * sizeof(int64_t));
-            auto* constLayer = ctx->network()->addConstant(dims, shapeWeights);
+            auto* constLayer = N_CHECK(ctx->network()->addConstant(dims, shapeWeights));
             ctx->registerLayer(constLayer, "ONNXTRT_ShapeTensorFromDims", nullptr);
-            mTensor = constLayer->getOutput(0);
+            mTensor = N_CHECK(constLayer->getOutput(0));
             mDepth = 0;
         }
         else
@@ -194,9 +195,9 @@ nvinfer1::ITensor& ShapeTensor::tensor(IImporterContext* ctx) const
             assert(mTensor);
             for (; mDepth > 0; --mDepth)
             {
-                auto* shapeLayer = ctx->network()->addShape(*mTensor);
+                auto* shapeLayer = N_CHECK(ctx->network()->addShape(*mTensor));
                 ctx->registerLayer(shapeLayer, "ONNXTRT_ShapeTensor", nullptr);
-                mTensor = shapeLayer->getOutput(0);
+                mTensor = N_CHECK(shapeLayer->getOutput(0));
                 mTensor = castHelper(ctx, mTensor, nvinfer1::DataType::kINT64);
             }
         }
@@ -211,12 +212,12 @@ ShapeTensor iotaShapeVector(int32_t n)
     return ShapeTensor(1, std::move(values));
 }
 
-ShapeTensor similar(IImporterContext* ctx, const ShapeTensor& exemplar, int64_t value)
+ShapeTensor similar(ImporterContext* ctx, const ShapeTensor& exemplar, int64_t value)
 {
     return fillShapeVector(ctx, value, shapeOf(exemplar));
 }
 
-ShapeTensor fillShapeVector(IImporterContext* ctx, int64_t value, const ShapeTensor& count)
+ShapeTensor fillShapeVector(ImporterContext* ctx, int64_t value, const ShapeTensor& count)
 {
     assert(count.rank() == 1 && "implementation assumes 1D size");
     assert(count.size() == 1 && "implementation assumes 1D size of known size");
@@ -228,7 +229,9 @@ ShapeTensor fillShapeVector(IImporterContext* ctx, int64_t value, const ShapeTen
     {
         nvinfer1::ISliceLayer* slice
             = addSlice(ctx, shapeVector(value).tensor(ctx), shapeVector(0), count, shapeVector(0));
-        return ShapeTensor(*slice->getOutput(0));
+        ctx->registerLayer(slice, "ONNXTRT_FillShapeVector", nullptr);
+        auto* sliceOutput = N_CHECK(slice->getOutput(0));
+        return ShapeTensor(*sliceOutput);
     }
 }
 
@@ -238,7 +241,7 @@ using nvinfer1::ElementWiseOperation;
 //! f must implement the operation on a pair of int64_t.
 //! commutes should be true f is commutative.
 //! rightIdentity should be the right identity value for f.
-static ShapeTensor op(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, ElementWiseOperation operation,
+static ShapeTensor op(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, ElementWiseOperation operation,
     bool commutative, int64_t rightIdentity, const std::function<int64_t(int64_t, int64_t)>&& f)
 {
     assert(!x.rankKnown() || !y.rankKnown() || x.rank() == y.rank());
@@ -276,38 +279,39 @@ static ShapeTensor op(IImporterContext* ctx, const ShapeTensor& x, const ShapeTe
         }
         return ShapeTensor(x.rank(), std::move(values));
     }
-    auto* elemLayer = ctx->network()->addElementWise(x.tensor(ctx), y.tensor(ctx), operation);
+    auto* elemLayer = N_CHECK(ctx->network()->addElementWise(x.tensor(ctx), y.tensor(ctx), operation));
     ctx->registerLayer(elemLayer, "ONNXTRT_ShapeElementWise", nullptr);
-    return ShapeTensor(*elemLayer->getOutput(0), 0);
+    auto* elemOutput = N_CHECK(elemLayer->getOutput(0));
+    return ShapeTensor(*elemOutput, 0);
 }
 
-ShapeTensor add(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor add(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kSUM, true, 0, std::plus<int64_t>());
 }
 
-ShapeTensor sub(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor sub(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kSUB, false, 0, std::minus<int64_t>());
 }
 
-ShapeTensor mul(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor mul(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kPROD, true, 1, std::multiplies<int64_t>());
 }
 
-ShapeTensor min(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor min(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kMIN, true, std::numeric_limits<int64_t>::max(),
         [](int64_t x, int64_t y) { return std::min(x, y); });
 }
 
-ShapeTensor max(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor max(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kMAX, true, std::numeric_limits<int64_t>::min(),
         [](int64_t x, int64_t y) { return std::max(x, y); });
 }
-ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor floorDiv(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kFLOOR_DIV, false, 1, [](int64_t x, int64_t y) {
         assert(y != 0 && "divisor must be non-zero");
@@ -316,7 +320,7 @@ ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTen
     });
 }
 
-ShapeTensor broadcast(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor broadcast(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     // max(x,y) works unless x or y is 0.
     // min(x,y,1) yields 0 if x or y is 0, and 1 otherwise.
@@ -324,7 +328,7 @@ ShapeTensor broadcast(IImporterContext* ctx, const ShapeTensor& x, const ShapeTe
     return mul(ctx, max(ctx, x, y), min(ctx, x, min(ctx, y, similar(ctx, y, 1))));
 }
 
-ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank)
+ShapeTensor product(ImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank)
 {
     assert(first <= last);
     ShapeTensor z(rank, std::vector<int64_t>(1, 1));
@@ -335,7 +339,7 @@ ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int 
     return z;
 }
 
-ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor concat(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
 {
     assert(!x.rankKnown() || x.rank() == 1);
     assert(!y.rankKnown() || y.rank() == 1);
@@ -356,12 +360,13 @@ ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTenso
     }
 
     nvinfer1::ITensor* const args[2] = {&x.tensor(ctx), &y.tensor(ctx)};
-    auto* concatLayer = ctx->network()->addConcatenation(args, 2);
+    auto* concatLayer = N_CHECK(ctx->network()->addConcatenation(args, 2));
     ctx->registerLayer(concatLayer, "ONNXTRT_ShapeConcat", nullptr);
-    return ShapeTensor(*concatLayer->getOutput(0));
+    auto* concatOutput = N_CHECK(concatLayer->getOutput(0));
+    return ShapeTensor(*concatOutput);
 }
 
-ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices)
+ShapeTensor gather(ImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices)
 {
     assert(data.rank() == 1);
     if (indices.allValuesKnown()
@@ -377,23 +382,24 @@ ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTe
     }
     auto* gatherLayer = ctx->network()->addGather(data.tensor(ctx), indices.tensor(ctx), 0);
     ctx->registerLayer(gatherLayer, "ONNXTRT_ShapeGather", nullptr);
-    return ShapeTensor(*gatherLayer->getOutput(0));
+    auto* gatherOutput = N_CHECK(gatherLayer->getOutput(0));
+    return ShapeTensor(*gatherOutput);
 }
 
-ShapeTensor castToInt32(IImporterContext* ctx, ShapeTensor const& x)
+ShapeTensor castToInt32(ImporterContext* ctx, ShapeTensor const& x)
 {
-    nvinfer1::ILayer* cast = ctx->network()->addCast(x.tensor(ctx), nvinfer1::DataType::kINT32);
-    assert(cast != nullptr);
+    nvinfer1::ILayer* cast = N_CHECK(ctx->network()->addCast(x.tensor(ctx), nvinfer1::DataType::kINT32));
     ctx->registerLayer(cast, "ONNXTRT_ShapeCastToInt32", nullptr);
-    return ShapeTensor(*cast->getOutput(0));
+    auto castOutput = N_CHECK(cast->getOutput(0));
+    return ShapeTensor(*castOutput);
 }
 
-ShapeTensor castToInt64(IImporterContext* ctx, ShapeTensor const& x)
+ShapeTensor castToInt64(ImporterContext* ctx, ShapeTensor const& x)
 {
-    nvinfer1::ILayer* cast = ctx->network()->addCast(x.tensor(ctx), nvinfer1::DataType::kINT64);
-    assert(cast != nullptr);
+    nvinfer1::ILayer* cast = N_CHECK(ctx->network()->addCast(x.tensor(ctx), nvinfer1::DataType::kINT64));
     ctx->registerLayer(cast, "ONNXTRT_ShapeCastToInt64", nullptr);
-    return ShapeTensor(*cast->getOutput(0));
+    auto castOutput = N_CHECK(cast->getOutput(0));
+    return ShapeTensor(*castOutput);
 }
 
 ShapeTensor shapeOf(nvinfer1::ITensor& tensor)
@@ -426,7 +432,7 @@ ShapeTensor shapeOf(const ShapeTensor& t)
     return t.rank() == 0 ? ShapeTensor(0, std::vector<int64_t>{}) : ShapeTensor(1, std::vector<int64_t>{t.size()});
 }
 
-ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)
+ShapeTensor convertTo1D(ImporterContext* ctx, const ShapeTensor& tensor)
 {
     assert(tensor.rank() == 0);
     assert(tensor.size() == 1);
@@ -434,7 +440,7 @@ ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor)
     {
         return shapeVector(tensor[0]);
     }
-    return ShapeTensor(*addShuffle(ctx, tensor.tensor(ctx), shapeVector(1))->getOutput(0));
+    return ShapeTensor(*N_CHECK(addShuffle(ctx, tensor.tensor(ctx), shapeVector(1))->getOutput(0)));
 }
 
 //! If all values of x are known, return Dims with those values,
@@ -469,7 +475,7 @@ static nvinfer1::Dims toDims(const ShapeTensor& x, const char* what, int32_t min
 
 //! If not all values in x are known, set layer input specifed by inputIndex
 //! to tensor with value of x.
-static void setShapeInputIfDynamic(IImporterContext* ctx, nvinfer1::ILayer* layer, int inputIndex, const ShapeTensor& x)
+static void setShapeInputIfDynamic(ImporterContext* ctx, nvinfer1::ILayer* layer, int inputIndex, const ShapeTensor& x)
 {
     if (!x.allValuesKnown())
     {
@@ -487,20 +493,20 @@ bool operator==(const ShapeTensor& x, const ShapeTensor& y)
     return x.mTensor == y.mTensor && x.mDepth == y.mDepth;
 }
 
-nvinfer1::ITensor& reshape(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape)
+nvinfer1::ITensor& reshape(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape)
 {
     const ShapeTensor oldShape = shapeOf(data);
     if (newShape == oldShape)
     {
         return data;
     }
-    return *addShuffle(ctx, data, newShape)->getOutput(0);
+    return *N_CHECK(addShuffle(ctx, data, newShape)->getOutput(0));
 }
 
 nvinfer1::IShuffleLayer* addShuffle(
-    IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder)
+    ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder)
 {
-    nvinfer1::IShuffleLayer* shuffle = ctx->network()->addShuffle(data);
+    nvinfer1::IShuffleLayer* shuffle = N_CHECK(ctx->network()->addShuffle(data));
     if (reshapeDims.allValuesKnown())
     {
         shuffle->setReshapeDimensions(toDims(reshapeDims, "reshape", -1, std::numeric_limits<int32_t>::max()));
@@ -514,13 +520,13 @@ nvinfer1::IShuffleLayer* addShuffle(
     return shuffle;
 }
 
-nvinfer1::ISliceLayer* addSlice(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
+nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
     const ShapeTensor& sizes, const ShapeTensor& strides)
 {
     constexpr int32_t minDim = std::numeric_limits<int32_t>::min();
     constexpr int32_t maxDim = std::numeric_limits<int32_t>::max();
-    nvinfer1::ISliceLayer* slice = ctx->network()->addSlice(data, toDims(starts, "slice start", 0, maxDim),
-        toDims(sizes, "slice size", 0, maxDim), toDims(strides, "slide strides", minDim, maxDim));
+    nvinfer1::ISliceLayer* slice = N_CHECK(ctx->network()->addSlice(data, toDims(starts, "slice start", 0, maxDim),
+        toDims(sizes, "slice size", 0, maxDim), toDims(strides, "slide strides", minDim, maxDim)));
     setShapeInputIfDynamic(ctx, slice, 1, starts);
     setShapeInputIfDynamic(ctx, slice, 2, sizes);
     setShapeInputIfDynamic(ctx, slice, 3, strides);
@@ -528,10 +534,10 @@ nvinfer1::ISliceLayer* addSlice(IImporterContext* ctx, nvinfer1::ITensor& data, 
     return slice;
 }
 
-nvinfer1::IFillLayer* addFill(IImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op)
+nvinfer1::IFillLayer* addFill(ImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op)
 {
-    nvinfer1::IFillLayer* fill = ctx->network()->addFill(
-        toDims(shape, "fill output", 0, std::numeric_limits<int32_t>::max()), op, nvinfer1::DataType::kFLOAT);
+    nvinfer1::IFillLayer* fill = N_CHECK(ctx->network()->addFill(
+        toDims(shape, "fill output", 0, std::numeric_limits<int32_t>::max()), op, nvinfer1::DataType::kFLOAT));
     setShapeInputIfDynamic(ctx, fill, 0, shape);
     ctx->registerLayer(fill, "ONNXTRT_ShapeFill", nullptr);
     return fill;

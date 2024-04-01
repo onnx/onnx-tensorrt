@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "builtin_op_static_checkers.hpp"
+#include "onnxOpCheckers.hpp"
 #include "ConditionalHelpers.hpp"
 #include "LoopHelpers.hpp"
 #include "ModelImporter.hpp"
@@ -14,7 +14,7 @@
 #include "ShapeTensor.hpp"
 #include "bfloat16.hpp"
 #include "half.h"
-#include "onnx2trt_utils.hpp"
+#include "importerUtils.hpp"
 
 #include <array>
 #include <cmath>
@@ -52,15 +52,15 @@ using nvinfer1::DataType;
     }
 
 #define DECLARE_OP_CHECKER(op)                                                                                         \
-    void check##op(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,        \
+    void check##op(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,         \
         size_t const nodeIndex)
 
 #define DEFINE_OP_CHECKER(op)                                                                                          \
-    void check##op(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,        \
+    void check##op(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,         \
         size_t const nodeIndex);                                                                                       \
     static bool const op##_registered_op_checker = registerOpStaticErrorChecker(#op, check##op);                       \
     IGNORE_UNUSED_GLOBAL(op##_registered_op_checker);                                                                  \
-    void check##op(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,        \
+    void check##op(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,         \
         size_t const nodeIndex)
 
 #define DEFINE_OP_EMPTY_CHECKER(op)                                                                                    \
@@ -74,7 +74,7 @@ bool registerOpStaticErrorChecker(std::string op, OpStaticErrorChecker const& ch
 }
 
 void argMinMaxCheckHelper(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
     int32_t selectLastIndex = attrs.get<int32_t>("select_last_index", 0);
@@ -84,7 +84,7 @@ void argMinMaxCheckHelper(
 }
 
 void poolingCheckHelper(
-    IImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
     if (ctx->getOpsetVersion() >= 10)
@@ -97,7 +97,7 @@ void poolingCheckHelper(
 }
 
 void randomUniformCheckHelper(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
 
@@ -109,14 +109,14 @@ void randomUniformCheckHelper(
         auto dtype = attrs.get<int32_t>("dtype", 1);
         if (dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT && dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT16)
         {
-            errors.push_back(MAKE_STATIC_ERROR(
-                "Unsupported data type in randomUniform", ErrorCode::kINVALID_VALUE, node, nodeIndex));
+            ADD_STATIC_ERROR(
+                "Unsupported data type in randomUniform", ErrorCode::kINVALID_VALUE, node, nodeIndex, errors);
         }
     }
 }
 
 void randomNormalCheckHelper(
-    IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
 
@@ -128,8 +128,8 @@ void randomNormalCheckHelper(
         auto dtype = attrs.get<int32_t>("dtype", 1);
         if (dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT && dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT16)
         {
-            errors.push_back(
-                MAKE_STATIC_ERROR("Unsupported data type in randomNormal", ErrorCode::kINVALID_VALUE, node, nodeIndex));
+            ADD_STATIC_ERROR(
+                "Unsupported data type in randomNormal", ErrorCode::kINVALID_VALUE, node, nodeIndex, errors);
         }
     }
 }
@@ -212,10 +212,11 @@ DEFINE_OP_CHECKER(ConstantOfShape)
 {
     OnnxAttrs attrs(node, ctx);
     ShapedWeights zeroWeights
-        = ctx->createTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, 1});
+        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, {1}});
     static_cast<float*>(zeroWeights.values)[0] = 0.f;
     auto valueWeights = TensorOrWeights{attrs.get("value", zeroWeights)};
-    STATIC_CHECK(notInvalidType(valueWeights, {"UINT8"}).is_success() && "Invalid input type for ConstantOfShape",
+    STATIC_CHECK(notInvalidType(valueWeights, {"UINT8"}, node, nodeIndex).is_success()
+            && "Invalid input type for ConstantOfShape",
         ErrorCode::kUNSUPPORTED_NODE_DATATYPE, node, errors, nodeIndex);
 }
 
@@ -238,6 +239,10 @@ DEFINE_OP_EMPTY_CHECKER(DequantizeLinear)
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8DequantizeLinear)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_INT4QuantizeLinear)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_INT4DequantizeLinear)
 
 DECLARE_OP_CHECKER(Mul);
 
@@ -271,8 +276,8 @@ DEFINE_OP_CHECKER(Einsum)
     if (!invalidCharacters.empty())
     {
         invalidCharacters.pop_back();
-        errors.push_back(MAKE_STATIC_ERROR("Invalid character(s) in Einsum equation: " + invalidCharacters,
-            ErrorCode::kINVALID_NODE, node, nodeIndex));
+        ADD_STATIC_ERROR("Invalid character(s) in Einsum equation: " + invalidCharacters, ErrorCode::kINVALID_NODE,
+            node, nodeIndex, errors);
     }
 }
 
@@ -297,6 +302,8 @@ DEFINE_OP_EMPTY_CHECKER(Gather)
 DEFINE_OP_EMPTY_CHECKER(GatherElements)
 
 DEFINE_OP_EMPTY_CHECKER(GatherND)
+
+DEFINE_OP_EMPTY_CHECKER(Gelu)
 
 DEFINE_OP_EMPTY_CHECKER(Gemm)
 
@@ -447,6 +454,7 @@ DEFINE_OP_CHECKER(LpPool)
 
     STATIC_CHECK((p == 1 || p == 2) && "Only L1 and L2 normalization are supported.", ErrorCode::kUNSUPPORTED_NODE,
         node, errors, nodeIndex);
+    poolingCheckHelper(ctx, node, errors, nodeIndex);
 }
 
 DEFINE_OP_EMPTY_CHECKER(MatMul)
@@ -560,7 +568,7 @@ DEFINE_OP_CHECKER(Resize)
     {
         // Check for TRT-supported resize attributes
         transformationMode = attrs.get<std::string>("coordinate_transformation_mode", "half_pixel");
-        auto nearest_mode = attrs.get<std::string>("nearest_mode", "round_prefer_floor");
+        auto const nearest_mode = attrs.get<std::string>("nearest_mode", "round_prefer_floor");
 
         STATIC_CHECK((transformationMode != "tf_half_pixel_for_nn" || nearest_mode == "round_prefer_floor")
                 && "This version of TensorRT only support round_prefer_floor nearest mode in tf_half_pixel_for_nn!",
@@ -571,6 +579,23 @@ DEFINE_OP_CHECKER(Resize)
                 && "TensorRT only supports half_pixel, pytorch_half_pixel, tf_half_pixel_for_nn, asymmetric and "
                 "align_corners transformation modes!", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
+
+    // Antialiasing is not supported currently.
+    auto const antialias = attrs.get<int32_t>("antialias", 0);
+    STATIC_CHECK((antialias == 0) && "Antialiasing is not supported currently.", ErrorCode::kUNSUPPORTED_NODE_ATTR,
+        node, errors, nodeIndex);
+
+    // Only stretch keep_aspect_ratio_policy is supported currently.
+    auto const keep_aspect_ratio_policy = attrs.get<std::string>("keep_aspect_ratio_policy", "stretch");
+    STATIC_CHECK((keep_aspect_ratio_policy == "stretch")
+            && "Only `stretch` is supported currently as `keep_aspect_ratio_policy`.",
+        ErrorCode::kUNSUPPORTED_NODE_ATTR, node, errors, nodeIndex);
+
+    // Axes provided must be unique.
+    auto const resizeAxes = attrs.get<std::vector<int32_t>>("axes", std::vector<int32_t>());
+    STATIC_CHECK((std::unordered_set<int32_t>(resizeAxes.begin(), resizeAxes.end()).size() == resizeAxes.size())
+            && "The input axes must have unique elements.",
+        ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 }
 
 DEFINE_OP_EMPTY_CHECKER(Reshape)
@@ -621,7 +646,26 @@ DEFINE_OP_CHECKER(RNN)
     }
 }
 
-DEFINE_OP_EMPTY_CHECKER(RoiAlign)
+DEFINE_OP_CHECKER(RoiAlign)
+{
+    OnnxAttrs attrs(node, ctx);
+    auto mode = attrs.get("mode", std::string("avg"));
+    STATIC_CHECK((mode == "avg" || mode == "max") && "Mode must be avg or max!", ErrorCode::kINVALID_NODE, node, errors,
+        nodeIndex);
+
+    auto samplingRatio = attrs.get<int32_t>("sampling_ratio", 0);
+    STATIC_CHECK(
+        samplingRatio >= 0 && "Sampling ratio cannot be negative!", ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+
+    // Opset 16 attributes
+    if (ctx->getOpsetVersion() >= 16)
+    {
+        auto ctm = attrs.get("coordinate_transformation_mode", std::string("half_pixel"));
+        STATIC_CHECK((ctm == "half_pixel" || ctm == "output_half_pixel")
+                && "Coordinate transformation mode must be half_pixel or output_half_pixel!",
+            ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+    }
+}
 
 DEFINE_OP_EMPTY_CHECKER(ScaledTanh)
 
@@ -720,13 +764,51 @@ DEFINE_OP_EMPTY_CHECKER(HardSwish)
 
 DEFINE_OP_EMPTY_CHECKER(NonZero)
 
+DEFINE_OP_EMPTY_CHECKER(Mish)
+
 // Any ops that are not supported will attempt to import as plugins.
-DEFINE_OP_EMPTY_CHECKER(FallbackPluginImporter)
+DEFINE_OP_CHECKER(FallbackPluginImporter)
+{
+    OnnxAttrs attrs(node, ctx);
+    std::string const pluginName{node.op_type()};
+    std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
+    std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
+
+    nvinfer1::IPluginCreatorInterface* creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
+    STATIC_CHECK(creator && "Plugin not found, are the plugin name, version, and namespace correct?",
+        nvonnxparser::ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+}
 
 DEFINE_OP_CHECKER(LocalFunctionImporter)
 {
     auto function = ctx->localFunctions().at(node.op_type());
     STATIC_CHECK(node.input().size() == function.input().size(), ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+
+    // Create attribute map for the local function instance. Attributes can have default values (from the parent
+    // FunctionProto) or local values (from the NodeProto instance of the Function).
+
+    StringMap<::ONNX_NAMESPACE::AttributeProto const*> attrMap;
+    // Add local values first as they override any default values.
+    for (auto const& attr : node.attribute())
+    {
+        attrMap.insert({attr.name(), &attr});
+    }
+    // Add default values
+    for (auto const& attr : function.attribute_proto())
+    {
+        attrMap.insert({attr.name(), &attr});
+    }
+
+    // Push current function name to top of stack in order to properly set layer metadata and track attributes
+    ctx->localFunctionStack().push_back({node.op_type(), attrMap});
+
+    for (auto const& node : function.node())
+    {
+        onnx2trt::parseNodeStaticCheck(ctx, node, errors, nodeIndex);
+    }
+
+    // Pop the current function name from stack
+    ctx->localFunctionStack().pop_back();
 }
 
 DEFINE_OP_EMPTY_CHECKER(TRT_Scale)
@@ -982,22 +1064,12 @@ DEFINE_OP_CHECKER(DynamicQuantizeLinear)
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
-DEFINE_OP_CHECKER(Gelu)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
 DEFINE_OP_CHECKER(HammingWindow)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
 DEFINE_OP_CHECKER(HannWindow)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(Mish)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }

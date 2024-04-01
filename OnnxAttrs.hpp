@@ -17,10 +17,10 @@ class OnnxAttrs
     using string_map = std::unordered_map<std::string, T>;
     typedef string_map<::ONNX_NAMESPACE::AttributeProto const*> AttrMap;
     AttrMap _attrs;
-    onnx2trt::IImporterContext* mCtx;
+    onnx2trt::ImporterContext* mCtx;
 
 public:
-    explicit OnnxAttrs(::ONNX_NAMESPACE::NodeProto const& onnx_node, onnx2trt::IImporterContext* ctx)
+    explicit OnnxAttrs(::ONNX_NAMESPACE::NodeProto const& onnx_node, onnx2trt::ImporterContext* ctx)
         : mCtx{ctx}
     {
         for (auto const& attr : onnx_node.attribute())

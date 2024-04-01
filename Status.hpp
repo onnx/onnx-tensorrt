@@ -6,7 +6,10 @@
 
 #include "NvOnnxParser.h"
 
+#include <algorithm>
+#include <iterator>
 #include <cassert>
+#include <sstream>
 #include <string>
 
 #ifndef ENABLE_STD_PLUGIN
@@ -23,6 +26,22 @@
 #else
 #define __FILENAME__ (__FILE__)
 #endif
+
+// Logging macros
+#define LOG(msg, severity)                                                                                             \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        std::stringstream ss{};                                                                                        \
+        if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
+            ss << __FILENAME__ << ":" << __LINE__ << ": ";                                                             \
+        ss << msg;                                                                                                     \
+        ctx->logger().log(severity, ss.str().c_str());                                                                 \
+    } while (0)
+
+#define LOG_VERBOSE(msg) LOG(msg, nvinfer1::ILogger::Severity::kVERBOSE)
+#define LOG_INFO(msg) LOG(msg, nvinfer1::ILogger::Severity::kINFO)
+#define LOG_WARNING(msg) LOG(msg, nvinfer1::ILogger::Severity::kWARNING)
+#define LOG_ERROR(msg) LOG(msg, nvinfer1::ILogger::Severity::kERROR)
 
 #define MAKE_ERROR(desc, code) onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__)
 
@@ -52,12 +71,31 @@
 #define MAKE_STATIC_ERROR(desc, code, node, index)                                                                     \
     onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
 
+#define ADD_STATIC_ERROR(desc, code, node, index, error_list)                                                          \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        size_t stackSize = ctx->localFunctionStack().size();                                                           \
+        std::vector<std::string> localFunctionStackString{};                                                           \
+        std::vector<char const*> localFunctionStackChar{};                                                             \
+        for (size_t i = 0; i < stackSize; i++)                                                                         \
+        {                                                                                                              \
+            localFunctionStackString.push_back(ctx->localFunctionStack()[i].first);                                    \
+        }                                                                                                              \
+        ctx->localFunctionErrors().push_back(localFunctionStackString);                                                \
+        for (size_t i = 0; i < stackSize; i++)                                                                         \
+        {                                                                                                              \
+            localFunctionStackChar.push_back(ctx->localFunctionErrors().back()[i].c_str());                            \
+        }                                                                                                              \
+        error_list.push_back(onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index),               \
+            (node.name()), (node.op_type()), localFunctionStackChar));                                                 \
+    } while (0)
+
 #define STATIC_CHECK(condition, error_code, node, error_list, index)                                                   \
     do                                                                                                                 \
     {                                                                                                                  \
         if (!(condition))                                                                                              \
         {                                                                                                              \
-            error_list.push_back(MAKE_STATIC_ERROR(#condition, (error_code), node, index));                            \
+            ADD_STATIC_ERROR(#condition, (error_code), node, index, error_list);                                       \
         }                                                                                                              \
     } while (0)
 
@@ -95,15 +133,78 @@
         }                                                                                                              \
     } while (0)
 
-#define CHECK(call)                                                                                                    \
+#define CHECK_STATUS(call)                                                                                             \
     do                                                                                                                 \
     {                                                                                                                  \
-        Status status = call;                                                                                          \
+        onnx2trt::Status status = call;                                                                                \
         if (!status.is_success())                                                                                      \
         {                                                                                                              \
             return status;                                                                                             \
         }                                                                                                              \
     } while (0)
+
+// Nullptr check for added layers and tensors. All added layers and their output tensors
+// should be non-null, so throw an exception here if it is null. This exception
+// will be caught by the parseNode function.
+template <typename T>
+T* N_CHECK(T* inputPtr)
+{
+    if (!inputPtr)
+    {
+        throw std::runtime_error("Internal Error!");
+    }
+    return inputPtr;
+}
+
+// Overloads of operator<< on TensorRT types must be defined inside nvinfer1
+// so that argument-dependent lookup works as expected. Declared static to
+// avoid symbol clashing when statically linking with other TensorRT libraries
+namespace nvinfer1
+{
+
+template <typename T>
+static std::ostream& printSequence(std::ostream& stream, const T* begin, int count)
+{
+    stream << "(";
+    if (count > 0)
+    {
+        std::copy_n(begin, count - 1, std::ostream_iterator<T>(stream, ", "));
+        stream << begin[count - 1];
+    }
+    stream << ")";
+    return stream;
+}
+
+static std::ostream& operator<<(std::ostream& stream, nvinfer1::Dims const& shape)
+{
+    return printSequence(stream, shape.d, shape.nbDims);
+}
+
+static std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm)
+{
+    return printSequence(stream, perm.order, nvinfer1::Dims::MAX_DIMS);
+}
+
+static std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& dtype)
+{
+    switch (dtype)
+    {
+    case nvinfer1::DataType::kFLOAT: return stream << "float32";
+    case nvinfer1::DataType::kHALF: return stream << "float16";
+    case nvinfer1::DataType::kBF16: return stream << "bfloat16";
+    case nvinfer1::DataType::kINT8: return stream << "int8";
+    case nvinfer1::DataType::kUINT8: return stream << "uint8";
+    case nvinfer1::DataType::kINT32: return stream << "int32";
+    case nvinfer1::DataType::kINT64: return stream << "int64";
+    case nvinfer1::DataType::kBOOL: return stream << "bool";
+    case nvinfer1::DataType::kFP8: return stream << "float8";
+    case nvinfer1::DataType::kINT4: return stream << "int4";
+
+    default: throw std::runtime_error("Unknown dtype");
+    }
+}
+
+} // namespace nvinfer1
 
 namespace onnx2trt
 {
@@ -120,6 +221,7 @@ class Status : public nvonnxparser::IParserError
     int _node;
     std::string _nodeName;
     std::string _nodeOperator;
+    std::vector<char const*> _localFunctionStack;
 
 public:
     static Status success()
@@ -128,7 +230,8 @@ public:
     }
     Status() {}
     explicit Status(ErrorCode code, std::string desc = "", std::string file = "", int line = 0, std::string func = "",
-        int node = -1, std::string nodeName = "", std::string nodeOperator = "")
+        int node = -1, std::string nodeName = "", std::string nodeOperator = "",
+        std::vector<char const*> localFunctionStack = {})
         : _code(code)
         , _desc(desc)
         , _file(file)
@@ -137,6 +240,7 @@ public:
         , _node(node)
         , _nodeName(nodeName)
         , _nodeOperator(nodeOperator)
+        , _localFunctionStack(localFunctionStack)
     {
     }
     ErrorCode code() const override
@@ -182,6 +286,14 @@ public:
     char const* nodeOperator() const override
     {
         return _nodeOperator.c_str();
+    }
+    char const* const* localFunctionStack() const override
+    {
+        return _localFunctionStack.data();
+    }
+    int32_t localFunctionStackSize() const override
+    {
+        return _localFunctionStack.size();
     }
 };
 

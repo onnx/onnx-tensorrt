@@ -40,10 +40,16 @@ class TensorRTBackendRep(BackendRep):
         self._set_device(device)
         self._logger = TRT_LOGGER
         self.builder = trt.Builder(self._logger)
-        self.config = self.builder.create_builder_config()
-        self.network = self.builder.create_network(flags=1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        self.network = self.builder.create_network(flags=0)
         self.parser = trt.OnnxParser(self.network, self._logger)
-        self.shape_tensor_inputs = []
+        self.config = self.builder.create_builder_config()
+
+
+
+
+
+
+
         self.serialize_engine = serialize_engine
         self.verbose = verbose
         self.dynamic = False
@@ -71,7 +77,7 @@ class TensorRTBackendRep(BackendRep):
         if max_workspace_size is None:
             max_workspace_size = 1 << 28
 
-        self.config.max_workspace_size = max_workspace_size
+        self.config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, max_workspace_size)
 
         num_inputs = self.network.num_inputs
         for idx in range(num_inputs):
@@ -101,7 +107,7 @@ class TensorRTBackendRep(BackendRep):
 
     def _build_engine(self, inputs=None):
         """
-        Builds a TensorRT engine with a builder config.
+        Builds TensorRT Engine, with BuilderConfig if needed
         :param inputs: inputs to the model; if not None, this means we are building the engine at run time,
                        because we need to register optimization profiles for some inputs
         :type inputs: List of np.ndarray
@@ -125,13 +131,12 @@ class TensorRTBackendRep(BackendRep):
                     opt_profile.set_shape(name, inputs[i].shape, inputs[i].shape, inputs[i].shape)
 
             self.config.add_optimization_profile(opt_profile)
+        trt_blob = self.builder.build_serialized_network(self.network, self.config)
 
-        trt_engine = self.builder.build_engine(self.network, self.config)
-
-        if trt_engine is None:
+        if trt_blob is None:
             raise RuntimeError("Failed to build TensorRT engine from network")
-        if self.serialize_engine:
-            trt_engine = self._serialize_deserialize(trt_engine)
+
+        trt_engine = self._deserialize(trt_blob)
         self.engine = Engine(trt_engine)
 
     def _set_device(self, device):
@@ -139,12 +144,10 @@ class TensorRTBackendRep(BackendRep):
         assert(device.type == DeviceType.CUDA)
         cudaSetDevice(device.device_id)
 
-    def _serialize_deserialize(self, trt_engine):
+    def _deserialize(self, trt_blob):
         self.runtime = trt.Runtime(TRT_LOGGER)
-        serialized_engine = trt_engine.serialize()
         del self.parser # Parser no longer needed for ownership of plugins
-        trt_engine = self.runtime.deserialize_cuda_engine(
-                serialized_engine)
+        trt_engine = self.runtime.deserialize_cuda_engine(trt_blob)
         return trt_engine
 
     def run(self, inputs, **kwargs):
