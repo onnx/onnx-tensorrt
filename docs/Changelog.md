@@ -2,7 +2,7 @@
 
 # ONNX-TensorRT Changelog
 
-# TensorRT 10.0 EA Release - 2024-3-27
+# TensorRT 10.0 EA Release - 2024-4-1
 For more details, see the 10.0 EA release notes.
 
 - Added new class `IParserRefitter` that can be used to refit a TensorRT engine with the weights of an ONNX model
