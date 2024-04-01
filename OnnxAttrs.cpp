@@ -4,10 +4,10 @@
 
 #include "OnnxAttrs.hpp"
 #include "ShapedWeights.hpp"
-#include "onnx2trt_utils.hpp"
+#include "importerUtils.hpp"
 #include <onnx/onnx_pb.h>
 
-bool isExternalAttribute(std::string const& key, onnx2trt::IImporterContext* ctx)
+bool isExternalAttribute(std::string const& key, onnx2trt::ImporterContext* ctx)
 {
     return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().second.count(key);
 }
@@ -87,6 +87,10 @@ nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(std::string const& key) const
     auto values = this->get<std::vector<int32_t>>(key);
     nvinfer1::Dims dims;
     dims.nbDims = values.size();
+    if (dims.nbDims > nvinfer1::Dims::MAX_DIMS)
+    {
+        throw std::runtime_error{"Number of dimensions values exceed the maximum amount supported by TensorRT!"};
+    }
     std::copy(values.begin(), values.end(), dims.d);
     // Note: No dimension type information is included
     return dims;
@@ -105,6 +109,10 @@ nvinfer1::Permutation OnnxAttrs::get<nvinfer1::Permutation>(std::string const& k
 {
     auto values = this->get<std::vector<int32_t>>(key);
     nvinfer1::Permutation perm;
+    if (values.size() > nvinfer1::Dims::MAX_DIMS)
+    {
+        throw std::runtime_error{"Number of permutations values exceed the maximum amount supported by TensorRT!"};
+    }
     std::copy(values.begin(), values.end(), perm.order);
     // Fill unused values with identity permutation
     for (int32_t i = values.size(); i < nvinfer1::Dims::MAX_DIMS; ++i)
@@ -123,7 +131,7 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(std::string cons
 
     ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->t() : this->at(key)->t();
     onnx2trt::ShapedWeights weights;
-    bool success = convertOnnxWeights(onnx_weights_tensor, &weights, mCtx);
+    bool success = mCtx->getWeightsContext().convertOnnxWeights(onnx_weights_tensor, &weights);
     if (!success)
     {
         throw std::runtime_error{"Unable to convert ONNX weights"};
@@ -234,59 +242,6 @@ const ::ONNX_NAMESPACE::GraphProto& OnnxAttrs::get<const ::ONNX_NAMESPACE::Graph
 }
 
 template <>
-nvinfer1::RNNOperation OnnxAttrs::get<nvinfer1::RNNOperation>(std::string const& key) const
-{
-    std::string op = this->get<std::string>(key);
-    if (op == std::string("relu"))
-    {
-        return nvinfer1::RNNOperation::kRELU;
-    }
-    if (op == std::string("tanh"))
-    {
-        return nvinfer1::RNNOperation::kTANH;
-    }
-    if (op == std::string("lstm"))
-    {
-        return nvinfer1::RNNOperation::kLSTM;
-    }
-    if (op == std::string("gru"))
-    {
-        return nvinfer1::RNNOperation::kGRU;
-    }
-    throw std::runtime_error("Unknown RNNOperation: " + op);
-}
-
-template <>
-nvinfer1::RNNInputMode OnnxAttrs::get<nvinfer1::RNNInputMode>(std::string const& key) const
-{
-    std::string mode = this->get<std::string>(key);
-    if (mode == std::string("skip"))
-    {
-        return nvinfer1::RNNInputMode::kSKIP;
-    }
-    if (mode == std::string("linear"))
-    {
-        return nvinfer1::RNNInputMode::kLINEAR;
-    }
-    throw std::runtime_error("Unknown RNNInputMode: " + mode);
-}
-
-template <>
-nvinfer1::RNNDirection OnnxAttrs::get<nvinfer1::RNNDirection>(std::string const& key) const
-{
-    std::string direction = this->get<std::string>(key);
-    if (direction == std::string("unidirection"))
-    {
-        return nvinfer1::RNNDirection::kUNIDIRECTION;
-    }
-    if (direction == std::string("bidirection"))
-    {
-        return nvinfer1::RNNDirection::kBIDIRECTION;
-    }
-    throw std::runtime_error("Unknown RNNDirection: " + direction);
-}
-
-template <>
 std::vector<std::string> OnnxAttrs::get<std::vector<std::string>>(std::string const& key) const
 {
     auto attr = this->at(key)->strings();
@@ -332,18 +287,18 @@ nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(std::string 
 }
 
 template <>
-nvinfer1::ResizeMode OnnxAttrs::get<nvinfer1::ResizeMode>(std::string const& key) const
+nvinfer1::InterpolationMode OnnxAttrs::get<nvinfer1::InterpolationMode>(std::string const& key) const
 {
     const auto& mode = this->get<std::string>(key);
     if (mode == "nearest")
     {
-        return nvinfer1::ResizeMode::kNEAREST;
+        return nvinfer1::InterpolationMode::kNEAREST;
     }
     if (mode == "linear" || mode == "bilinear")
     {
-        return nvinfer1::ResizeMode::kLINEAR;
+        return nvinfer1::InterpolationMode::kLINEAR;
     }
-    throw std::runtime_error("Unknown ResizeMode: " + mode);
+    throw std::runtime_error("Unknown InterpolationMode: " + mode);
 }
 
 template <>

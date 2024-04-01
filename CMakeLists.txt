@@ -27,8 +27,8 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 #--------------------------------------------------
 # Version information
 #--------------------------------------------------
-set(ONNX2TRT_MAJOR 9)
-set(ONNX2TRT_MINOR 3)
+set(ONNX2TRT_MAJOR 10)
+set(ONNX2TRT_MINOR 0)
 set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
@@ -39,10 +39,10 @@ set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CAC
 set(IMPORTER_SOURCES
   NvOnnxParser.cpp
   ModelImporter.cpp
-  builtin_op_importers.cpp
-  builtin_op_static_checkers.cpp
+  ModelRefitter.cpp
+  onnxOpImporters.cpp
   ImporterContext.cpp
-  onnx2trt_utils.cpp
+  importerUtils.cpp
   ShapedWeights.cpp
   ShapeTensor.cpp
   LoopHelpers.cpp
@@ -51,6 +51,11 @@ set(IMPORTER_SOURCES
   onnxErrorRecorder.cpp
   ConditionalHelpers.cpp
   bfloat16.cpp
+  onnxOpCheckers.cpp
+  onnxProtoUtils.cpp
+  weightUtils.cpp
+  WeightsContext.cpp
+  TensorOrWeights.cpp
 )
 
 if (BUILD_ONNXIFI)

@@ -4,6 +4,8 @@
 
 #include "ImporterContext.hpp"
 #include "NvInferVersion.h"
+#include "importerUtils.hpp"
+#include "weightUtils.hpp"
 #include <sstream>
 
 #if !defined(_WIN32)
@@ -52,7 +54,7 @@ void ImporterContext::popBaseNameScope()
 void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName)
 {
     // TRT requires unique tensor names.
-    std::string const& uniqueName = generateUniqueName(mTensorNames, basename);
+    std::string const& uniqueName = generateUniqueName(mTensorNames, mSuffixCounter, basename);
 
     if (tensor)
     {
@@ -109,7 +111,7 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
     if (layer)
     {
         std::string const name = basename.empty() ? layer->getName() : basename;
-        std::string const& uniqueName = generateUniqueName(mLayerNames, name);
+        std::string const& uniqueName = generateUniqueName(mLayerNames, mSuffixCounter, basename);
 
         auto* ctx = this; // To enable logging.
         if (node != nullptr)
@@ -132,7 +134,7 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
             mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
         }
     }
-    if (node != nullptr)
+    if (node != nullptr && layer != nullptr)
     {
         processMetadata(this, *node, layer);
     }
@@ -154,7 +156,7 @@ std::string getOSLibraryName(char const* logicalName)
 #if defined(_WIN32)
     libName << logicalName << ".dll";
 #else
-    libName << "lib" << logicalName << ".so." << NV_TENSORRT_SONAME_MAJOR;
+    libName << "lib" << logicalName << ".so." << NV_TENSORRT_MAJOR;
 #endif
     return libName.str();
 }

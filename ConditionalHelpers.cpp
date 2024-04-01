@@ -4,7 +4,7 @@
 
 #include "ConditionalHelpers.hpp"
 #include "ModelImporter.hpp"
-#include "onnx2trt_utils.hpp"
+#include "importerUtils.hpp"
 #include "toposort.hpp"
 
 namespace onnx2trt
@@ -34,7 +34,7 @@ SubgraphPortsMap::const_iterator findLayer(const SubgraphPortsMap& inputs, const
 
 // Add an ConditionalInputLayer between `layer` and its inputs.
 // I.e. input[inIdx] -> layer ==> input[inIdx] -> ConditionalInputLayer -> layer.
-Status addConditionalInputLayer(IImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
+Status addConditionalInputLayer(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
     nvinfer1::ILayer& layer, int32_t inIdx)
 {
     auto input = layer.getInput(inIdx);
@@ -54,27 +54,28 @@ Status addConditionalInputLayer(IImporterContext* ctx, nvinfer1::IIfConditional*
     nvinfer1::IIfConditionalInputLayer* inputLayer = nullptr;
     if (it == inputsMap.end())
     {
-        inputLayer = conditional->addInput(*input);
+        inputLayer = N_CHECK(conditional->addInput(*input));
         inputsMap[name] = inputLayer;
         const std::string inputLayerName(name);
         ctx->registerLayer(inputLayer, inputLayerName + "_InputLayer", nullptr);
         // Note: Since multiple conditionals may use the same external tensor, check unique names for output tensors of
         // IfConditionalInputLayers to avoid tensor name duplication.
         ctx->registerTensor(
-            TensorOrWeights{inputLayer->getOutput(0)}, inputLayerName + "_InputLayer_output", /*checkUniqueName*/ true);
+            TensorOrWeights{N_CHECK(inputLayer->getOutput(0))}, inputLayerName + "_InputLayer_output", /*checkUniqueName*/ true);
     }
     else
     {
         // An InputLayer may in the inputsMap if it has several consumers.
         inputLayer = it->second;
     }
-    layer.setInput(inIdx, *(inputLayer->getOutput(0)));
+    auto ifOutput = N_CHECK(inputLayer->getOutput(0));
+    layer.setInput(inIdx, *ifOutput);
     return Status::success();
 };
 
 // Take a snapshot of the network before and after parsing the subgraph and return a list
 // of newly added network layers.
-Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& subgraph,
+Status importSubgraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& subgraph,
     std::vector<nvinfer1::ILayer*>& newLayers, std::vector<TensorOrWeights>& subgraphTensors)
 {
     auto net = ctx->network();
@@ -84,7 +85,7 @@ Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const&
     NameScope nameScope(*ctx);
 
     std::vector<Status> errors{};
-    CHECK(onnx2trt::parseGraph(ctx, subgraph, errors));
+    CHECK_STATUS(onnx2trt::parseGraph(ctx, subgraph, errors));
 
     for (int32_t i = 0; i < subgraph.output_size(); ++i)
     {
@@ -101,7 +102,7 @@ Status importSubgraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const&
 }
 
 // Add an IConditionalInputLayer to `layer`'s inputs, if they don't already exist.
-Status addConditionalInputIfNeeded(IImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
+Status addConditionalInputIfNeeded(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
     nvinfer1::ILayer& layer, SubgraphPortsMap subgraphInputsMap)
 {
     // Return all of the layer's inputs that are external to the subgraph that
@@ -128,7 +129,7 @@ Status addConditionalInputIfNeeded(IImporterContext* ctx, nvinfer1::IIfCondition
 }
 
 // Add IConditionalInputLayers to `layer`'s inputs.
-Status addIfInputLayers(IImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
+Status addIfInputLayers(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
     const std::vector<nvinfer1::ILayer*>& newLayers)
 {
     // Find all of the tensors entering the subgraph.

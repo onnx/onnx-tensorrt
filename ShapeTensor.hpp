@@ -12,7 +12,7 @@
 namespace onnx2trt
 {
 
-class IImporterContext;
+class ImporterContext;
 class TensorOrWeights;
 
 //! Represents a 0D or 1D tensor of int64_t.
@@ -29,7 +29,7 @@ public:
     ShapeTensor(int32_t rank_, std::vector<float>&& values_);
 
     //! Create ShapeTensor representing value of TensorOrWeights.
-    ShapeTensor(IImporterContext* ctx, TensorOrWeights& t);
+    ShapeTensor(ImporterContext* ctx, TensorOrWeights& t);
 
     //! Construct ShapeTensor equivalent to applying IShapeLayer depth times.
     //! The depth may be in [0,3].
@@ -119,7 +119,7 @@ public:
     friend ShapeTensor shapeOf(const ShapeTensor& t);
 
     //! Get TensorRT tensor representation.
-    nvinfer1::ITensor& tensor(IImporterContext* ctx) const;
+    nvinfer1::ITensor& tensor(ImporterContext* ctx) const;
 
 private:
     //! Number of IShapeLayer to apply to mTensor to get ITensor representing value of *this.
@@ -161,7 +161,7 @@ std::ostream& operator<<(std::ostream& stream, const ShapeTensor& x);
 
 //! Create 1D ShapeTensor of length n filled with value.
 //! count must be 1D ShapeTensor of size 1.
-ShapeTensor fillShapeVector(IImporterContext* ctx, int64_t value, const ShapeTensor& count);
+ShapeTensor fillShapeVector(ImporterContext* ctx, int64_t value, const ShapeTensor& count);
 
 //! Create 1D ShapeTensor of length 1 containing given value.
 ShapeTensor shapeVector(int64_t value);
@@ -174,51 +174,51 @@ ShapeTensor iotaShapeVector(int32_t n);
 
 //! Create ShapeTensor filled with value that has same shape as exemplar.
 //! The exemplar must be 1D.
-ShapeTensor similar(IImporterContext* ctx, const ShapeTensor& exemplar, int64_t value);
+ShapeTensor similar(ImporterContext* ctx, const ShapeTensor& exemplar, int64_t value);
 
 //! Elementwise addition
-ShapeTensor add(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor add(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise subtraction
-ShapeTensor sub(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor sub(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise multiplication
-ShapeTensor mul(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor mul(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise min
-ShapeTensor min(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor min(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise max
-ShapeTensor max(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor max(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise floor division
-ShapeTensor floorDiv(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor floorDiv(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Elementwise f, for a partial function f defined by:
 //! f(x,x) = x
 //! f(1,x) = x
 //! f(x,1) = x
 //! Undefined otherwise or if x < 0.
-ShapeTensor broadcast(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor broadcast(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Return product of x[i] for i in [first..last), as 0D or one-element 1D tensor of given rank.
-ShapeTensor product(IImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank);
+ShapeTensor product(ImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank);
 
 //! Gather where data is 1D tensor and indices can be 0D or 1D
-ShapeTensor gather(IImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices);
+ShapeTensor gather(ImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices);
 
 //! Concatenation of two 1D tensors
-ShapeTensor concat(IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
+ShapeTensor concat(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y);
 
 //! Cast to int32_t shape tensor.
-ShapeTensor castToInt32(IImporterContext* ctx, ShapeTensor const& x);
+ShapeTensor castToInt32(ImporterContext* ctx, ShapeTensor const& x);
 
 //! Cast to int64_t shape tensor.
-ShapeTensor castToInt64(IImporterContext* ctx, ShapeTensor const& x);
+ShapeTensor castToInt64(ImporterContext* ctx, ShapeTensor const& x);
 
 //! Return gather(concat(x,y),subscripts)
 inline ShapeTensor interlace(
-    IImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, const ShapeTensor& subscripts)
+    ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, const ShapeTensor& subscripts)
 {
     return gather(ctx, concat(ctx, x, y), subscripts);
 }
@@ -229,10 +229,10 @@ ShapeTensor shapeOf(const ShapeTensor& tensor);
 ShapeTensor shapeOf(TensorOrWeights& t);
 
 //! Reshape 0D tensor to 1D tensor.
-ShapeTensor convertTo1D(IImporterContext* ctx, const ShapeTensor& tensor);
+ShapeTensor convertTo1D(ImporterContext* ctx, const ShapeTensor& tensor);
 
 //! Add an ISliceLayer.
-nvinfer1::ISliceLayer* addSlice(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
+nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
     const ShapeTensor& sizes, const ShapeTensor& strides);
 
 //! Add an IShuffleLayer.
@@ -244,15 +244,15 @@ nvinfer1::ISliceLayer* addSlice(IImporterContext* ctx, nvinfer1::ITensor& data, 
 //! zeroIsPlaceholder=true should happen only when replicating the
 //! semantics of the ONNX Reshape operator.
 nvinfer1::IShuffleLayer* addShuffle(
-    IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder = false);
+    ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder = false);
 
 //! Add an IFillLayer.
-nvinfer1::IFillLayer* addFill(IImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op);
+nvinfer1::IFillLayer* addFill(ImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op);
 
 //! Reshape a tensor.
 //!
 //! Treats any zeros in newShape as dimensions, not placeholders.
 //! Implementation note: does not insert shuffle if it's a no-op.
-nvinfer1::ITensor& reshape(IImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape);
+nvinfer1::ITensor& reshape(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape);
 
 } // namespace onnx2trt

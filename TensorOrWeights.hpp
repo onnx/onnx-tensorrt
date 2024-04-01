@@ -8,10 +8,12 @@
 
 #include <NvInfer.h>
 #include <cassert>
+#include <stdexcept>
 
 namespace onnx2trt
 {
 
+//! Abstract representation of a tensor, which might be a nvinfer1::ITensor or ShapedWeights.
 class TensorOrWeights
 {
     union
@@ -26,6 +28,7 @@ class TensorOrWeights
     } _variant;
 
 public:
+    //! Represents "null tensor", which is used to denote "missing tensor".
     TensorOrWeights()
         : _tensor(nullptr)
         , _variant(NODE_TENSOR)
@@ -55,27 +58,39 @@ public:
     }
     nvinfer1::ITensor& tensor()
     {
-        assert(!isNullTensor());
+        if (is_weights() || isNullTensor())
+        {
+            throw std::runtime_error("Trying to access weights or a null tensor!");
+        }
         return *_tensor;
     }
     nvinfer1::ITensor const& tensor() const
     {
-        assert(!isNullTensor());
+        if (is_weights() || isNullTensor())
+        {
+            throw std::runtime_error("Trying to access weights or a null tensor!");
+        }
         return *_tensor;
     }
     ShapedWeights& weights()
     {
-        assert(is_weights());
+        if (is_tensor())
+        {
+            throw std::runtime_error("Trying to access a null weights!");
+        }
         return _weights;
     }
     ShapedWeights const& weights() const
     {
-        assert(is_weights());
+        if (is_tensor())
+        {
+            throw std::runtime_error("Trying to access a null weights!");
+        }
         return _weights;
     }
     nvinfer1::Dims shape() const
     {
-        return is_tensor() ? _tensor->getDimensions() : _weights.shape;
+        return is_tensor() ? tensor().getDimensions() : weights().shape;
     }
     explicit operator bool() const
     {
@@ -83,129 +98,75 @@ public:
     }
     bool isFp32() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kFLOAT
-                           : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kFLOAT
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
     }
     bool isFp16() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kHALF
-                    : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kHALF
+                    : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
     }
     bool isBFp16() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kBF16
-                    : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kBF16
+                    : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16;
     }
     bool isInt32() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT32
-                           : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kINT32
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
     }
     bool isInt64() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT64
-                           : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kINT64
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
     }
     bool isInt8() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kINT8
-                           : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kINT8
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
     }
     bool isBool() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kBOOL : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kBOOL : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
     }
     bool isFp8() const
     {
-        return is_tensor() ? _tensor->getType() == nvinfer1::DataType::kFP8 : _weights.type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kFP8 : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN;
     }
     std::string getName() const
     {
-        return is_tensor() ? _tensor->getName() : _weights.getName();
+        return is_tensor() ? tensor().getName() : weights().getName();
     }
-    std::string getType() const
-    {
-        if (is_tensor())
-        {
-            switch (_tensor->getType())
-            {
-            case nvinfer1::DataType::kFLOAT: return "FLOAT";
-            case nvinfer1::DataType::kHALF: return "HALF";
-            case nvinfer1::DataType::kBF16: return "BF16";
-            case nvinfer1::DataType::kINT8: return "INT8";
-            case nvinfer1::DataType::kUINT8: return "UINT8";
-            case nvinfer1::DataType::kINT32: return "INT32";
-            case nvinfer1::DataType::kINT64: return "INT64";
-            case nvinfer1::DataType::kBOOL: return "BOOL";
-            case nvinfer1::DataType::kFP8: return "FP8";
-            }
-        }
-        else
-        {
-            switch (_weights.type)
-            {
-            case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return "FLOAT";
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT: return "FLOAT";
-            case ::ONNX_NAMESPACE::TensorProto::INT8: return "INT8";
-            case ::ONNX_NAMESPACE::TensorProto::UINT8: return "UINT8";
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return "HALF";
-            case ::ONNX_NAMESPACE::TensorProto::BFLOAT16: return "BF16";
-            case ::ONNX_NAMESPACE::TensorProto::BOOL: return "BOOL";
-            case ::ONNX_NAMESPACE::TensorProto::INT32: return "INT32";
-            case ::ONNX_NAMESPACE::TensorProto::INT64: return "INT64";
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return "FP8";
-            }
-        }
-        return "UNKNOWN TYPE";
-    }
+    std::string getType() const;
 
-    nvinfer1::DataType convertONNXDataType(ShapedWeights::DataType datatype) const
-    {
-        switch (datatype)
-        {
-            case ::ONNX_NAMESPACE::TensorProto::DOUBLE: return nvinfer1::DataType::kFLOAT;
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT: return nvinfer1::DataType::kFLOAT;
-            case ::ONNX_NAMESPACE::TensorProto::INT8: return nvinfer1::DataType::kINT8;
-            case ::ONNX_NAMESPACE::TensorProto::UINT8: return nvinfer1::DataType::kUINT8;
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT16: return nvinfer1::DataType::kHALF;
-            case ::ONNX_NAMESPACE::TensorProto::BFLOAT16: return nvinfer1::DataType::kBF16;
-            case ::ONNX_NAMESPACE::TensorProto::BOOL: return nvinfer1::DataType::kBOOL;
-            case ::ONNX_NAMESPACE::TensorProto::INT32: return nvinfer1::DataType::kINT32;
-            case ::ONNX_NAMESPACE::TensorProto::INT64: return nvinfer1::DataType::kINT64;
-            case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return nvinfer1::DataType::kFP8;
-        }
-        assert(false && "Unknown datatype");
-        return nvinfer1::DataType::kFLOAT;
-    }
+    nvinfer1::DataType convertONNXDataType(ShapedWeights::DataType datatype) const;
 
-    ShapedWeights::DataType convertTRTDataType(nvinfer1::DataType datatype) const
-    {
-        switch (datatype)
-        {
-            case nvinfer1::DataType::kFLOAT: return ::ONNX_NAMESPACE::TensorProto::FLOAT;
-            case nvinfer1::DataType::kINT8: return ::ONNX_NAMESPACE::TensorProto::INT8;
-            case nvinfer1::DataType::kUINT8: return ::ONNX_NAMESPACE::TensorProto::UINT8;
-            case nvinfer1::DataType::kHALF: return ::ONNX_NAMESPACE::TensorProto::FLOAT16;
-            case nvinfer1::DataType::kBF16: return ::ONNX_NAMESPACE::TensorProto::BFLOAT16;
-            case nvinfer1::DataType::kBOOL: return ::ONNX_NAMESPACE::TensorProto::BOOL;
-            case nvinfer1::DataType::kINT32: return ::ONNX_NAMESPACE::TensorProto::INT32;
-            case nvinfer1::DataType::kINT64: return ::ONNX_NAMESPACE::TensorProto::INT64;
-            case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
-        }
-        assert(false && "Unknown datatype");
-        return ::ONNX_NAMESPACE::TensorProto::FLOAT;
-    }
+    ShapedWeights::DataType convertTRTDataType(nvinfer1::DataType datatype) const;
 
     nvinfer1::DataType getDataType() const
     {
-        if (is_tensor()) return _tensor->getType();
-        else return convertONNXDataType(_weights.type);
+        if (is_tensor())
+        {
+            return tensor().getType();
+        }
+        else
+        {
+            return convertONNXDataType(weights().type);
+        }
     }
-    
+
     ShapedWeights::DataType getONNXDataType() const
     {
-        if (is_tensor()) return convertTRTDataType(_tensor->getType());
-        else return _weights.type;
+        if (is_tensor())
+        {
+            return convertTRTDataType(tensor().getType());
+        }
+        else
+        {
+            return weights().type;
+        }
+
     }
 };
 

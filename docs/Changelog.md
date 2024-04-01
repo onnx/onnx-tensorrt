@@ -2,6 +2,16 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.0 EA Release - 2024-3-27
+For more details, see the 10.0 EA release notes.
+
+- Added new class `IParserRefitter` that can be used to refit a TensorRT engine with the weights of an ONNX model
+- `kNATIVE_INSTANCENORM` is now set to ON by default
+- Added support for `IPluginV3` interfaces from TensorRT
+- Added support for `INT4` quantization
+- Added support for the `reduction` attribute in `ScatterElements`
+- Added support for `wrap` padding mode in `Pad`
+
 # TensorRT 9.3 GA Release - 2024-2-8
 For more details, see the 9.3 GA release notes for the fixes since 9.2 GA.
 

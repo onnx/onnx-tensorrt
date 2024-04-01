@@ -7,6 +7,7 @@
 
 #include "NvInfer.h"
 #include <stddef.h>
+#include <string>
 #include <vector>
 
 //!
@@ -52,7 +53,7 @@ constexpr inline int32_t EnumMax();
 //!
 //! \enum ErrorCode
 //!
-//! \brief The type of error that the parser may return
+//! \brief The type of error that the parser or refitter may return
 //!
 enum class ErrorCode : int
 {
@@ -69,7 +70,8 @@ enum class ErrorCode : int
     kUNSUPPORTED_NODE_INPUT = 10,
     kUNSUPPORTED_NODE_DATATYPE = 11,
     kUNSUPPORTED_NODE_DYNAMIC = 12,
-    kUNSUPPORTED_NODE_SHAPE = 13
+    kUNSUPPORTED_NODE_SHAPE = 13,
+    kREFIT_FAILED = 14
 };
 
 //!
@@ -96,7 +98,7 @@ enum class OnnxParserFlag : int32_t
     //! Parse the ONNX model into the INetworkDefinition with the intention of using TensorRT's native layer
     //! implementation over the plugin implementation for InstanceNormalization nodes.
     //! This flag is required when building version-compatible or hardware-compatible engines.
-    //! There may be performance degradations when this flag is enabled.
+    //! This flag is set to be ON by default.
     kNATIVE_INSTANCENORM = 0
 };
 
@@ -151,6 +153,18 @@ public:
     //!\brief name of the node operation in which the error occurred.
     //!
     virtual char const* nodeOperator() const = 0;
+    //!
+    //!\brief A list of the local function names, from the top level down, constituting the current
+    //!             stack trace in which the error occurred. A top-level node that is not inside any
+    //!             local function would return a nullptr.
+    //!
+    virtual char const* const* localFunctionStack() const = 0;
+    //!
+    //!\brief The size of the stack of local functions at the point where the error occurred.
+    //!             A top-level node that is not inside any local function would correspond to
+    //              a stack size of 0.
+    //!
+    virtual int32_t localFunctionStackSize() const = 0;
 
 protected:
     virtual ~IParserError() {}
@@ -234,13 +248,7 @@ public:
     virtual bool supportsOperator(const char* op_name) const = 0;
 
     //!
-    //!\brief destroy this object
-    //!
-    //! \warning deprecated
-    //!
-    TRT_DEPRECATED virtual void destroy() = 0;
 
-    //!
     //!\brief Get the number of errors that occurred during prior calls to
     //!         \p parse
     //!
@@ -330,11 +338,86 @@ public:
     //! \return True if flag is set, false if unset.
     //!
     virtual bool getFlag(OnnxParserFlag onnxParserFlag) const noexcept = 0;
+
+    //!
+    //!\brief Return the i-th output ITensor object for the ONNX layer "name".
+    //!
+    //! Return the i-th output ITensor object for the ONNX layer "name".
+    //! If "name" is not found or i is out of range, return nullptr.
+    //! In the case of multiple nodes sharing the same name this function will return
+    //! the output tensors of the first instance of the node in the ONNX graph.
+    //!
+    //! \param name The name of the ONNX layer.
+    //!
+    //! \param i The index of the output. i must be in range [0, layer.num_outputs).
+    //!
+    virtual nvinfer1::ITensor const* getLayerOutputTensor(char const* name, int64_t i) = 0;
+};
+
+//!
+//! \class IParserRefitter
+//!
+//! \brief An interface designed to refit weights from an ONNX model.
+//!
+class IParserRefitter
+{
+public:
+    //!
+    //! \brief Load a serialized ONNX model from memory and perform weight refit.
+    //!
+    //! \param serializedOnnxModel Pointer to the serialized ONNX model
+    //! \param serializedOnnxModelSize Size of the serialized ONNX model
+    //!        in bytes
+    //! \param modelPath Absolute path to the model file for loading external weights if required
+    //! \return true if all the weights in the engine were refit successfully.
+    //!
+    //! The serialized ONNX model must be identical to the one used to generate the engine
+    //! that will be refit.
+    //!
+    virtual bool refitFromBytes(
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept
+        = 0;
+
+    //!
+    //! \brief Load and parse a ONNX model from disk and perform weight refit.
+    //!
+    //! \param onnxModelFile Path to the ONNX model to load from disk.
+    //!
+    //! \return true if the model was loaded successfully, and if all the weights in the engine were refit successfully.
+    //!
+    //! The provided ONNX model must be identical to the one used to generate the engine
+    //! that will be refit.
+    //!
+    virtual bool refitFromFile(char const* onnxModelFile) noexcept = 0;
+
+    //!
+    //!\brief Get the number of errors that occurred during prior calls to \p refitFromBytes or \p refitFromFile
+    //!
+    //! \see getError() IParserError
+    //!
+    virtual int32_t getNbErrors() const noexcept = 0;
+
+    //!
+    //!\brief Get an error that occurred during prior calls to \p refitFromBytes or \p refitFromFile
+    //!
+    //! \see getNbErrors() IParserError
+    //!
+    virtual IParserError const* getError(int32_t index) const noexcept = 0;
+
+    //!
+    //!\brief Clear errors from prior calls to \p refitFromBytes or \p refitFromFile
+    //!
+    //! \see getNbErrors() getError() IParserError
+    //!
+    virtual void clearErrors() = 0;
+
+    virtual ~IParserRefitter() noexcept = default;
 };
 
 } // namespace nvonnxparser
 
 extern "C" TENSORRTAPI void* createNvOnnxParser_INTERNAL(void* network, void* logger, int version);
+extern "C" TENSORRTAPI void* createNvOnnxParserRefitter_INTERNAL(void* refitter, void* logger, int32_t version);
 extern "C" TENSORRTAPI int getNvOnnxParserVersion();
 
 namespace nvonnxparser
@@ -361,6 +444,21 @@ namespace
 inline IParser* createParser(nvinfer1::INetworkDefinition& network, nvinfer1::ILogger& logger)
 {
     return static_cast<IParser*>(createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
+}
+
+//!
+//! \brief Create a new ONNX refitter object
+//!
+//! \param refitter The Refitter object used to refit the model
+//! \param logger The logger to use
+//! \return a new ParserRefitter object or NULL if an error occurred
+//!
+//! \see IParserRefitter
+//!
+inline IParserRefitter* createParserRefitter(nvinfer1::IRefitter& refitter, nvinfer1::ILogger& logger)
+{
+    return static_cast<IParserRefitter*>(
+        createNvOnnxParserRefitter_INTERNAL(&refitter, &logger, NV_ONNX_PARSER_VERSION));
 }
 
 } // namespace
