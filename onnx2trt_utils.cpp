@@ -1415,9 +1415,76 @@ std::vector<float> parseLSTMActivationValues(const std::vector<nvinfer1::Activat
     return tmpActs;
 }
 
+std::string normalizePath(std::string const& path)
+{
+    std::vector<std::string> normPath;
+    auto addToPath = [&normPath](std::string s) {
+        // Ignore all extra slashes, and current directory paths
+        if (s == "/" || s == "./")
+        {
+            return;
+        }
+        // Push back to normPath under the following circumstances
+        // 1. Current string is not "../" or
+        // 2. "../" if it's the first string or
+        // 3. "../" is the previous string in normPath
+        if (s != "../" || normPath.empty() || (!normPath.empty() && normPath.back() == "../"))
+        {
+            normPath.push_back(s);
+        }
+        // Remove previous entry since "../" was encountered.
+        else
+        {
+            normPath.pop_back();
+        }
+    };
+
+    size_t i = 0;
+    size_t n = path.size();
+    std::string sep = "/";
+
+    // Loop through path, split on all path seperator tokens, and append to normPath if applicable.
+    while (i < n)
+    {
+        auto slashPos = path.find(sep, i);
+        if (slashPos == std::string::npos)
+        {
+            addToPath(path.substr(i, n - i));
+            break;
+        }
+        else
+        {
+            addToPath(path.substr(i, slashPos - i + 1));
+            i = slashPos + 1;
+        }
+    }
+
+    // Build final output string
+    std::string out;
+    for (auto s : normPath)
+    {
+        out += s;
+    }
+    return out;
+}
+
 bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string path, int64_t offset, int64_t length,
     std::vector<char>& weightsBuf, size_t& size)
 {
+    // Accessing parent directories (i.e. ../) is not allowed. Normalize path first.
+    std::string normalizedFile = normalizePath(file);
+    bool illegalDir{false};
+#ifdef _MSC_VER
+    illegalDir |= normalizedFile.find("..\\") != std::string::npos;
+#endif
+    illegalDir |= normalizedFile.find("../") != std::string::npos;
+
+    if (illegalDir)
+    {
+        LOG_ERROR("Relative paths to parent (../) are not allowed in ONNX external weights! Normalized path is: "
+            << normalizedFile);
+        return false;
+    }
     // The weight paths in the ONNX model are relative paths to the main ONNX file.
 #ifdef _MSC_VER
     size_t slash = path.rfind("\\");
@@ -1431,12 +1498,13 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
 #endif
     if (slash != std::string::npos)
     {
-        path.replace(slash + 1, path.size() - (slash + 1), file);
+        path.replace(slash + 1, path.size() - (slash + 1), normalizedFile);
     }
     else
     {
-        path = file;
+        path = normalizedFile;
     }
+    LOG_VERBOSE("Reading weights from external file: " << path);
     std::ifstream relPathFile(path, std::ios::binary | std::ios::ate);
     if (!relPathFile)
     {
@@ -1447,7 +1515,6 @@ bool parseExternalWeights(IImporterContext* ctx, std::string file, std::string p
     relPathFile.seekg(offset, std::ios::beg);
     int64_t weightsBufSize = length == 0 ? fileSize : length;
     weightsBuf.resize(weightsBufSize);
-    LOG_VERBOSE("Reading weights from external file: " << path);
     if (!relPathFile.read(weightsBuf.data(), weightsBuf.size()))
     {
         LOG_ERROR("Failed to read weights from external file: " << path);
