@@ -263,7 +263,7 @@ Status importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInfoProto const&
 {
     auto const& onnxDtype = input.type().tensor_type();
     nvinfer1::DataType trtDtype;
-    ASSERT_INPUT(convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX date type to TensorRT data type.", ErrorCode::kUNSUPPORTED_NODE, input.name());
+    ASSERT_INPUT(convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX data type to TensorRT data type.", ErrorCode::kUNSUPPORTED_NODE, input.name());
     nvinfer1::Dims trt_dims;
     size_t const oldNbNamedDimensions = namedDims.size();
     ASSERT_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims, namedDims) && "Failed to convert ONNX dimensions to TensorRT dimensions.", ErrorCode::kUNSUPPORTED_GRAPH, input.name());
@@ -591,7 +591,7 @@ Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
             mImporterCtx.network()->markOutput(*output_tensor_ptr);
             nvinfer1::DataType output_trt_dtype;
             ASSERT(convertDtype(output.type().tensor_type().elem_type(), &output_trt_dtype)
-                    && "Failed to convert ONNX date type to TensorRT data type.",
+                    && "Failed to convert ONNX data type to TensorRT data type.",
                 ErrorCode::kUNSUPPORTED_NODE);
             // For INT32 data type, output type must match tensor type
             ASSERT( (output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
