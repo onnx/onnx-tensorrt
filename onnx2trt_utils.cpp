@@ -1576,6 +1576,8 @@ NodeImportResult poolingHelper(IImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     }
 
     nvinfer1::IPoolingLayer* poolingLayer = ctx->network()->addPoolingNd(*tensorPtr, type, kernel_size);
+    ASSERT(poolingLayer && "Failed to add pooling layer.", ErrorCode::kUNSUPPORTED_NODE);
+
     poolingLayer->setStrideNd(strides);
     // This member is ignored in maxpooling
     poolingLayer->setAverageCountExcludesPadding(exclude_padding);
