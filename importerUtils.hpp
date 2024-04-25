@@ -177,9 +177,9 @@ NodeImportResult elementwiseHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeP
 nvinfer1::ITensor* flattenTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     nvinfer1::ITensor& tensor, int axis = 0, bool regLayer = false);
 
-// Gathers the specified dimension from a shape tensor. e.g. gatherDimension(shape=(7, 6, 5), dim=2) would return 5.
+// Slice out the specified dimension from a shape tensor. e.g. extractDimension(shape=(7, 6, 5), dim=2) would return 5.
 // shape specifies the shape of the returned Tensor. Must have a volume of 1.
-nvinfer1::ITensor* gatherDimension(ImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape);
+nvinfer1::ITensor* extractDimension(ImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int32_t dim, nvinfer1::Dims shape);
 
 // Helper function to generate padding values for convTranspose
 void generatePadding(nvinfer1::Dims inputShape, nvinfer1::Dims outputShape, nvinfer1::Dims kernelSize,

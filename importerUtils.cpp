@@ -372,22 +372,22 @@ bool convertOnnxPadding(ImporterContext* ctx, int32_t nbInputDims, std::vector<i
     return startTensor && totalPaddingTensor;
 }
 
-bool shiftIsAllZeros(ShapedWeights const& shiftInt8)
+bool shiftIsAllZeros(ShapedWeights const& shift)
 {
-    // Check if all of the values in the shift tensor are zeros
-    auto const* v = static_cast<int8_t const*>(shiftInt8.values);
-    auto allZeros = std::all_of(v, v + shiftInt8.count(), [](int8_t x) { return x == 0; });
+    // Check if all of the values in the shift tensor are zeros. Shift dtype is one of [INT8, UINT8, INT4, UINT4]
+    auto const* v = static_cast<int8_t const*>(shift.values);
+    size_t const count = shift.size_bytes();
+    auto allZeros = std::all_of(v, v + count, [](int8_t x) { return x == 0; });
     return allZeros;
 }
 
-onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt8, int32_t type, ImporterContext* ctx)
+onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt, int32_t type, ImporterContext* ctx)
 {
-    auto const* v = static_cast<int8_t const*>(shiftInt8.values);
-    if (!std::all_of(v, v + shiftInt8.count(), [](int8_t x) { return x == 0; }))
+    if (!shiftIsAllZeros(shiftInt))
     {
         LOG_WARNING("TensorRT currenly supports only zero shifts values for QuatizeLinear/DequantizeLinear ops");
     }
-    auto shift = ctx->createNamedTempWeights(type, shiftInt8.shape);
+    auto shift = ctx->createNamedTempWeights(type, shiftInt.shape);
     float* sh = static_cast<float*>(shift.values);
     for (int i = 0, n = shift.count(); i < n; i++)
     {
@@ -630,13 +630,21 @@ nvinfer1::ITensor* flattenTensor(
     return N_CHECK(flattenLayer->getOutput(0));
 }
 
-nvinfer1::ITensor* gatherDimension(ImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape)
+nvinfer1::ITensor* extractDimension(ImporterContext* ctx, nvinfer1::ITensor* shapeTensor, int dim, nvinfer1::Dims shape)
 {
-    auto* axisLayer = N_CHECK(addConstantScalar(ctx, dim, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape));
-    auto* axisValue = N_CHECK(axisLayer->getOutput(0));
-    auto* layer = N_CHECK(ctx->network()->addGather(*shapeTensor, *axisValue, 0));
-    ctx->registerLayer(layer, "ONNXTRT_gatherDimension", nullptr);
-    return N_CHECK(layer->getOutput(0));
+    // Comparing with gather, slice is more flexible. It does not need to convert dim into a constant.
+    // It is important for refit as when add an additional constant, this gather may not be optimized out.
+    auto* slice = N_CHECK(ctx->network()->addSlice(
+        *shapeTensor, nvinfer1::Dims{1, {dim}}, nvinfer1::Dims{1, {1}}, nvinfer1::Dims{1, {1}}));
+    ctx->registerLayer(slice, "ONNXTRT_extractDimension", nullptr);
+    if (shape != nvinfer1::Dims{1, {1}})
+    {
+        auto* reshape = N_CHECK(ctx->network()->addShuffle(*slice->getOutput(0)));
+        reshape->setReshapeDimensions(shape);
+        ctx->registerLayer(reshape, "ONNXTRT_extractDimensionReshape", nullptr);
+        return N_CHECK(reshape->getOutput(0));
+    }
+    return N_CHECK(slice->getOutput(0));
 }
 
 // Helper function to generate padding values for convTranspose
@@ -713,42 +721,21 @@ float getActivationDefaultBeta(nvinfer1::ActivationType type)
 
 nvinfer1::ITensor* getAxisLength(ImporterContext* ctx, nvinfer1::ITensor* inpTensor, int32_t axis, nvinfer1::Dims shape)
 {
-    // fast path for static dims
-    auto dims = inpTensor->getDimensions();
-    int d = dims.d[axis];
-    if (d >= 0)
-    {
-        auto* layer = N_CHECK(addConstantScalar(ctx, d, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, shape));
-        return N_CHECK(layer->getOutput(0));
-    }
-    else
-    {
-        auto* shapeLayer = N_CHECK(ctx->network()->addShape(*inpTensor));
-        nvinfer1::ITensor* inpShape = N_CHECK(shapeLayer->getOutput(0));
-        // TRT-22536 - remove the cast and fix clients of getAxisLength to use 64-bit lengths.
-        auto* castLayer = N_CHECK(ctx->network()->addCast(*inpShape, nvinfer1::DataType::kINT32));
-        inpShape = N_CHECK(castLayer->getOutput(0));
-        return gatherDimension(ctx, inpShape, axis, shape);
-    }
+    // Let TRT handle the shape tensor optimization.
+    auto* shapeLayer = N_CHECK(ctx->network()->addShape(*inpTensor));
+    nvinfer1::ITensor* inpShape = N_CHECK(shapeLayer->getOutput(0));
+    // TRT-22536 - remove the cast and fix clients of getAxisLength to use 64-bit lengths.
+    auto* castLayer = N_CHECK(ctx->network()->addCast(*inpShape, nvinfer1::DataType::kINT32));
+    inpShape = N_CHECK(castLayer->getOutput(0));
+    return extractDimension(ctx, inpShape, axis, shape);
 }
 
 nvinfer1::ITensor* getAxisLengthInt64(
     ImporterContext* ctx, nvinfer1::ITensor* inpTensor, int axis, nvinfer1::Dims shape)
 {
-    // fast path for static dims
-    auto dims = inpTensor->getDimensions();
-    int32_t d = dims.d[axis];
-    if (d >= 0)
-    {
-        auto* scalarLayer = N_CHECK(addConstantScalar(ctx, static_cast<int64_t>(d), ::ONNX_NAMESPACE::TensorProto_DataType_INT64, shape));
-        return N_CHECK(scalarLayer->getOutput(0));
-    }
-    else
-    {
-        auto* shapeLayer = N_CHECK(ctx->network()->addShape(*inpTensor));
-        nvinfer1::ITensor* inpShape = N_CHECK(shapeLayer->getOutput(0));
-        return gatherDimension(ctx, castHelper(ctx, inpShape, nvinfer1::DataType::kINT64), axis, shape);
-    }
+    auto* shapeLayer = N_CHECK(ctx->network()->addShape(*inpTensor));
+    nvinfer1::ITensor* inpShape = N_CHECK(shapeLayer->getOutput(0));
+    return extractDimension(ctx, inpShape, axis, shape);
 }
 
 nvinfer1::ITensor* getElementWiseResult(ImporterContext* ctx, nvinfer1::ITensor& lhs, nvinfer1::ITensor& rhs, nvinfer1::ElementWiseOperation op)

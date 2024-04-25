@@ -11,7 +11,6 @@ class Binding(object):
     def __init__(self, engine, idx_or_name):
         if isinstance(idx_or_name, string_types):
             self.name = idx_or_name
-
         else:
             self.index = idx_or_name
             self.name  = engine.get_tensor_name(self.index)
@@ -34,7 +33,6 @@ class Binding(object):
         shape = engine.get_tensor_shape(self.name)
 
         self.shape = tuple(shape)
-
         self._host_buf   = None
         self._device_buf = None
     @property
@@ -90,7 +88,6 @@ class Engine(object):
     def __init__(self, trt_engine):
         self.engine = trt_engine
 
-
         bindings = [Binding(self.engine, i)
                     for i in range(self.engine.num_io_tensors)]
         self.binding_addrs = [b.device_buffer.ptr for b in bindings]
@@ -103,7 +100,6 @@ class Engine(object):
             _ = binding.host_buffer   # Force buffer allocation
         self.context = self.engine.create_execution_context()
         self.stream = pycuda.driver.Stream()
-
     def __del__(self):
         if self.engine is not None:
             del self.engine
@@ -111,12 +107,12 @@ class Engine(object):
     def run(self, inputs):
         # len(inputs) > len(self.inputs) with Shape operator, input is never used
         # len(inputs) == len(self.inputs) for other operators
+
         if len(inputs) < len(self.inputs):
             raise ValueError("Not enough inputs. Expected %i, got %i." %
                              (len(self.inputs), len(inputs)))
         if isinstance(inputs, dict):
             inputs = [inputs[b.name] for b in self.inputs]
-
 
         for i, (input_array, input_binding) in enumerate(zip(inputs, self.inputs)):
             input_array = check_input_validity(i, input_array, input_binding)
@@ -135,9 +131,6 @@ class Engine(object):
 
         results = [output.get_async(self.stream)
                    for output in self.outputs]
-
-
-
         self.stream.synchronize()
         return results
 

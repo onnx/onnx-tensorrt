@@ -110,12 +110,13 @@ static std::string makeErrorExplanation(std::exception const& e, std::string con
 Status parseNode(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, bool deserializingINetwork)
 {
-    // For nodes that contain subgraphs (Ifs, Loops, Scans, LocalFunctions), ensure that the recursion depth is limited to
-    // a set amount. Recursion depth is tracked by the size of ctx->mBaseNameScopeStack().
-    size_t const MAX_NESTED_SUBGRAPHS = 24;
-    if (ctx->getNestedDepth() > MAX_NESTED_SUBGRAPHS)
+    // For nodes that contain subgraphs (Ifs, Loops, Scans, LocalFunctions), ensure that the recursion depth is limited
+    // to a set amount. Recursion depth is tracked by the size of ctx->mBaseNameScopeStack().
+    size_t const kMAX_NESTED_SUBGRAPHS = 24;
+    if (ctx->getNestedDepth() > kMAX_NESTED_SUBGRAPHS)
     {
-        ASSERT(false && "ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!", ErrorCode::kUNSUPPORTED_GRAPH);
+        ASSERT(false && "ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!",
+            ErrorCode::kUNSUPPORTED_GRAPH);
     }
     StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
     std::string const& nodeName = getNodeName(node);
@@ -366,8 +367,6 @@ std::vector<Status> importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInf
             && "Failed to convert ONNX dimensions to TensorRT dimensions.",
         ErrorCode::kUNSUPPORTED_GRAPH, input.name(), errorList);
 
-
-
     LOG_VERBOSE(
         "Adding network input: " << input.name() << " with dtype: " << trtDtype << ", dimensions: " << trt_dims);
     if (errorList.empty())
@@ -605,8 +604,6 @@ bool ModelImporter::parse(void const* serialized_onnx_model, size_t serialized_o
 
 Status ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
 {
-
-
     auto* ctx = &mImporterCtx;
     mImporterCtx.clearOpsets();
     // Add domain import limit for security reasons
@@ -780,8 +777,8 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity)
     struct stat sb;
     if (stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode))
     {
-	LOG_ERROR("Input is not a regular file: " << onnxModelFile);
-	return false;
+        LOG_ERROR("Input is not a regular file: " << onnxModelFile);
+        return false;
     }
 
     GOOGLE_PROTOBUF_VERIFY_VERSION;
@@ -789,7 +786,6 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity)
     // Own the ONNX model for weights to persist.
     mONNXModels.emplace_back();
     ::ONNX_NAMESPACE::ModelProto& onnxModel = mONNXModels.back();
-
     bool const fileLoadSuccess = ParseFromFileAsBinary(&onnxModel, onnxModelFile);
     if (!fileLoadSuccess)
     {
@@ -812,7 +808,7 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity)
     LOG_INFO("Doc string:       " << onnxModel.doc_string());
     LOG_INFO("----------------------------------------------------------------");
 
-    // Set currentNode count to -1 
+    // Set currentNode count to -1
     mCurrentNode = -1;
     Status status = this->importModel(onnxModel);
     if (status.is_error())

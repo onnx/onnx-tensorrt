@@ -69,50 +69,12 @@ std::string convertProtoToString(::google::protobuf::Message const& message)
     return s;
 }
 
-bool ParseFromFileAsBinary(google::protobuf::Message* msg, char const* filename)
-{
-
-    std::ifstream stream(filename, std::ios::in | std::ios::binary);
-    if (!stream)
-    {
-        std::cerr << "Could not open file " << std::string(filename) << std::endl;
-        return false;
-    }
-    google::protobuf::io::IstreamInputStream rawInput(&stream);
-
-    google::protobuf::io::CodedInputStream codedInput(&rawInput);
-#if GOOGLE_PROTOBUF_VERSION >= 3011000
-    // Starting Protobuf 3.11 accepts only single parameter.
-    codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max());
-#else
-    // Note: This WARs the very low default size limit (64MB)
-    codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-#endif
-    return msg->ParseFromCodedStream(&codedInput);
-}
-
 std::string onnxIRVersionAsString(int64_t irVersion)
 {
     int64_t verMajor = irVersion / 1000000;
     int64_t verMinor = irVersion % 1000000 / 10000;
     int64_t verPatch = irVersion % 10000;
     return (std::to_string(verMajor) + "." + std::to_string(verMinor) + "." + std::to_string(verPatch));
-}
-
-Status deserializeOnnxModel(void const* serializedModel, size_t serializedModelSize, ::ONNX_NAMESPACE::ModelProto* model)
-{
-    google::protobuf::io::ArrayInputStream rawInput(serializedModel, serializedModelSize);
-    google::protobuf::io::CodedInputStream codedInput(&rawInput);
-#if GOOGLE_PROTOBUF_VERSION >= 3011000
-    // Starting Protobuf 3.11 accepts only single parameter.
-    codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max());
-#else
-    // Note: This WARs the very low default size limit (64MB)
-    codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
-#endif
-    ASSERT((model->ParseFromCodedStream(&codedInput)) && "Failed to parse the ONNX model.",
-        ErrorCode::kMODEL_DESERIALIZE_FAILED);
-    return Status::success();
 }
 
 } // namespace onnx2trt

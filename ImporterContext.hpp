@@ -80,30 +80,44 @@ class ImporterContext
 {
     nvinfer1::INetworkDefinition* mNetwork;
     nvinfer1::ILogger* mLogger;
-    // WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the Parser.
+    //! WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the Parser.
     WeightsContext mWeightsContext;
     StringMap<int64_t> mOpsets;
-    StringMap<TensorOrWeights> mTensors; // All tensors in the graph mapped to their names.
+    //! All tensors in the graph mapped to their names.
+    StringMap<TensorOrWeights> mTensors;
     StringMap<nvinfer1::TensorLocation> mTensorLocations;
     StringMap<float> mTensorRangeMins;
     StringMap<float> mTensorRangeMaxes;
     StringMap<nvinfer1::DataType> mLayerPrecisions;
-    std::set<std::string> mTensorNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
-    std::set<std::string> mLayerNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
-    int64_t mSuffixCounter{0}; // increasing suffix counter used to uniquify layer names.
-    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
-    StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
-    std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
+    //! Set to keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mTensorNames;
+    //! Set to keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mLayerNames;
+    //! An increasing suffix counter used to uniquify layer names.
+    int64_t mSuffixCounter{0};
+    //! Set to keep track of how many times a batch norm weight name shows up,
+    //! to avoid duplicate naming in TRT.
+    std::set<std::string> mBatchNormWeightNames;
+    //! An increasing suffix counter used to uniquify batch norm weight names.
+    int64_t mBatchNormWeightSuffixCounter{0};
+    //! Set to hold output tensor names of layers that produce shape tensor outputs but do not
+    //! natively support them.
+    std::unordered_set<std::string> mUnsupportedShapeTensors;
+    //! Container to map subgraph tensors to their original outer graph names.
+    StringMap<std::string> mLoopTensors;
+    //! Error recorder to control TRT errors.
+    std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper;
     StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
     bool mConvertINT64Logged{false};
     bool mConvertINT64OutOfBoundsLogged{false};
     bool mConvertDoubleLogged{false};
     bool mConvertDoubleOutOfBoundsLogged{false};
-    nvonnxparser::OnnxParserFlags mOnnxParserFlags; // OnnxParserFlags specified by the parser
+    //! OnnxParserFlags specified by the parser.
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags;
     StringMap<std::vector<nvinfer1::ITensor const*>> mNodeNameToTensor;
 
-    // Logical library names for VC plugin libraries.  This gets translated to library paths
-    // when getUsedVCPluginLibraries() is called.
+    //! Logical library names for VC plugin libraries. This gets translated to library paths
+    //! when getUsedVCPluginLibraries() is called.
     std::set<std::string> mLogicalVCPluginLibraries;
 
     //! Stack of names defined by nested ONNX graphs, with information about how to
@@ -199,17 +213,14 @@ public:
     }
 
     // Register an unique name for the created weights
-    ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape)
+    ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, bool batchNormNode = false)
     {
+        if (batchNormNode)
+        {
+            return mWeightsContext.createNamedTempWeights(
+                type, shape, mBatchNormWeightNames, mBatchNormWeightSuffixCounter, /*batchNormNode=*/true);
+        }
         return mWeightsContext.createNamedTempWeights(type, shape, mTensorNames, mSuffixCounter);
-    }
-
-    // Create weights with a given name
-    ShapedWeights createNamedWeights(
-        ShapedWeights::DataType type, nvinfer1::Dims shape, std::string const& name, bool allocate_buffer_for_name)
-    {
-        return mWeightsContext.createNamedWeights(
-            type, shape, name, allocate_buffer_for_name ? &mTensorNames : nullptr);
     }
 
     void clearOpsets()
