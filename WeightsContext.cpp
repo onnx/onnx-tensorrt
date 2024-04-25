@@ -65,6 +65,18 @@ float* WeightsContext::convertDouble(double const* weightValues, nvinfer1::Dims 
     return floatWeights;
 }
 
+uint8_t* WeightsContext::convertPackedInt32Data(
+    int32_t const* weightValues, nvinfer1::Dims const& shape, size_t nbytes, int32_t onnxdtype)
+{
+    uint8_t* newWeights{static_cast<uint8_t*>(createTempWeights(onnxdtype, shape).values)};
+
+    for (size_t i = 0; i < nbytes; i++)
+    {
+        newWeights[i] = static_cast<uint8_t>(weightValues[i]);
+    }
+    return newWeights;
+}
+
 // Helper function to validate size_t multiplications will not overflow
 bool multiplicationWillOverflow(size_t const a, size_t const b)
 {
@@ -343,7 +355,8 @@ bool WeightsContext::convertOnnxWeights(
     // https://github.com/onnx/onnx/blob/609282efe8d4871f620141223139bbb99bdbe9f6/onnx/onnx.proto#L567
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT32 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT16 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BFLOAT16
-        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT8 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BOOL)
+        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT8 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BOOL
+        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4)
     {
         if (onnxTensor.raw_data().size() > 0)
         {
@@ -356,9 +369,7 @@ bool WeightsContext::convertOnnxWeights(
         }
         else
         {
-            nbytes = onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64
-                ? getTensorOrWeightsSizeBytes(onnxTensor.int64_data().size(), onnxDtype)
-                : getTensorOrWeightsSizeBytes(onnxTensor.int32_data().size(), onnxDtype);
+            nbytes = getTensorOrWeightsSizeBytes(onnxTensor.int32_data().size(), onnxDtype);
             switch (onnxDtype)
             {
             case ::ONNX_NAMESPACE::TensorProto::INT32:
@@ -369,6 +380,7 @@ bool WeightsContext::convertOnnxWeights(
                 }
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT64:
+                nbytes = getTensorOrWeightsSizeBytes(onnxTensor.int64_data().size(), onnxDtype);
                 dataPtr = (void*) (onnxTensor.int64_data().data());
                 if (ownAllWeights)
                 {
@@ -377,13 +389,18 @@ bool WeightsContext::convertOnnxWeights(
                 break;
             case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
             case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
-                dataPtr = convertINT32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT8:
-                dataPtr = convertINT32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::BOOL:
-                dataPtr = convertINT32Data<uint8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<uint8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                break;
+            case ::ONNX_NAMESPACE::TensorProto::INT4:
+                // int4 data is packed, each int32 element contains one byte (two int4 nibbles)
+                nbytes = onnxTensor.int32_data().size();
+                dataPtr = convertPackedInt32Data(onnxTensor.int32_data().data(), shape, nbytes, onnxDtype);
                 break;
             default:
                 LOG_ERROR("Found unsupported datatype (" << onnxDtype
@@ -418,23 +435,6 @@ bool WeightsContext::convertOnnxWeights(
         assert(onnxTensor.int32_data().size());
         dataPtr = (void*) (onnxTensor.int32_data().data());
         nbytes = onnxTensor.int32_data().size();
-        if (ownAllWeights)
-        {
-            dataPtr = ownWeights(dataPtr, onnxDtype, shape, nbytes);
-        }
-    }
-    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4)
-    {
-        if (onnxTensor.raw_data().size() > 0)
-        {
-            dataPtr = (void*) (onnxTensor.raw_data().data());
-            nbytes = onnxTensor.raw_data().size();
-        }
-        else
-        {
-            dataPtr = (void*) (onnxTensor.int32_data().data());
-            nbytes = onnxTensor.int32_data().size();
-        }
         if (ownAllWeights)
         {
             dataPtr = ownWeights(dataPtr, onnxDtype, shape, nbytes);
@@ -479,26 +479,19 @@ float* WeightsContext::getFP32Values(ShapedWeights const& w)
                                                             : convertFP16Data(w.values, w.shape);
 }
 
-ShapedWeights WeightsContext::createNamedTempWeights(
-    ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::set<std::string>& namesSet, int64_t& suffixCounter)
+ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
+    std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode)
 {
-    std::string const& name = generateUniqueName(namesSet, suffixCounter, "tmp_weight");
+    std::string const& name
+        = generateUniqueName(namesSet, suffixCounter, batchNormNode ? "tmp_batch_norm_weight" : "tmp_weight");
     return createNamedWeights(type, shape, name);
 }
 
-ShapedWeights WeightsContext::createNamedWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
-    std::string const& name, std::set<std::string>* bufferedNames)
+ShapedWeights WeightsContext::createNamedWeights(
+    ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name)
 {
     ShapedWeights weights(type, nullptr, shape);
-    if (bufferedNames)
-    {
-        bufferedNames->insert(name);
-        weights.setName((*bufferedNames->find(name)).c_str());
-    }
-    else
-    {
-        weights.setName(name.c_str());
-    }
+    weights.setName(name.c_str());
     allocateTempWeights(weights);
     return weights;
 }

@@ -29,7 +29,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 10)
 set(ONNX2TRT_MINOR 0)
-set(ONNX2TRT_PATCH 0)
+set(ONNX2TRT_PATCH 1)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------
@@ -67,10 +67,17 @@ set(API_TESTS_SOURCES
   ModelImporter.cpp
 )
 
+# Find protobuf if it's not a target.
 if (NOT TARGET protobuf::libprotobuf)
   FIND_PACKAGE(Protobuf REQUIRED)
+endif()
+
+# Set protobuf libraries between full / lite.
+if (ONNX_USE_LITE_PROTO)
+  add_definitions("-DUSE_LITE_PROTOBUF=1")
+  set(PROTOBUF_LIBRARY "protobuf::libprotobuf-lite")
 else()
-  set(PROTOBUF_LIB "protobuf::libprotobuf")
+  set(PROTOBUF_LIBRARY "protobuf::libprotobuf")
 endif()
 
 if(NOT TARGET onnx_proto)
@@ -97,27 +104,23 @@ find_path(TENSORRT_INCLUDE_DIR NvInfer.h
   HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
   PATH_SUFFIXES include)
 MESSAGE(STATUS "Found TensorRT headers at ${TENSORRT_INCLUDE_DIR}")
-find_library(TENSORRT_LIBRARY_INFER nvinfer
-  HINTS ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
-  PATH_SUFFIXES lib lib64 lib/x64)
-find_library(TENSORRT_LIBRARY_INFER_PLUGIN nvinfer_plugin
-  HINTS  ${TENSORRT_ROOT} ${TENSORRT_BUILD} ${CUDA_TOOLKIT_ROOT_DIR}
-  PATH_SUFFIXES lib lib64 lib/x64)
-set(TENSORRT_LIBRARY ${TENSORRT_LIBRARY_INFER} ${TENSORRT_LIBRARY_INFER_PLUGIN})
-MESSAGE(STATUS "Find TensorRT libs at ${TENSORRT_LIBRARY}")
-find_package_handle_standard_args(
-  TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-if(NOT TENSORRT_FOUND)
-  message(ERROR "Cannot find TensorRT library.")
+
+# Output dynamic library names depends on platform:
+if (MSVC)
+    set(nvonnxparser_lib_name "nvonnxparser_${ONNX2TRT_MAJOR}")
+else()
+    set(nvonnxparser_lib_name "nvonnxparser")
 endif()
+# Output static library name is the same cross-platform.
+set(nvonnxparser_lib_name_static "nvonnxparser_static")
 
 # --------------------------------
 # Importer library
 # --------------------------------
-add_library(nvonnxparser SHARED ${IMPORTER_SOURCES})
-target_include_directories(nvonnxparser PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
-target_link_libraries(nvonnxparser PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
-set_target_properties(nvonnxparser PROPERTIES
+add_library(${nvonnxparser_lib_name} SHARED ${IMPORTER_SOURCES})
+target_include_directories(${nvonnxparser_lib_name} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+target_link_libraries(${nvonnxparser_lib_name} PUBLIC onnx_proto ${PROTOBUF_LIBRARY})
+set_target_properties(${nvonnxparser_lib_name} PROPERTIES
   VERSION   ${ONNX2TRT_VERSION}
   SOVERSION ${ONNX2TRT_MAJOR}
   LINK_DEPENDS ${PARSER_LINKER_SCRIPT}
@@ -126,10 +129,10 @@ set_target_properties(nvonnxparser PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
 )
-add_library(nvonnxparser_static STATIC ${IMPORTER_SOURCES})
-target_include_directories(nvonnxparser_static PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
-target_link_libraries(nvonnxparser_static PUBLIC onnx_proto ${PROTOBUF_LIBRARY} ${TENSORRT_LIBRARY})
-set_target_properties(nvonnxparser_static PROPERTIES
+add_library(${nvonnxparser_lib_name_static} STATIC ${IMPORTER_SOURCES})
+target_include_directories(${nvonnxparser_lib_name_static} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+target_link_libraries(${nvonnxparser_lib_name_static} PUBLIC onnx_proto ${PROTOBUF_LIBRARY})
+set_target_properties(${nvonnxparser_lib_name_static} PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
   LIBRARY_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${TRT_OUT_DIR}"
@@ -140,7 +143,7 @@ set_target_properties(nvonnxparser_static PROPERTIES
 if(BUILD_ONNXIFI)
   add_library(trt_onnxify SHARED ${ONNXIFI_SOURCES})
   target_include_directories(trt_onnxify PUBLIC ${CUDA_INCLUDE_DIR} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR})
-  target_link_libraries(trt_onnxify PUBLIC nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+  target_link_libraries(trt_onnxify PUBLIC ${nvonnxparser_lib_name_static} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 endif()
 
 # --------------------------------
@@ -149,15 +152,15 @@ endif()
 if (BUILD_API_TEST)
   add_executable(getSupportedAPITest ${API_TESTS_SOURCES})
   target_include_directories(getSupportedAPITest PUBLIC ${ONNX_INCLUDE_DIRS} ${CUDNN_INCLUDE_DIR})
-  target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} nvonnxparser_static ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+  target_link_libraries(getSupportedAPITest PUBLIC ${PROTOBUF_LIB} ${nvonnxparser_lib_name_static} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 endif()
 
 # --------------------------------
 # Installation
 # --------------------------------
 install(TARGETS
-                nvonnxparser
-                nvonnxparser_static
+                ${nvonnxparser_lib_name}
+                ${nvonnxparser_lib_name_static}
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
 )

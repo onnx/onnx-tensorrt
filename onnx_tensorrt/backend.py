@@ -43,13 +43,6 @@ class TensorRTBackendRep(BackendRep):
         self.network = self.builder.create_network(flags=0)
         self.parser = trt.OnnxParser(self.network, self._logger)
         self.config = self.builder.create_builder_config()
-
-
-
-
-
-
-
         self.serialize_engine = serialize_engine
         self.verbose = verbose
         self.dynamic = False
@@ -97,6 +90,7 @@ class TensorRTBackendRep(BackendRep):
                 print("Found dynamic inputs! Deferring engine build to run stage")
         else:
             self._build_engine()
+
         self._output_shapes = {}
         self._output_dtype = {}
         for output in model.graph.output:
@@ -115,6 +109,7 @@ class TensorRTBackendRep(BackendRep):
 
         if inputs:
             opt_profile = self.builder.create_optimization_profile()
+
             # Set optimization profiles for the input bindings that need them
             for i in range(self.network.num_inputs):
                 inp_tensor = self.network.get_input(i)

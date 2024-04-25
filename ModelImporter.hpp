@@ -76,7 +76,6 @@ public:
         return static_cast<bool>(mOnnxParserFlags & flag);
     }
 
-
     int32_t getNbErrors() const override
     {
         return mErrors.size();

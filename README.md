@@ -46,6 +46,8 @@ Once you have cloned the repository, you can build the parser libraries and exec
 
 Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
 
+To build with `protobuf-lite` support, add `-DUSE_ONNX_LITE_PROTO=1` to the end of the `cmake` command.
+
 ### InstanceNormalizaiton Performance
 
 There are two implementations of InstanceNormalization that may perform differently depending on various parameters. By default, the parser will use the native TensorRT implementation of InstanceNorm. Users that want to benchmark using the plugin implementation of InstanceNorm can unset the parser flag `kNATIVE_INSTANCENORM` prior to parsing the model. Note that the plugin implementation cannot be used for building version compatible or hardware compatible engines, and attempting to do so will result in an error.

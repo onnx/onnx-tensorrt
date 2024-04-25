@@ -12,6 +12,19 @@
 #include <unordered_set>
 #include <vector>
 
+// Logging macros
+#define LOG_REFITTER(msg, severity)                                                                                    \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        std::ostringstream ss{};                                                                                       \
+        if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
+            ss << __FILENAME__ << ":" << __LINE__ << ": ";                                                             \
+        ss << msg;                                                                                                     \
+        mLogger->log(severity, ss.str().c_str());                                                                      \
+    } while (0)
+
+#define LOG_REFITTER_WARNING(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kWARNING)
+
 namespace onnx2trt
 {
 class ModelRefitter : public nvonnxparser::IParserRefitter
@@ -20,13 +33,23 @@ private:
     nvinfer1::IRefitter* mRefitter;
     nvinfer1::ILogger* mLogger;
 
-    // WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the refitter.
+    //! WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the refitter.
     WeightsContext mWeightsContext;
 
-    // ONNX ModelProto object to hold ownership of ONNX weights whenever a data type conversion is not needed
+    //! ONNX ModelProto object to hold ownership of ONNX weights whenever a data type conversion is not needed.
     ::ONNX_NAMESPACE::ModelProto onnx_model;
 
-    std::unordered_set<std::string> refittable_weights;
+    //! Counter to limit the recursion depth to a set amount for nodes containing subgraphs.
+    size_t nestedDepth{0};
+
+    //! Set to keep track of how many times a batch norm weight name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mBatchNormWeightNames;
+    //! An increasing suffix counter used to uniquify batch norm weight names.
+    int64_t mBatchNormWeightSuffixCounter{0};
+
+    size_t successfullyRefittedWeights{};
+    std::unordered_set<std::string> refittableWeights;
+    std::unordered_set<std::string> refittedWeights;
 
     std::vector<Status> mErrors;
 
@@ -36,10 +59,17 @@ private:
     //! TConvertFunc is a functor for converting ShapedWeights to an array of type T.
     //! It should return a T*.
     template <typename T, typename TConvertFunc>
-    ValueOrStatus<size_t> batchnormWeightRefitter(::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-        std::vector<ShapedWeights>& inputs, TConvertFunc&& f);
+    ValueOrStatus<size_t> batchnormWeightRefitter(
+        ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f);
 
     Status refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model);
+    Status refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph);
+    Status refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
+    Status refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName);
+    Status refitOnnxBatchNormNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
+    Status refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node);
+    Status refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node);
+    Status refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node);
 
 public:
     ModelRefitter(nvinfer1::IRefitter* refitter, nvinfer1::ILogger* logger)

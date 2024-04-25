@@ -5,7 +5,6 @@
 #pragma once
 
 #include "ShapedWeights.hpp"
-
 #include <NvInfer.h>
 #include <cassert>
 #include <stdexcept>
@@ -166,7 +165,6 @@ public:
         {
             return weights().type;
         }
-
     }
 };
 

@@ -10,8 +10,6 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 > Note: INT8, INT4, and FP8 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision.
 > Note: UINT8 is only supported as network input or output tensor types.
 
-See below for the support matrix of ONNX operators in ONNX-TensorRT.
-
 ## Operator Support Matrix
 
 | Operator                  | Supported  | Supported Types | Restrictions                                                                                                           |

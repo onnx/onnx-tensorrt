@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.0 GA Release - 2024-4-25
+For more details, see the 10.0 GA release notes.
+
+- Added support for building with with `protobuf-lite`
+- Fixed issue when parsing and refitting models with nested `BatchNormalization` nodes
+- Added support for empty inputs in custom plugin nodes
+
 # TensorRT 10.0 EA Release - 2024-4-1
 For more details, see the 10.0 EA release notes.
 

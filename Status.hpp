@@ -20,6 +20,10 @@
 #define ENABLE_SAFE_PLUGIN 0
 #endif // ENABLE_SAFE_PLUGIN
 
+#ifndef USE_LITE_PROTOBUF
+#define USE_LITE_PROTOBUF 0
+#endif // USE_LITE_PROTOBUF
+
 // Used to strip out build path information from debug prints
 #if defined(SOURCE_LENGTH)
 #define __FILENAME__ (__FILE__ + SOURCE_LENGTH)

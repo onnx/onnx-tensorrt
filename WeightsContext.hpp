@@ -33,11 +33,14 @@ public:
     float* convertDouble(double const* weightValues, nvinfer1::Dims const& shape);
 
     template <typename DataType>
-    DataType* convertINT32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype);
+    DataType* convertInt32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype);
+
+    uint8_t* convertPackedInt32Data(
+        int32_t const* weightValues, nvinfer1::Dims const& shape, size_t nbytes, int32_t onnxdtype);
 
     // Function to create an internal buffer to own the weights without any type conversions.
-    void* ownWeights(void const* weightValues, const ShapedWeights::DataType dataType, nvinfer1::Dims const& shape,
-        const size_t nBytes);
+    void* ownWeights(void const* weightValues, ShapedWeights::DataType const dataType, nvinfer1::Dims const& shape,
+        size_t const nBytes);
 
     // Function to read bytes from an external file and return the data in a buffer.
     bool parseExternalWeights(
@@ -57,12 +60,11 @@ public:
 
     // Register an unique name for the created weights.
     ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
-        std::set<std::string>& namesSet, int64_t& suffixCounter);
+        std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode = false);
 
     // Create weights with a given name.
-    ShapedWeights createNamedWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name,
-        std::set<std::string>* bufferedNames = nullptr);
-
+    ShapedWeights createNamedWeights(
+        ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name);
 
     // Creates a ShapedWeights object class of a given type and shape.
     ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape, uint8_t value = 0)
@@ -99,10 +101,10 @@ public:
 };
 
 template <typename DataType>
-DataType* WeightsContext::convertINT32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype)
+DataType* WeightsContext::convertInt32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype)
 {
-    const size_t nbWeights = volume(shape);
-    DataType* newWeights{reinterpret_cast<DataType*>(createTempWeights(onnxdtype, shape).values)};
+    size_t const nbWeights = volume(shape);
+    DataType* newWeights{static_cast<DataType*>(createTempWeights(onnxdtype, shape).values)};
 
     for (size_t i = 0; i < nbWeights; i++)
     {

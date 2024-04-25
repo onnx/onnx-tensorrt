@@ -248,7 +248,6 @@ public:
     virtual bool supportsOperator(const char* op_name) const = 0;
 
     //!
-
     //!\brief Get the number of errors that occurred during prior calls to
     //!         \p parse
     //!

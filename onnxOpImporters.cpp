@@ -284,16 +284,14 @@ NodeImportResult batchnormWeightHelper(
         ? ::ONNX_NAMESPACE::TensorProto::BFLOAT16
         : (typeid(T).hash_code() == typeid(half_float::half).hash_code() ? ::ONNX_NAMESPACE::TensorProto::FLOAT16
                                                                          : ::ONNX_NAMESPACE::TensorProto::FLOAT);
-    const std::string node_id = "node_trt_batch_norm_" + std::to_string(nodeIdx);
-    auto combinedScale = ctx->createNamedWeights(
-        weightType, scale.shape, node_id + "_scale_weight", /*allocate_buffer_for_name=*/true);
-    auto combinedBias
-        = ctx->createNamedWeights(weightType, bias.shape, node_id + "_bias_weight", /*allocate_buffer_for_name=*/true);
+    auto combinedScale = ctx->createNamedTempWeights(weightType, scale.shape, /*batchNormNode=*/true);
+    auto combinedBias = ctx->createNamedTempWeights(weightType, bias.shape, /*batchNormNode=*/true);
 
     // Validate that all the weights have the same amount of values
-    bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count() && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
-    ASSERT_NODE(allSame, "Inputs to BatchNormalization must have the same shape!", node, nodeIdx, ErrorCode::kINVALID_NODE);
-
+    bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
+        && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
+    ASSERT_NODE(
+        allSame, "Inputs to BatchNormalization must have the same shape!", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
     for (int32_t i = 0; i < nbChannels; ++i)
     {
@@ -363,16 +361,16 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
 
     // Fold the weights together into a single bias and scale
     int32_t const nbChannels = scale.shape.d[0];
-    const std::string node_id = "node_trt_batch_norm_" + std::to_string(nodeIdx);
-    auto combinedScale = ctx->createNamedWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, scale.shape,
-        node_id + "_scale_weight", /*allocate_buffer_for_name=*/true);
-    auto combinedBias = ctx->createNamedWeights(
-        ::ONNX_NAMESPACE::TensorProto::FLOAT, bias.shape, node_id + "_bias_weight", /*allocate_buffer_for_name=*/true);
+    auto combinedScale
+        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, scale.shape, /*batchNormNode=*/true);
+    auto combinedBias
+        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, bias.shape, /*batchNormNode=*/true);
 
     // Validate that all the weights have the same amount of values
-    bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count() && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
-    ASSERT_NODE(allSame, "Inputs to BatchNormalization must have the same shape!", node, nodeIdx, ErrorCode::kINVALID_NODE);
-
+    bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
+        && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
+    ASSERT_NODE(
+        allSame, "Inputs to BatchNormalization must have the same shape!", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
     for (int32_t i = 0; i < nbChannels; ++i)
     {
@@ -6144,11 +6142,17 @@ std::vector<nvinfer1::PluginField> loadFields(StringMap<std::vector<uint8_t>>& f
             case ::ONNX_NAMESPACE::TensorProto::UINT64:
             case ::ONNX_NAMESPACE::TensorProto::COMPLEX64:
             case ::ONNX_NAMESPACE::TensorProto::COMPLEX128:
-                MAKE_ERROR("Tensor type: "
-                        + ::ONNX_NAMESPACE::TensorProto::DataType_Name(
-                            static_cast<::ONNX_NAMESPACE::TensorProto::DataType>(tensor.type))
-                        + " is unsupported",
-                    ErrorCode::kUNSUPPORTED_NODE);
+                // ::ONNX_NAMESPACE::TensorProto::DataType_Name function not available in protobuf-lite.
+                std::stringstream ss{};
+                ss << "Tensor type: ";
+#if USE_LITE_PROTOBUF
+                ss << static_cast<::ONNX_NAMESPACE::TensorProto::DataType>(tensor.type);
+#else
+                ss << ::ONNX_NAMESPACE::TensorProto::DataType_Name(
+                    static_cast<::ONNX_NAMESPACE::TensorProto::DataType>(tensor.type));
+#endif // USE_LITE_PROTOBUF
+                ss << " is unsupported in plugin fields." << std::endl;
+                MAKE_ERROR(ss.str(), ErrorCode::kUNSUPPORTED_NODE);
             }
             break;
         }
@@ -6160,9 +6164,16 @@ std::vector<nvinfer1::PluginField> loadFields(StringMap<std::vector<uint8_t>>& f
         case ::ONNX_NAMESPACE::AttributeProto::GRAPHS:
         case ::ONNX_NAMESPACE::AttributeProto::TYPE_PROTO:
         case ::ONNX_NAMESPACE::AttributeProto::TYPE_PROTOS:
-            MAKE_ERROR("Attributes of type: "
-                    + ::ONNX_NAMESPACE::AttributeProto::AttributeType_Name(attrs.type(fieldName)) + " are unsupported",
-                ErrorCode::kUNSUPPORTED_NODE);
+            // ::ONNX_NAMESPACE::AttributeProto::AttributeType_Name function not available in protobuf-lite.
+            std::stringstream ss{};
+            ss << "Attributes of type: ";
+#if USE_LITE_PROTOBUF
+            ss << attrs.type(fieldName);
+#else
+            ss << ::ONNX_NAMESPACE::AttributeProto::AttributeType_Name(attrs.type(fieldName));
+#endif // USE_LITE_PROTOBUF
+            ss << " are unsupported as plugin fields." << std::endl;
+            MAKE_ERROR(ss.str(), ErrorCode::kUNSUPPORTED_NODE);
         }
         fields.emplace_back(fieldName.c_str(), data, type, length);
     }
@@ -6202,6 +6213,12 @@ NodeImportResult addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::No
 
     for (auto& input : inputs)
     {
+        if (input.isNullTensor())
+        {
+            LOG_VERBOSE("Found unset input for " << pluginName << ".");
+            pluginInputs.push_back(nullptr);
+            continue;
+        }
         nvinfer1::ITensor* inputTensor = &convertToTensor(input, ctx);
         if (onlySupportInt32TRTPlugin(pluginName) && inputTensor->getType() == nvinfer1::DataType::kINT64)
         {
