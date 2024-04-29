@@ -1,6 +1,7 @@
 {
   global:
     createNvOnnxParser_INTERNAL;
+    createNvOnnxParserRefitter_INTERNAL;
     getNvOnnxParserVersion;
     extern "C++" {
       vtable*nvonnxparser::*;

@@ -40,14 +40,14 @@ public:
     template <typename T>
     T& at(size_t index)
     {
-        assert(index >= 0 && (index * sizeof(T)) < size_bytes());
+        assert(values && index >= 0 && index < count());
         return static_cast<T*>(values)[index];
     }
 
     template <typename T>
     const T& at(size_t index) const
     {
-        assert(index >= 0 && (index * sizeof(T)) < size_bytes());
+        assert(values && index >= 0 && index < count());
         return static_cast<const T*>(values)[index];
     }
 
@@ -58,6 +58,6 @@ public:
     const char* name{};
 };
 
-class IImporterContext;
+class ImporterContext;
 
 } // namespace onnx2trt

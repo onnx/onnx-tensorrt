@@ -48,4 +48,4 @@ For writing a plugin for existing ONNX operators that requires modification of t
 
 ## Quantized Operator Support
 
-As of the latest release version of TensorRT, the only two ONNX quantizing operators we support are the opset 11 definitions of `QuantizeLinear` and `DequantizeLinear`. We are currently working to expand the ability for TensorRT to import QAT and PTQ ONNX networks in future releases.
+As of the latest release version of TensorRT, the only two ONNX quantizing operators we support are INT8 and FP8 `QuantizeLinear` and `DequantizeLinear`.

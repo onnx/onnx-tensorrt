@@ -7,19 +7,25 @@
 #include "ImporterContext.hpp"
 #include "NvInferPlugin.h"
 #include "NvOnnxParser.h"
-#include "builtin_op_importers.hpp"
-#include "utils.hpp"
+#include "onnxOpCheckers.hpp"
+#include "onnxOpImporters.hpp"
 
 namespace onnx2trt
 {
 
-Status parseGraph(IImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, bool deserializingINetwork = false,
-    int32_t* currentNode = nullptr);
+Status parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    bool deserializingINetwork = false);
+
+void parseNodeStaticCheck(
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex);
+
+Status parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
+    bool deserializingINetwork = false, int32_t* currentNode = nullptr);
 
 class ModelImporter : public nvonnxparser::IParser
 {
 protected:
-    string_map<NodeImporter> _op_importers;
+    StringMap<NodeImporter> _op_importers;
     virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model);
 
 private:
@@ -30,7 +36,7 @@ private:
     std::list<::ONNX_NAMESPACE::ModelProto> mONNXModels; // Needed for ownership of weights
     int mCurrentNode;
     std::vector<Status> mErrors;
-    nvonnxparser::OnnxParserFlags mOnnxParserFlags{0};
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags{1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM)}; // kNATIVE_INSTANCENORM is ON by default.
 
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
@@ -70,10 +76,6 @@ public:
         return static_cast<bool>(mOnnxParserFlags & flag);
     }
 
-    void destroy() override
-    {
-        delete this;
-    }
     int32_t getNbErrors() const override
     {
         return mErrors.size();
@@ -86,6 +88,15 @@ public:
     void clearErrors() override
     {
         mErrors.clear();
+    }
+
+    nvinfer1::ITensor const* getLayerOutputTensor(char const* name, int64_t i)
+    {
+        if (!name)
+        {
+            return nullptr;
+        }
+        return mImporterCtx.findLayerOutputTensor(name, i);
     }
 
     bool parseFromFile(char const* onnxModelFile, int32_t verbosity) override;
