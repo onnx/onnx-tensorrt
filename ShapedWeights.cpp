@@ -3,10 +3,10 @@
  */
 
 #include "ShapedWeights.hpp"
-#include "onnx2trt_utils.hpp"
-#include "trt_utils.hpp"
+#include "importerUtils.hpp"
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace onnx2trt
 {
@@ -15,8 +15,17 @@ size_t ShapedWeights::count() const
 {
     assert(shape.nbDims >= 0);
     size_t c = 1;
-    for (int i = 0; i < this->shape.nbDims; ++i)
+    for (int32_t i = 0; i < this->shape.nbDims; ++i)
     {
+        if (shape.d[i] == 0)
+        {
+            c = 0;
+            break;
+        }
+        if (c > std::numeric_limits<size_t>::max() / shape.d[i])
+        {
+            throw std::runtime_error("Count of weights exceeds maximum!");
+        }
         c *= this->shape.d[i];
     }
     return c;
@@ -37,7 +46,7 @@ ShapedWeights::ShapedWeights(DataType type_, void* values_, nvinfer1::Dims shape
 
 size_t ShapedWeights::size_bytes() const
 {
-    return this->count() * getDtypeSize(this->type);
+    return getTensorOrWeightsSizeBytes(this->count(), this->type);
 }
 
 ShapedWeights::operator bool() const

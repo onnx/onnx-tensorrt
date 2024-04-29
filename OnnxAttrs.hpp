@@ -17,10 +17,10 @@ class OnnxAttrs
     using string_map = std::unordered_map<std::string, T>;
     typedef string_map<::ONNX_NAMESPACE::AttributeProto const*> AttrMap;
     AttrMap _attrs;
-    onnx2trt::IImporterContext* mCtx;
+    onnx2trt::ImporterContext* mCtx;
 
 public:
-    explicit OnnxAttrs(::ONNX_NAMESPACE::NodeProto const& onnx_node, onnx2trt::IImporterContext* ctx)
+    explicit OnnxAttrs(::ONNX_NAMESPACE::NodeProto const& onnx_node, onnx2trt::ImporterContext* ctx)
         : mCtx{ctx}
     {
         for (auto const& attr : onnx_node.attribute())
@@ -29,7 +29,7 @@ public:
         }
     }
 
-    bool count(const std::string& key) const
+    bool count(std::string const& key) const
     {
         return _attrs.count(key);
     }
@@ -43,17 +43,16 @@ public:
         return _attrs.at(key);
     }
 
-    ::ONNX_NAMESPACE::AttributeProto::AttributeType type(const std::string& key) const
+    ::ONNX_NAMESPACE::AttributeProto::AttributeType type(std::string const& key) const
     {
         return this->at(key)->type();
     }
 
+    template <typename T>
+    T get(std::string const& key) const;
 
     template <typename T>
-    T get(const std::string& key) const;
-
-    template <typename T>
-    T get(const std::string& key, T const& default_value) const
+    T get(std::string const& key, T const& default_value) const
     {
         return _attrs.count(key) ? this->get<T>(key) : default_value;
     }

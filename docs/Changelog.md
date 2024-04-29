@@ -2,6 +2,57 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.0 GA Release - 2024-4-25
+For more details, see the 10.0 GA release notes.
+
+- Added support for building with with `protobuf-lite`
+- Fixed issue when parsing and refitting models with nested `BatchNormalization` nodes
+- Added support for empty inputs in custom plugin nodes
+
+# TensorRT 10.0 EA Release - 2024-4-1
+For more details, see the 10.0 EA release notes.
+
+- Added new class `IParserRefitter` that can be used to refit a TensorRT engine with the weights of an ONNX model
+- `kNATIVE_INSTANCENORM` is now set to ON by default
+- Added support for `IPluginV3` interfaces from TensorRT
+- Added support for `INT4` quantization
+- Added support for the `reduction` attribute in `ScatterElements`
+- Added support for `wrap` padding mode in `Pad`
+
+# TensorRT 9.3 GA Release - 2024-2-8
+For more details, see the 9.3 GA release notes for the fixes since 9.2 GA.
+
+- Added native support for `INT32` and `INT64` types for `ArgMin` and `ArgMax` nodes
+- Fixed check for valid `zero_point` values in `QuantizeLinear` and `DequantizeLinear` nodes
+
+# TensorRT 9.2 GA Release - 2023-11-8
+For more details, see the 9.2 GA release notes for the fixes since 9.1 GA.
+
+- Added support for `Hardmax`
+- Fixed type inference for few operators to use native ONNX types
+
+# TensorRT 9.1 GA Release - 2023-10-18
+For more details, see the 9.1 GA release notes for the fixes since 9.0 GA.
+
+- Added new `ErrorCode` enums to improve error logging
+- Added new members to `IParserError` to improve error logging 
+- Added static checkers when parsing nodes, resulting better reporting of errors
+
+# TensorRT 9.0 GA Release - 2023-9-5
+For more details, see the 9.0 GA release notes for the fixes since 9.0 EA.
+
+- Added support for FP8 and BF16 datatypes.
+- Fixed a bug that previously caused `If` nodes to fail import due to branch output size mismatch
+- Improved support for importing ONNX Local Functions
+
+# TensorRT 9.0 EA Release - 2023-8-4
+For more details, see the 9.0 EA release notes for the fixes since 8.6 GA.
+
+- Added support for INT64 data type. The ONNX parser no longer automatically casts INT64 to INT32.
+- Added support for ONNX local functions when parsing ONNX models with the ONNX parser. 
+- Breaking API Change: In TensorRT 9.0, due to the introduction of INT64 as a supported data type, ONNX models with INT64 I/O require INT64 bindings. Note that prior to this release, such models required INT32 bindings.
+- Updated ONNX submodule to v1.14.0.
+
 # TensorRT 8.6 GA Release - 2023-5-1
 For more details, see the 8.6 GA release notes for the fixes since 8.6 EA.
 
@@ -193,4 +244,3 @@ See the 8.2 EA release notes for new features added in TensorRT 8.2.
 ## Removed
 - Removed deprecated docker files.
 - Removed deprecated `setup.py`.
-

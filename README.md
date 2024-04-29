@@ -4,7 +4,7 @@
 
 Parses ONNX models for execution with [TensorRT](https://developer.nvidia.com/tensorrt).
 
-See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/sdk/#inference).
+See also the [TensorRT documentation](https://docs.nvidia.com/deeplearning/tensorrt/).
 
 For the list of recent changes, see the [changelog](docs/Changelog.md).
 
@@ -16,28 +16,9 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the `main` branch is for the latest version of [TensorRT 8.6](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on the `main` branch is for the latest version of [TensorRT 10.0](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
-
-## Full Dimensions + Dynamic Shapes
-
-Building INetwork objects in full dimensions mode with dynamic shape support requires calling the following API:
-
-C++
-
-    const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    builder->createNetworkV2(explicitBatch)
-
-Python
-
-    import tensorrt
-    explicit_batch = 1 << (int)(tensorrt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-    builder.create_network(explicit_batch)
-
-For examples of usage of these APIs see:
-* [sampleONNXMNIST](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleOnnxMNIST)
-* [sampleDynamicReshape](https://github.com/NVIDIA/TensorRT/tree/main/samples/sampleDynamicReshape)
 
 ## Supported Operators
 
@@ -48,8 +29,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 ### Dependencies
 
  - [Protobuf >= 3.0.x](https://github.com/google/protobuf/releases)
- - [TensorRT 8.6](https://developer.nvidia.com/tensorrt)
- - [TensorRT 8.6 open source libaries (main branch)](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 10.0](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 10.0 open source libaries] (https://github.com/NVIDIA/TensorRT/)
 
 ### Building
 
@@ -60,24 +41,26 @@ Once you have cloned the repository, you can build the parser libraries and exec
     cd onnx-tensorrt
     mkdir build && cd build
     cmake .. -DTENSORRT_ROOT=<path_to_trt> && make -j
-    // Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
+    # Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
 Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
 
+To build with `protobuf-lite` support, add `-DUSE_ONNX_LITE_PROTO=1` to the end of the `cmake` command.
+
 ### InstanceNormalizaiton Performance
 
-In TensorRT 8.6 there are two implementations of InstanceNormalization that may perform differently depending on various parameters. By default the parser will insert an InstanceNormalization plugin layer as it performs best for general use cases. Users that want to benchmark using the native TensorRT implementation of InstanceNorm can set the parser flag `kNATIVE_INSTANCENORM` prior to parsing the model. For building version compatible or hardware compatible engines, this flag must be set.
+There are two implementations of InstanceNormalization that may perform differently depending on various parameters. By default, the parser will use the native TensorRT implementation of InstanceNorm. Users that want to benchmark using the plugin implementation of InstanceNorm can unset the parser flag `kNATIVE_INSTANCENORM` prior to parsing the model. Note that the plugin implementation cannot be used for building version compatible or hardware compatible engines, and attempting to do so will result in an error.
 
 C++ Example:
 
-    auto flag = 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM);
-    parser->setFlags(flag);
+    // Unset the kNATIVE_INSTANCENORM flag to use the plugin implementation.
+    parser->unsetFlag(nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM);
 
 Python Example:
 
-    flag = 1 << (int)(trt.OnnxParserFlag.NATIVE_INSTANCENORM)
-    parser.flags = flag
+    // Unset the NATIVE_INSTANCENORM flag to use the plugin implementation.
+    parser.clear_flag(trt.OnnxParserFlag.NATIVE_INSTANCENORM)
 
 ## Executable Usage
 
@@ -97,11 +80,9 @@ Refer to the link or run `polygraphy run -h` for more information on CLI options
 
 ### Python Modules
 
-Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files. Install them with
+Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files.
 
-    python3 -m pip install <tensorrt_install_dir>/python/tensorrt-8.x.x.x-cp<python_ver>-none-linux_x86_64.whl
-
-TensorRT 8.6 supports ONNX release 1.16.0. Install it with:
+TensorRT 10.0 supports ONNX release 1.16.0. Install it with:
 
     python3 -m pip install onnx==1.16.0
 

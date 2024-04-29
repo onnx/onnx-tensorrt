@@ -4,16 +4,25 @@
 
 #pragma once
 
-#include "onnx2trt.hpp"
-#include "onnx2trt_utils.hpp"
+#include "NvOnnxParser.h"
+#include "ShapedWeights.hpp"
+#include "Status.hpp"
+#include "TensorOrWeights.hpp"
 #include "onnxErrorRecorder.hpp"
+#include "WeightsContext.hpp"
+#include <fstream>
+#include <functional>
 #include <list>
-#include <string>
+#include <onnx/onnx_pb.h>
 #include <unordered_map>
-#include <utility>
+#include <unordered_set>
+#include <vector>
 
 namespace onnx2trt
 {
+
+template <typename T>
+using StringMap = std::unordered_map<std::string, T>;
 
 class ErrorRecorderWrapper
 {
@@ -67,35 +76,48 @@ private:
     nvinfer1::IErrorRecorder* mUserErrorRecorder{nullptr};
 };
 
-class ImporterContext final : public IImporterContext
+class ImporterContext
 {
     nvinfer1::INetworkDefinition* mNetwork;
     nvinfer1::ILogger* mLogger;
-    std::list<std::vector<uint8_t>> mTempBufs;
-    StringMap<nvinfer1::ITensor*> mUserInputs;
-    StringMap<nvinfer1::ITensor**> mUserOutputs;
+    //! WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the Parser.
+    WeightsContext mWeightsContext;
     StringMap<int64_t> mOpsets;
-    StringMap<TensorOrWeights> mTensors; // All tensors in the graph mapped to their names.
+    //! All tensors in the graph mapped to their names.
+    StringMap<TensorOrWeights> mTensors;
     StringMap<nvinfer1::TensorLocation> mTensorLocations;
     StringMap<float> mTensorRangeMins;
     StringMap<float> mTensorRangeMaxes;
     StringMap<nvinfer1::DataType> mLayerPrecisions;
-    std::set<std::string> mTensorNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
-    std::set<std::string> mLayerNames; // Keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
-    int64_t mSuffixCounter{0}; // increasing suffix counter used to uniquify layer names.
-    std::unordered_set<std::string> mUnsupportedShapeTensors; // Container to hold output tensor names of layers that produce shape tensor outputs but do not natively support them.
-    StringMap<std::string> mLoopTensors; // Container to map subgraph tensors to their original outer graph names.
-    std::string mOnnxFileLocation;       // Keep track of the directory of the parsed ONNX file
-    std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper; // error recorder to control TRT errors
+    //! Set to keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mTensorNames;
+    //! Set to keep track of how many times a tensor name shows up, to avoid duplicate naming in TRT.
+    std::set<std::string> mLayerNames;
+    //! An increasing suffix counter used to uniquify layer names.
+    int64_t mSuffixCounter{0};
+    //! Set to keep track of how many times a batch norm weight name shows up,
+    //! to avoid duplicate naming in TRT.
+    std::set<std::string> mBatchNormWeightNames;
+    //! An increasing suffix counter used to uniquify batch norm weight names.
+    int64_t mBatchNormWeightSuffixCounter{0};
+    //! Set to hold output tensor names of layers that produce shape tensor outputs but do not
+    //! natively support them.
+    std::unordered_set<std::string> mUnsupportedShapeTensors;
+    //! Container to map subgraph tensors to their original outer graph names.
+    StringMap<std::string> mLoopTensors;
+    //! Error recorder to control TRT errors.
+    std::unique_ptr<ErrorRecorderWrapper> mErrorWrapper;
     StringMap<nvinfer1::IConstantLayer*> mConstantLayers;
     bool mConvertINT64Logged{false};
     bool mConvertINT64OutOfBoundsLogged{false};
     bool mConvertDoubleLogged{false};
     bool mConvertDoubleOutOfBoundsLogged{false};
-    nvonnxparser::OnnxParserFlags mOnnxParserFlags; // OnnxParserFlags specified by the parser
+    //! OnnxParserFlags specified by the parser.
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags;
+    StringMap<std::vector<nvinfer1::ITensor const*>> mNodeNameToTensor;
 
-    // Logical library names for VC plugin libraries.  This gets translated to library paths
-    // when getUsedVCPluginLibraries() is called.
+    //! Logical library names for VC plugin libraries. This gets translated to library paths
+    //! when getUsedVCPluginLibraries() is called.
     std::set<std::string> mLogicalVCPluginLibraries;
 
     //! Stack of names defined by nested ONNX graphs, with information about how to
@@ -113,116 +135,94 @@ class ImporterContext final : public IImporterContext
     //!
     std::vector<StringMap<std::pair<bool, TensorOrWeights>>> mBaseNameScopeStack;
 
+    //! Map holding FunctionProtos
+    StringMap<::ONNX_NAMESPACE::FunctionProto> mLocalFunctions;
+
+    //! Vector to hold current local function names and attributes
+    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>> mLocalFunctionStack;
+
+    //! Vector to hold the local function names at each error
+    std::vector<std::vector<std::string>> mLocalFunctionErrors;
+
+    //! Vector to hold expected graph outputs
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphOutputNames;
+
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
         , mLogger(logger)
+        , mWeightsContext(WeightsContext(logger))
         , mErrorWrapper(std::make_unique<ErrorRecorderWrapper>(mNetwork, logger))
     {
     }
-    nvinfer1::INetworkDefinition* network() override
+    nvinfer1::INetworkDefinition* network()
     {
+        assert(mNetwork != nullptr);
         return mNetwork;
     }
-    StringMap<TensorOrWeights>& tensors() override
+    WeightsContext& getWeightsContext()
+    {
+        return mWeightsContext;
+    }
+    StringMap<TensorOrWeights>& tensors()
     {
         return mTensors;
     }
-    StringMap<nvinfer1::TensorLocation>& tensorLocations() override
+    StringMap<nvinfer1::TensorLocation>& tensorLocations()
     {
         return mTensorLocations;
     }
-    StringMap<float>& tensorRangeMins() override
+    StringMap<float>& tensorRangeMins()
     {
         return mTensorRangeMins;
     }
-    StringMap<float>& tensorRangeMaxes() override
+    StringMap<float>& tensorRangeMaxes()
     {
         return mTensorRangeMaxes;
     }
-    StringMap<nvinfer1::DataType>& layerPrecisions() override
+    StringMap<nvinfer1::DataType>& layerPrecisions()
     {
         return mLayerPrecisions;
     }
-    std::unordered_set<std::string>& unsupportedShapeTensors() override
+    std::unordered_set<std::string>& unsupportedShapeTensors()
     {
         return mUnsupportedShapeTensors;
     }
-    StringMap<std::string>& loopTensors() override
+    StringMap<std::string>& loopTensors()
     {
         return mLoopTensors;
     }
-    void setOnnxFileLocation(std::string location) override
+    // Pass file location down to WeightsContext as all external weight handling logic is done in that class.
+    void setOnnxFileLocation(std::string location)
     {
-        mOnnxFileLocation = location;
+        mWeightsContext.setOnnxFileLocation(location);
     }
-    std::string getOnnxFileLocation() override
-    {
-        return mOnnxFileLocation;
-    }
+    void pushBaseNameScope();
 
-    void pushBaseNameScope() override;
-
-    void popBaseNameScope() override;
+    void popBaseNameScope();
 
     // This actually handles weights as well, but is named this way to be consistent with the tensors()
-    void registerTensor(
-        TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName = false) override;
+    void registerTensor(TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName = false);
 
-    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node) override;
-    void registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node) override;
+    void registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node);
+    void registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node);
 
-    nvinfer1::ILogger& logger() override
+    nvinfer1::ILogger& logger()
     {
         return *mLogger;
     }
 
-    ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, uint8_t value = 0) override
+    // Register an unique name for the created weights
+    ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, bool batchNormNode = false)
     {
-        std::string const& name = generateUniqueName(mTensorNames, "tmp_weight");
-        ShapedWeights weights(type, nullptr, shape);
-        weights.setName(name.c_str());
-        mTempBufs.push_back(std::vector<uint8_t>(weights.size_bytes(), value));
-        weights.values = mTempBufs.back().data();
-        return weights;
+        if (batchNormNode)
+        {
+            return mWeightsContext.createNamedTempWeights(
+                type, shape, mBatchNormWeightNames, mBatchNormWeightSuffixCounter, /*batchNormNode=*/true);
+        }
+        return mWeightsContext.createNamedTempWeights(type, shape, mTensorNames, mSuffixCounter);
     }
 
-    bool setUserInput(const char* name, nvinfer1::ITensor* input)
-    {
-        mUserInputs[name] = input;
-        return true;
-    }
-    bool setUserOutput(const char* name, nvinfer1::ITensor** output)
-    {
-        mUserOutputs[name] = output;
-        return true;
-    }
-    nvinfer1::ITensor* getUserInput(const char* name)
-    {
-        if (!mUserInputs.count(name))
-        {
-            return nullptr;
-        }
-        else
-        {
-            return mUserInputs.at(name);
-        }
-    }
-    nvinfer1::ITensor** getUserOutput(const char* name)
-    {
-        if (!mUserOutputs.count(name))
-        {
-            return nullptr;
-        }
-        else
-        {
-            return mUserOutputs.at(name);
-        }
-    }
-    StringMap<nvinfer1::ITensor**> const& getUserOutputs() const
-    {
-        return mUserOutputs;
-    }
     void clearOpsets()
     {
         mOpsets.clear();
@@ -231,7 +231,7 @@ public:
     {
         mOpsets.emplace(domain, version);
     }
-    int64_t getOpsetVersion(const char* domain = "") const override
+    int64_t getOpsetVersion(const char* domain = "") const
     {
         if (mOpsets.empty())
         {
@@ -252,16 +252,16 @@ public:
             return mOpsets.at(domain);
         }
     }
-    bool hasError() const noexcept override
+    bool hasError() const noexcept
     {
         return mErrorWrapper != nullptr && mErrorWrapper->hasError();
     }
 
-    nvinfer1::IErrorRecorder* getErrorRecorder() const noexcept override
+    nvinfer1::IErrorRecorder* getErrorRecorder() const noexcept
     {
         return mErrorWrapper ? mErrorWrapper->getErrorRecorder() : nullptr;
     }
-    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const final
+    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const
     {
         if (name == nullptr)
         {
@@ -275,19 +275,19 @@ public:
         return iter->second;
     }
 
-    void setFlags(nvonnxparser::OnnxParserFlags const& onnxParserFlags) override
+    void setFlags(nvonnxparser::OnnxParserFlags const& onnxParserFlags)
     {
         mOnnxParserFlags = onnxParserFlags;
     }
-    nvonnxparser::OnnxParserFlags getFlags() const override
+    nvonnxparser::OnnxParserFlags getFlags() const
     {
         return mOnnxParserFlags;
     }
 
     virtual void addUsedVCPluginLibrary(
-        ::ONNX_NAMESPACE::NodeProto const& node, char const* pluginName, char const* pluginLib) final;
+        ::ONNX_NAMESPACE::NodeProto const& node, char const* pluginName, char const* pluginLib);
 
-    virtual std::vector<std::string> getUsedVCPluginLibraries() final;
+    virtual std::vector<std::string> getUsedVCPluginLibraries();
 
     bool isConvertINT64Logged()
     {
@@ -321,22 +321,63 @@ public:
     {
         mConvertDoubleOutOfBoundsLogged = logged;
     }
-
-private:
-    std::string const& generateUniqueName(std::set<std::string>& namesSet, const std::string& basename)
+    StringMap<::ONNX_NAMESPACE::FunctionProto>& localFunctions()
     {
-        std::string candidate = basename;
-
-        while (namesSet.find(candidate) != namesSet.end())
+        return mLocalFunctions;
+    }
+    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>>& localFunctionStack()
+    {
+        return mLocalFunctionStack;
+    }
+    std::vector<std::vector<std::string>>& localFunctionErrors()
+    {
+        return mLocalFunctionErrors;
+    }
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames()
+    {
+        return mGraphOutputNames;
+    }
+    nvinfer1::ITensor const* findLayerOutputTensor(std::string name, int64_t i)
+    {
+        auto it = mNodeNameToTensor.find(name);
+        if (it == mNodeNameToTensor.end())
         {
-            candidate = basename + "_" + std::to_string(mSuffixCounter);
-            ++mSuffixCounter;
+            return nullptr;
         }
-
-        namesSet.insert(candidate);
-        // Return reference to newly inserted string to avoid any c_str()'s going out of scope
-        return *namesSet.find(candidate);
+        auto tensors = it->second;
+        return i < static_cast<int64_t>(tensors.size()) ? tensors.at(i) : nullptr;
+    }
+    void addLayerOutputTensors(std::string name, std::vector<TensorOrWeights> const& outputs)
+    {
+        if (mNodeNameToTensor.find(name) != mNodeNameToTensor.end())
+        {
+            auto* ctx = this; // For logging
+            LOG_WARNING(
+                "A node named " << name
+                                << " already exists, the output tensors of this new instance will not be queryable.");
+            return;
+        }
+        for (auto const& output : outputs)
+        {
+            if (output.is_tensor())
+            {
+                mNodeNameToTensor[name].push_back(static_cast<nvinfer1::ITensor const*>(&(output.tensor())));
+            }
+        }
+    }
+    size_t getNestedDepth()
+    {
+        return mBaseNameScopeStack.size();
     }
 };
+
+typedef ValueOrStatus<std::vector<TensorOrWeights>> NodeImportResult;
+typedef std::function<NodeImportResult(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)>
+    NodeImporter;
+
+typedef std::function<void(
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)>
+    OpStaticErrorChecker;
 
 } // namespace onnx2trt

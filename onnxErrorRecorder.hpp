@@ -5,11 +5,11 @@
 #pragma once
 
 #include "NvInferRuntimeCommon.h"
-#include "onnx2trt_utils.hpp"
 #include <atomic>
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace onnx2trt

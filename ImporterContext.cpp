@@ -4,6 +4,8 @@
 
 #include "ImporterContext.hpp"
 #include "NvInferVersion.h"
+#include "importerUtils.hpp"
+#include "weightUtils.hpp"
 #include <sstream>
 
 #if !defined(_WIN32)
@@ -52,7 +54,7 @@ void ImporterContext::popBaseNameScope()
 void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& basename, bool const checkUniqueName)
 {
     // TRT requires unique tensor names.
-    std::string const& uniqueName = generateUniqueName(mTensorNames, basename);
+    std::string const& uniqueName = generateUniqueName(mTensorNames, mSuffixCounter, basename);
 
     if (tensor)
     {
@@ -65,12 +67,6 @@ void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& 
         }
         else if (tensor.is_weights())
         {
-            auto const& weights = tensor.weights();
-            if (tensor.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
-            {
-                tensor = ShapedWeights{::ONNX_NAMESPACE::TensorProto::INT32,
-                    convertINT64(reinterpret_cast<int64_t*>(weights.values), weights.shape, this), weights.shape};
-            }
             // It may be possible for nested subgraphs to have different values for the same initializer.
             // For multiple name scopes - use unique name to keep track of weights.
             if (!mBaseNameScopeStack.empty())
@@ -115,10 +111,17 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
     if (layer)
     {
         std::string const name = basename.empty() ? layer->getName() : basename;
-        std::string const& uniqueName = generateUniqueName(mLayerNames, name);
+        std::string const& uniqueName = generateUniqueName(mLayerNames, mSuffixCounter, basename);
 
         auto* ctx = this; // To enable logging.
-        LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
+        if (node != nullptr)
+        {
+            LOG_VERBOSE("Registering layer: " << uniqueName << " for ONNX node: " << basename);
+        }
+        else
+        {
+            LOG_VERBOSE("Registering layer: " << uniqueName << " required by ONNX-TRT");
+        }
 
         layer->setName(uniqueName.c_str());
         if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
@@ -131,9 +134,9 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
             mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
         }
     }
-    if (node != nullptr)
+    if (node != nullptr && layer != nullptr)
     {
-        processMetadata(*node, layer);
+        processMetadata(this, *node, layer);
     }
 }
 
@@ -153,7 +156,7 @@ std::string getOSLibraryName(char const* logicalName)
 #if defined(_WIN32)
     libName << logicalName << ".dll";
 #else
-    libName << "lib" << logicalName << ".so." << NV_TENSORRT_SONAME_MAJOR;
+    libName << "lib" << logicalName << ".so." << NV_TENSORRT_MAJOR;
 #endif
     return libName.str();
 }
