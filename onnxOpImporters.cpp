@@ -2766,6 +2766,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
     auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
     layer->setComputePrecision(computeType);
+    ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
