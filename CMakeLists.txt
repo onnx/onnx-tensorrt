@@ -4,8 +4,8 @@ cmake_minimum_required(VERSION 3.13)
 project(onnx2trt LANGUAGES CXX C)
 
 set(ONNX2TRT_ROOT ${PROJECT_SOURCE_DIR})
-# Set C++14 as standard for the whole project
-set(CMAKE_CXX_STANDARD 14)
+# Set C++17 as standard for the whole project, as required by ONNX 1.16
+set(CMAKE_CXX_STANDARD 17)
 
 # Enable compiler warnings
 if (CMAKE_COMPILER_IS_GNUCC)
