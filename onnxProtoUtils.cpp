@@ -60,15 +60,6 @@ std::string removeRepeatedDataStrings(std::string const& s)
     return oss.str();
 }
 
-std::string convertProtoToString(::google::protobuf::Message const& message)
-{
-    std::string s;
-    ::google::protobuf::TextFormat::PrintToString(message, &s);
-    removeRawDataStrings(s);
-    s = removeRepeatedDataStrings(s);
-    return s;
-}
-
 std::string onnxIRVersionAsString(int64_t irVersion)
 {
     int64_t verMajor = irVersion / 1000000;

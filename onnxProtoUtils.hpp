@@ -50,7 +50,7 @@ std::string convertProtoToString(ProtoMessage const& message)
     removeRawDataStrings(s);
     s = removeRepeatedDataStrings(s);
     return s;
-#endif
+#endif // USE_LITE_PROTOBUF
 }
 
 // Deserializes an ONNX ModelProto passed in as a protobuf::Message or a protobuf::MessageLite.
