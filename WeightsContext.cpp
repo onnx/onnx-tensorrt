@@ -445,15 +445,21 @@ bool WeightsContext::convertOnnxWeights(
         LOG_ERROR("Found unsupported datatype (" << onnxDtype << ") when importing initializer: " << onnxTensor.name());
         return false;
     }
-    onnx2trt::ShapedWeights trt_weights(onnxDtype, dataPtr, shape);
-    // Sanity check that weights were converted properly
-    if (trt_weights.size_bytes() != nbytes)
+
+    onnx2trt::ShapedWeights trtWeights = createTempWeights(onnxDtype, shape);
+
+    // Check if the size of weights is as expected.
+    if (trtWeights.size_bytes() != nbytes)
     {
-        LOG_ERROR("Size mismatch when importing initializer: " << onnxTensor.name() << ". Expected size: " << nbytes
-                                                            << " , actual size: " << trt_weights.size_bytes());
-        return false;
+        LOG_ERROR("Unexpected size for the weights! Expected size: "
+            << trtWeights.size_bytes() << " bytes (shape = " << shape << "). Actual size: " << nbytes
+            << " bytes.");
+       return false;
     }
-    *weights = trt_weights;
+    // Copy the weight values into trtWeights.
+    std::memcpy(trtWeights.values, dataPtr, nbytes);
+
+    *weights = trtWeights;
     return true;
 }
 
