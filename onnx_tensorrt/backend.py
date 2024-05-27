@@ -34,7 +34,7 @@ TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 class TensorRTBackendRep(BackendRep):
     def __init__(self, model, device,
-            max_workspace_size=None, serialize_engine=False, verbose=False, **kwargs):
+            max_workspace_size=None, serialize_engine=False, verbose=False, fp16=False, **kwargs):
         if not isinstance(device, Device):
             device = Device(device)
         self._set_device(device)
@@ -45,7 +45,11 @@ class TensorRTBackendRep(BackendRep):
         self.config = self.builder.create_builder_config()
         self.serialize_engine = serialize_engine
         self.verbose = verbose
+        self.fp16 = fp16
         self.dynamic = False
+
+        if self.fp16:
+            self.config.set_flag(trt.BuilderFlag.FP16)
 
         if self.verbose:
             print(f'\nRunning {model.graph.name}...')
