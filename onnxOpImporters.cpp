@@ -5112,8 +5112,8 @@ DEFINE_BUILTIN_OP_IMPORTER(GridSample)
 DEFINE_BUILTIN_OP_IMPORTER(ScatterND)
 {
     OnnxAttrs attrs(node, ctx);
-    ASSERT_NODE(!attrs.count("reduction"), "Attribute reduction is not supported.", node, nodeIdx,
-        ErrorCode::kUNSUPPORTED_NODE_ATTR);
+    ASSERT_NODE(!attrs.count("reduction") || attrs.get<std::string>("reduction") == "none",
+        "Attribute reduction is not supported.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_ATTR);
     return addScatterLayer(ctx, node, nodeIdx, inputs, nvinfer1::ScatterMode::kND);
 }
 
