@@ -1010,6 +1010,190 @@ bool isDynamic(nvinfer1::Dims const& shape)
     return std::any_of(shape.d, shape.d + shape.nbDims, [](int dim) { return dim < 0; });
 }
 
+NodeImportResult modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)
+{
+    nvinfer1::ITensor* inputXPtr = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* weightPtr = &convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor* offsetPtr = &convertToTensor(inputs.at(2), ctx);
+    int32_t nbDims = inputXPtr->getDimensions().nbDims;
+    ASSERT_NODE(nbDims >= 3 && nbDims <= 4, "TensorRT only supports DeformConv on 3D, or 4D tensors!", node, nodeIdx,
+        ErrorCode::kUNSUPPORTED_NODE);
+    bool const needToExpandDims = (nbDims == 3);
+    if (needToExpandDims)
+    {
+        // Expand spatial dims from 1D to 2D
+        std::vector<int32_t> const axes{3};
+        inputXPtr = unsqueezeTensor(ctx, node, *inputXPtr, axes);
+        weightPtr = unsqueezeTensor(ctx, node, *weightPtr, axes);
+        offsetPtr = unsqueezeTensor(ctx, node, *offsetPtr, axes);
+        ASSERT(inputXPtr && "Failed to unsqueeze the input tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(weightPtr && "Failed to unsqueeze the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT(offsetPtr && "Failed to unsqueeze the offset tensor.", ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    // Parse attributes
+    OnnxAttrs attrs(node, ctx);
+    int32_t nbSpatialDims = nbDims - 2;
+    if (attrs.count("kernel_shape"))
+    {
+        ASSERT(nbSpatialDims == attrs.at("kernel_shape")->ints().size()
+                && "The attribute kernel_shape misaligns with the shape of the weight tensor.",
+            ErrorCode::kUNSUPPORTED_NODE);
+        ASSERT_NODE(((nbSpatialDims == 1 && needToExpandDims) || nbSpatialDims == 2),
+            "The attribute kernel_shape misaligns with the shape of the input tensor.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    nvinfer1::Dims dilations = makeDims(nbSpatialDims, /*Default value of dilations*/ 1);
+    if (attrs.count("dilations"))
+    {
+        auto const* onnxDilations = attrs.at("dilations");
+        setAttr(&dilations, onnxDilations, nbSpatialDims, 1);
+    }
+
+    nvinfer1::Dims kernelShape = makeDims(nbSpatialDims, 0);
+    if (attrs.count("kernel_shape"))
+    {
+        auto const* onnxKernelShape = attrs.at("kernel_shape");
+        setAttr(&kernelShape, onnxKernelShape, nbSpatialDims, 0);
+    }
+    else
+    {
+        auto weightTensorShape = inputs.at(1).shape();
+        for (int32_t i = 0; i < nbSpatialDims; i++)
+        {
+            kernelShape.d[i] = weightTensorShape.d[2 + i];
+        }
+    }
+
+    nvinfer1::Dims begPadding = makeDims(nbSpatialDims, /*Default value of pads*/ 0);
+    nvinfer1::Dims endPadding = makeDims(nbSpatialDims, /*Default value of pads*/ 0);
+
+    if (attrs.count("pads"))
+    {
+        auto onnxPadding = attrs.get<std::vector<int32_t>>("pads");
+        int32_t ndim = onnxPadding.size() / 2;
+        ASSERT(ndim == nbSpatialDims
+                && "The given pads attribute mismatch with the spatial dimensions of the weight tensor.",
+            ErrorCode::kUNSUPPORTED_NODE);
+        for (int32_t i = 0; i < nbSpatialDims; ++i)
+        {
+            begPadding.d[i] = onnxPadding.at(i);
+            endPadding.d[i] = onnxPadding.at(i + ndim);
+        }
+    }
+
+    ASSERT(begPadding == endPadding 
+        && "TensorRT only support the pads attribute of the DeformConv operator where the same number of pixels are added to the beginning and the end of the corresponding axis.", ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::Dims strides = makeDims(nbSpatialDims, /*Default value of strides*/ 1);
+    if (attrs.count("strides"))
+    {
+        auto const* onnxStrides = attrs.at("strides");
+        setAttr(&strides, onnxStrides, nbSpatialDims, 1);
+    }
+
+    int32_t group = attrs.get("group", 1);
+    int32_t offset_group = attrs.get("offset_group", 1);
+
+    // Populate instanceNormalization plugin properties.
+    std::string const pluginName = "ModulatedDeformConv2d";
+    std::string const pluginVersion = "1";
+    std::vector<nvinfer1::PluginField> f;
+
+    // Unsqueeze the list attributes if necessary
+    int32_t listAttrSize = nbSpatialDims == 1 ? 2 : nbSpatialDims;
+    std::vector<int32_t> dilationValues(listAttrSize, /*Default value of dilations*/ 1);
+    std::vector<int32_t> strideValues(listAttrSize, /*Default value of strides*/ 1);
+    std::vector<int32_t> paddingValues(listAttrSize, /*Default value of pads*/ 0);
+
+    for (int32_t i = 0; i < nbSpatialDims; i++)
+    {
+        dilationValues[i] = static_cast<int32_t>(dilations.d[i]);
+        strideValues[i] = static_cast<int32_t>(strides.d[i]);
+        paddingValues[i] = static_cast<int32_t>(begPadding.d[i]);
+    }
+
+    f.emplace_back("group", &group, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("deformable_group", &offset_group, nvinfer1::PluginFieldType::kINT32, 1);
+    f.emplace_back("stride", strideValues.data(), nvinfer1::PluginFieldType::kINT32, listAttrSize);
+    f.emplace_back("padding", paddingValues.data(), nvinfer1::PluginFieldType::kINT32, listAttrSize);
+    f.emplace_back("dilation", dilationValues.data(), nvinfer1::PluginFieldType::kINT32, listAttrSize);
+
+    // Create plugin from registry
+    auto const plugin = createPlugin(
+        pluginName, static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
+
+    ASSERT_NODE(plugin != nullptr, "ModulatedDeformConv2d plugin was not found in the plugin registry!", node, nodeIdx,
+        ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::ITensor* biasPtr = nullptr;
+    nvinfer1::ITensor* maskPtr = nullptr;
+
+    // Create the default mask input if not provided.
+    // The mask input is optional in ONNX but is required by the ModulatedDeformConv plugin.
+    if (inputs.size() > 4)
+    {
+        // Add the optional Mask tensor input.
+        maskPtr = &convertToTensor(inputs.at(4), ctx);
+        if (needToExpandDims)
+        {
+            // Expand spatial dims from 1D to 2D
+            std::vector<int32_t> const axes{3};
+            maskPtr = unsqueezeTensor(ctx, node, *maskPtr, axes);
+            ASSERT(maskPtr && "Failed to unsqueeze the mask tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        }
+    }
+    else
+    {
+        // Create the default mask input as a tensor of ones.
+        // The offset and mask inputs have the same shape.
+        nvinfer1::ITensor& maskShape = shapeOf(*offsetPtr).tensor(ctx);
+        ShapedWeights defaultMaskWeights
+            = ctx->createNamedTempWeights(inputs.at(0).getONNXDataType(), nvinfer1::Dims{1, {1}});
+
+        if (inputs.at(0).getDataType() == nvinfer1::DataType::kHALF)
+        {
+            static_cast<half_float::half*>(defaultMaskWeights.values)[0] = 1.0;
+            auto maskTensor = TensorOrWeights{defaultMaskWeights};
+            maskPtr = constantOfShape(ctx, node, &convertToTensor(maskTensor, ctx), &maskShape);
+        }
+        else
+        {
+            static_cast<float*>(defaultMaskWeights.values)[0] = 1.F;
+            auto maskTensor = TensorOrWeights{defaultMaskWeights};
+            maskPtr = constantOfShape(ctx, node, &convertToTensor(maskTensor, ctx), &maskShape);
+        }
+    }
+
+    if (inputs.size() > 3)
+    {
+        // Add the optional Bias tensor input.
+        biasPtr = &convertToTensor(inputs.at(3), ctx);
+    }
+
+    std::vector<nvinfer1::ITensor*> inputTensorsPtrs = {inputXPtr, offsetPtr, maskPtr, weightPtr};
+    if (biasPtr != nullptr)
+    {
+        inputTensorsPtrs.push_back(biasPtr);
+    }
+
+    auto* layer = N_CHECK(ctx->network()->addPluginV2(inputTensorsPtrs.data(), inputTensorsPtrs.size(), *plugin));
+    ctx->registerLayer(layer, node);
+    nvinfer1::ITensor* outputPtr = N_CHECK(layer->getOutput(0));
+
+    if (needToExpandDims)
+    {
+        // Un-expand spatial dims back to 1D
+        std::vector<int32_t> const axes{3};
+        outputPtr = squeezeTensor(ctx, node, *outputPtr, axes);
+        ASSERT_NODE(outputPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    return {{outputPtr}};
+}
+
 NodeImportResult instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)
 {
@@ -1103,31 +1287,6 @@ TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input)
         ctx->registerLayer(layer, "ONNXTRT_identity", nullptr);
         return N_CHECK(layer->getOutput(0));
     }
-}
-
-bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm)
-{
-    int ndim = shape.nbDims;
-    int prev_significant_dim = 0;
-    for (int dst_i = 0; dst_i < ndim; ++dst_i)
-    {
-        int src_i = perm.order[dst_i];
-        int dim_i = shape.d[src_i];
-        if (dim_i != 1)
-        {
-            // We must do a transpose for dynamically shaped tensors
-            if (dim_i == -1)
-            {
-                return true;
-            }
-            if (src_i < prev_significant_dim)
-            {
-                return true;
-            }
-            prev_significant_dim = src_i;
-        }
-    }
-    return false;
 }
 
 nvinfer1::Dims makeDims(int nbDims, int val)
@@ -1475,28 +1634,9 @@ nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::N
 nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
     nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm)
 {
-    nvinfer1::Dims const shape = tensor.getDimensions();
-
     nvinfer1::IShuffleLayer* layer = N_CHECK(ctx->network()->addShuffle(tensor));
     ctx->registerLayer(layer, node);
-
-    // If a transpose is required, add transpose property to the shuffle layer.
-    if (isTransposeRequired(shape, perm))
-    {
-        layer->setFirstTranspose(perm);
-    }
-    // Else, the transpose can be simplified to a reshape.
-    else
-    {
-        nvinfer1::Dims new_shape;
-        new_shape.nbDims = shape.nbDims;
-        for (int32_t i = 0; i < new_shape.nbDims; ++i)
-        {
-            new_shape.d[i] = shape.d[perm.order[i]];
-        }
-        layer->setReshapeDimensions(new_shape);
-        layer->setZeroIsPlaceholder(false);
-    }
+    layer->setFirstTranspose(perm);
     return N_CHECK(layer->getOutput(0));
 }
 
@@ -1559,12 +1699,13 @@ NodeImportResult unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeP
     bool validUnaryType = true;
     switch (op)
     {
+    // TRT only supports BOOL types for the NOT operation
     case nvinfer1::UnaryOperation::kNOT:
     {
-        // TRT only supports BOOL types for the NOT operation
         validUnaryType = inputType == nvinfer1::DataType::kBOOL;
         break;
     }
+    // ABS and SIGN supports everything except BOOL and UINT8.
     case nvinfer1::UnaryOperation::kABS:
     case nvinfer1::UnaryOperation::kSIGN:
     {
@@ -1586,16 +1727,11 @@ NodeImportResult unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeP
         validUnaryType = (inputType != nvinfer1::DataType::kBOOL && inputType != nvinfer1::DataType::kUINT8);
         break;
     }
-    case nvinfer1::UnaryOperation::kISINF:
-    {
-        validUnaryType = (inputType == nvinfer1::DataType::kFLOAT || inputType == nvinfer1::DataType::kHALF);
-        break;
-    }
     default:
     {
-        // By default TRT does not support BOOL, INT32, UINT8 types for Unary operations.
+        // By default TRT does not support BOOL, INT32, INT64, and UINT8 types for Unary operations.
         validUnaryType = (inputType != nvinfer1::DataType::kBOOL && inputType != nvinfer1::DataType::kINT32
-            && inputType != nvinfer1::DataType::kUINT8);
+            && inputType != nvinfer1::DataType::kINT64 && inputType != nvinfer1::DataType::kUINT8);
     }
     }
 

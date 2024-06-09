@@ -2,6 +2,14 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.1 GA Release - 2024-6-17
+For more details, see the 10.0 GA release notes.
+
+- Added `supportsModelV2` API
+- Added support for `DeformConv` operation
+- Added support for `PluginV3` TensorRT Plugins
+- Marked all IParser and IParserRefitter APIs as `noexcept`
+
 # TensorRT 10.0 GA Release - 2024-4-25
 For more details, see the 10.0 GA release notes.
 

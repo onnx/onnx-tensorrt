@@ -24,7 +24,7 @@ int32_t* WeightsContext::convertUINT8(uint8_t const* weightValues, nvinfer1::Dim
 {
     int64_t const nbWeights = volume(shape);
     int32_t* int32Weights{
-        reinterpret_cast<int32_t*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, shape).values)};
+        static_cast<int32_t*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, shape).values)};
 
     for (int64_t i = 0; i < nbWeights; i++)
     {
@@ -38,7 +38,7 @@ float* WeightsContext::convertDouble(double const* weightValues, nvinfer1::Dims 
     auto* ctx = this; // For logging macros.
     int64_t const nbWeights = volume(shape);
     float* floatWeights{
-        reinterpret_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape).values)};
+        static_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape).values)};
 
     bool outOfBounds{false};
     double const floatMax = static_cast<double>(std::numeric_limits<float>::max());
@@ -432,9 +432,16 @@ bool WeightsContext::convertOnnxWeights(
     }
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN)
     {
-        assert(onnxTensor.int32_data().size());
-        dataPtr = (void*) (onnxTensor.int32_data().data());
-        nbytes = onnxTensor.int32_data().size();
+        if (onnxTensor.raw_data().size() > 0)
+        {
+            dataPtr = (void*) (onnxTensor.raw_data().data());
+            nbytes = onnxTensor.raw_data().size();
+        }
+        else
+        {
+            dataPtr = (void*) (onnxTensor.int32_data().data());
+            nbytes = onnxTensor.int32_data().size();
+        }
         if (ownAllWeights)
         {
             dataPtr = ownWeights(dataPtr, onnxDtype, shape, nbytes);
@@ -487,12 +494,35 @@ ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType typ
     return createNamedWeights(type, shape, name);
 }
 
-ShapedWeights WeightsContext::createNamedWeights(
-    ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name)
+ShapedWeights WeightsContext::createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape)
 {
     ShapedWeights weights(type, nullptr, shape);
-    weights.setName(name.c_str());
-    allocateTempWeights(weights);
+    int64_t nbBytes = weights.size_bytes();
+    // For empty weights, keep the values as nullptr.
+    if (nbBytes == 0)
+    {
+        return weights;
+    }
+    void* ptr = operator new(nbBytes);
+    std::memset(ptr, 0, nbBytes);
+    mWeightBuffers.push_back(BufferPtr{ptr});
+    weights.values = ptr;
+    return weights;
+}
+
+ShapedWeights WeightsContext::createNamedWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
+    std::string const& name, std::set<std::string>* bufferedNames)
+{
+    ShapedWeights weights = createTempWeights(type, shape);
+    if (bufferedNames)
+    {
+        bufferedNames->insert(name);
+        weights.setName((*bufferedNames->find(name)).c_str());
+    }
+    else
+    {
+        weights.setName(name.c_str());
+    }
     return weights;
 }
 

@@ -7,6 +7,7 @@
 #include "NvInferRuntime.h"
 #include "Status.hpp"
 #include "WeightsContext.hpp"
+#include "errorHelpers.hpp"
 #include <onnx/onnx_pb.h>
 #include <string>
 #include <unordered_set>
@@ -51,7 +52,7 @@ private:
     std::unordered_set<std::string> refittableWeights;
     std::unordered_set<std::string> refittedWeights;
 
-    std::vector<Status> mErrors;
+    mutable std::vector<Status> mErrors;
 
     std::unordered_set<std::string> getRefittableWeights();
 
@@ -90,8 +91,12 @@ public:
 
     nvonnxparser::IParserError const* getError(int32_t index) const noexcept override
     {
-        assert(0 <= index && index < (int32_t) mErrors.size());
-        return &mErrors[index];
+        ONNXTRT_TRY
+        {
+            return &mErrors.at(index);
+        }
+        ONNXTRT_CATCH_LOG(mLogger)
+        return nullptr;
     }
 
     void clearErrors() noexcept override

@@ -81,9 +81,9 @@ ShapedWeights::DataType TensorOrWeights::convertTRTDataType(nvinfer1::DataType d
         case nvinfer1::DataType::kINT64: return ::ONNX_NAMESPACE::TensorProto::INT64;
         case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
         case nvinfer1::DataType::kINT4: return ::ONNX_NAMESPACE::TensorProto::INT4;
-    }
-    assert(false && "Unknown datatype");
-    return ::ONNX_NAMESPACE::TensorProto::FLOAT;
+        }
+        assert(false && "Unknown datatype");
+        return ::ONNX_NAMESPACE::TensorProto::FLOAT;
 }
 
 } // namespace onnx2trt

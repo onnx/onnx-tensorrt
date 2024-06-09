@@ -230,6 +230,8 @@ DEFINE_OP_EMPTY_CHECKER(Cosh)
 
 DEFINE_OP_EMPTY_CHECKER(CumSum)
 
+DEFINE_OP_EMPTY_CHECKER(DeformConv)
+
 DEFINE_OP_EMPTY_CHECKER(DepthToSpace)
 
 DEFINE_OP_EMPTY_CHECKER(QuantizeLinear)
@@ -900,11 +902,6 @@ DEFINE_OP_CHECKER(ConvInteger)
 }
 
 DEFINE_OP_CHECKER(DFT)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(DeformConv)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }

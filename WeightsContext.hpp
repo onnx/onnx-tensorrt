@@ -18,9 +18,21 @@ namespace onnx2trt
 
 class WeightsContext
 {
+    struct BufferDeleter
+    {
+        void operator()(void* ptr)
+        {
+            operator delete(ptr);
+        }
+    };
+
+    using BufferPtr = std::unique_ptr<void, BufferDeleter>;
+
     nvinfer1::ILogger* mLogger;
-    // Vector of bytes to maintain ownership of weights.
-    std::vector<std::vector<uint8_t>> mWeightBuffers;
+
+    // Vector of hunks to maintain ownership of weights.
+    std::vector<BufferPtr> mWeightBuffers;
+
     // Keeps track of the absolute location of the file in order to read external weights.
     std::string mOnnxFileLocation;
 
@@ -63,23 +75,11 @@ public:
         std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode = false);
 
     // Create weights with a given name.
-    ShapedWeights createNamedWeights(
-        ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name);
+    ShapedWeights createNamedWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name,
+        std::set<std::string>* bufferedNames = nullptr);
 
     // Creates a ShapedWeights object class of a given type and shape.
-    ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape, uint8_t value = 0)
-    {
-        ShapedWeights weights(type, nullptr, shape);
-        allocateTempWeights(weights);
-        return weights;
-    }
-
-    // Allocate the data buffer
-    void allocateTempWeights(ShapedWeights& weightsRef)
-    {
-        mWeightBuffers.push_back(std::vector<uint8_t>(weightsRef.size_bytes(), 0));
-        weightsRef.values = mWeightBuffers.back().data();
-    }
+    ShapedWeights createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape);
 
     // Sets the absolute filepath of the loaded ONNX model in order to read external weights.
     void setOnnxFileLocation(std::string location)

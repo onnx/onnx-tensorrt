@@ -18,7 +18,7 @@ public:
     //! Create 1D zero-length ShapedWeights of given type, count()==0, and values=nullptr.
     static ShapedWeights empty(DataType type);
 
-    //! Construct ShapedWeights that is not expected to be usuable,
+    //! Construct ShapedWeights that is not expected to be usable,
     //! except with `operator=` and method `setName()`.
     ShapedWeights() = default;
 

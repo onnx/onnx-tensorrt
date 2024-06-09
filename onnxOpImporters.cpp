@@ -1205,6 +1205,43 @@ DEFINE_BUILTIN_OP_IMPORTER(CumSum)
     RETURN_FIRST_OUTPUT(loopOut, node, nodeIdx);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(DeformConv)
+{
+    auto inputDataType = inputs.at(0).getDataType();
+    auto weightDataType = inputs.at(1).getDataType();
+    auto offsetDataType = inputs.at(2).getDataType();
+
+    ASSERT_NODE((inputDataType == DataType::kFLOAT || inputDataType == DataType::kHALF),
+        "Inputs must be either FLOAT or FLOAT16. Input type is " + getTrtDtypeName(inputDataType) + ".", node, nodeIdx,
+        ErrorCode::kINVALID_NODE);
+
+    ASSERT_NODE((inputDataType == weightDataType && inputDataType == offsetDataType),
+        "Inputs must be either all FLOAT or all FLOAT16. Input type = " + getTrtDtypeName(inputDataType)
+            + ", weight type = " + getTrtDtypeName(weightDataType)
+            + ", offset type = " + getTrtDtypeName(offsetDataType) + ".",
+        node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    if (inputs.size() > 3)
+    {
+        auto biasDataType = inputs.at(3).getDataType();
+        ASSERT_NODE((inputDataType == biasDataType),
+            "Inputs must be either all FLOAT or all FLOAT16. Input type = " + getTrtDtypeName(inputDataType)
+                + ", bias type = " + getTrtDtypeName(biasDataType) + ".",
+            node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
+    if (inputs.size() > 4)
+    {
+        auto maskDataType = inputs.at(4).getDataType();
+        ASSERT_NODE((inputDataType == maskDataType),
+            "Inputs must be either all FLOAT or all FLOAT16. Input type = " + getTrtDtypeName(inputDataType)
+                + ", mask type = " + getTrtDtypeName(maskDataType) + ".",
+            node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
+    return modulatedDeformableConvPluginHelper(ctx, node, nodeIdx, inputs);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
 {
     CHECK_STATUS(notInvalidType(inputs.at(0), {"BOOL", "UINT8"}, node, nodeIdx));
@@ -2709,12 +2746,7 @@ DEFINE_BUILTIN_OP_IMPORTER(IsInf)
 
 DEFINE_BUILTIN_OP_IMPORTER(IsNaN)
 {
-    auto* input = &convertToTensor(inputs[0], ctx);
-    // IEEE arithmetic guarantees that x == x is false if x is a NaN, and true otherwise.
-    std::vector<TensorOrWeights> const newInputs{input, input};
-    std::vector<TensorOrWeights> equalResult;
-    GET_VALUE(elementwiseHelper(ctx, node, nodeIdx, newInputs, nvinfer1::ElementWiseOperation::kEQUAL), &equalResult);
-    return unaryHelper(ctx, node, nodeIdx, equalResult.at(0), nvinfer1::UnaryOperation::kNOT);
+    return unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kISNAN);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
@@ -2766,6 +2798,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
     auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
     layer->setComputePrecision(computeType);
+    ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
@@ -3797,11 +3830,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad)
                     isValueSet = true;
                     break;
                 case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
-                    value = reinterpret_cast<half_float::half const*>(padWeight.values)[0];
+                    value = static_cast<half_float::half const*>(padWeight.values)[0];
                     isValueSet = true;
                     break;
                 case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
-                    value = reinterpret_cast<BFloat16 const*>(padWeight.values)[0];
+                    value = static_cast<BFloat16 const*>(padWeight.values)[0];
                     isValueSet = true;
                     break;
                 default:
@@ -4890,7 +4923,7 @@ DEFINE_BUILTIN_OP_IMPORTER(RoiAlign)
 
     // Populate RoiAlign plugin properties.
     std::string const pluginName = "ROIAlign_TRT";
-    std::string const pluginVersion = "1";
+    std::string const pluginVersion = "2";
     std::vector<nvinfer1::PluginField> f;
     f.emplace_back(
         "coordinate_transformation_mode", &coordinateTransformationMode, nvinfer1::PluginFieldType::kINT32, 1);
@@ -4902,17 +4935,21 @@ DEFINE_BUILTIN_OP_IMPORTER(RoiAlign)
 
     // Create plugin from registry
     auto const plugin = createPlugin(getNodeName(node),
-        static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
+        static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ASSERT_NODE(plugin != nullptr, "ROIAlign plugin was not found in the plugin registry!", node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::ITensor* const inputTensorsPtr[3] = {tensorPtr, roisPtr, batchIndicesPtr};
-    auto* layer = N_CHECK(ctx->network()->addPluginV2(inputTensorsPtr, 3, *plugin));
+    auto* layer = N_CHECK(ctx->network()->addPluginV3(inputTensorsPtr, 3, nullptr, 0, *plugin));
     ctx->registerLayer(layer, node);
 
     // ROIAlign requires nvinfer_vc_plugin when using VC.
+#if defined(_WIN32)
+    ctx->addUsedVCPluginLibrary(node, pluginName.c_str(), ("nvinfer_vc_plugin_" + std::to_string(NV_TENSORRT_MAJOR)).c_str());
+#else
     ctx->addUsedVCPluginLibrary(node, pluginName.c_str(), "nvinfer_vc_plugin");
+#endif
 
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -6180,16 +6217,17 @@ std::vector<nvinfer1::PluginField> loadFields(StringMap<std::vector<uint8_t>>& f
     return fields;
 }
 
-nvinfer1::IPluginV2Layer* addPluginLayer(
-    ImporterContext* ctx, std::vector<nvinfer1::ITensor*> const& pluginInputs, nvinfer1::IPluginV2& plugin)
+nvinfer1::IPluginV2Layer* addPluginLayer(ImporterContext* ctx, std::vector<nvinfer1::ITensor*> const& pluginInputs,
+    std::vector<nvinfer1::ITensor*> const& /* pluginShapeInputs */, nvinfer1::IPluginV2& plugin)
 {
     return N_CHECK(ctx->network()->addPluginV2(pluginInputs.data(), pluginInputs.size(), plugin));
 }
 
-nvinfer1::IPluginV3Layer* addPluginLayer(
-    ImporterContext* ctx, std::vector<nvinfer1::ITensor*> const& pluginInputs, nvinfer1::IPluginV3& plugin)
+nvinfer1::IPluginV3Layer* addPluginLayer(ImporterContext* ctx, std::vector<nvinfer1::ITensor*> const& pluginInputs,
+    std::vector<nvinfer1::ITensor*> const& pluginShapeInputs, nvinfer1::IPluginV3& plugin)
 {
-    return N_CHECK(ctx->network()->addPluginV3(pluginInputs.data(), pluginInputs.size(), nullptr, 0, plugin));
+    return N_CHECK(ctx->network()->addPluginV3(
+        pluginInputs.data(), pluginInputs.size(), pluginShapeInputs.data(), pluginShapeInputs.size(), plugin));
 }
 
 template <typename TPluginCreator>
@@ -6204,35 +6242,77 @@ NodeImportResult addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::No
     StringMap<std::vector<uint8_t>> fieldData{};
     std::vector<nvinfer1::PluginField> fields = loadFields(fieldData, attrs, fieldNames, ctx);
 
+    std::unordered_set<int32_t> shapeInputIdxsSet{};
+    auto const nbInputs{static_cast<int32_t>(inputs.size())};
+
+    if (attrs.count("tensorrt_plugin_shape_input_indices"))
+    {
+        if (std::strcmp(creator->getInterfaceInfo().kind, "PLUGIN CREATOR_V1") != 0)
+        {
+            ASSERT_NODE(attrs.type("tensorrt_plugin_shape_input_indices") == ::ONNX_NAMESPACE::AttributeProto::INTS,
+                "Shape input indices defined, but attribute tensorrt_plugin_shape_input_indices has unsupported type. "
+                "Only AttributeProto::INTS is supported.",
+                node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+            auto shapeInputIdxsVec = attrs.get<std::vector<int32_t>>("tensorrt_plugin_shape_input_indices");
+            std::vector<bool> issuedWarningIdxs(nbInputs, false);
+            for (auto const& curr : shapeInputIdxsVec)
+            {
+                // check for out-of-range indices: index must be in [-n, n-1] where n = number of inputs.
+                ASSERT_NODE((curr < nbInputs) && (curr >= (-nbInputs)), "Out-of-range shape input index: " << curr,
+                    node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+                auto const& e = (curr >= 0) ? curr : nbInputs + curr;
+                auto res = shapeInputIdxsSet.insert(e);
+                if (!res.second && !issuedWarningIdxs[e])
+                {
+                    LOG_WARNING("Node " << getNodeName(node) << " has duplicate shape input index: " << curr);
+                    issuedWarningIdxs[e] = true;
+                }
+            }
+        }
+        else
+        {
+            LOG_WARNING("Node " << getNodeName(node)
+                                << " has shape input indices defined, but plugin creator is for an "
+                                   "IPluginV2-derivative plugin. Ignoring shape input indices.");
+        }
+    }
+
+    std::string const pluginName{node.op_type()};
+
     auto const plugin = createPlugin(getNodeName(node), static_cast<TPluginCreator*>(creator), fields);
 
     ASSERT_NODE(plugin, "Could not create the plugin.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     std::vector<nvinfer1::ITensor*> pluginInputs{};
-    std::string const pluginName{node.op_type()};
+    std::vector<nvinfer1::ITensor*> pluginShapeInputs{};
 
-    for (auto& input : inputs)
+    for (int32_t idx{}; idx < nbInputs; ++idx)
     {
+        auto input = inputs[idx];
+        auto pluginInputVec
+            = shapeInputIdxsSet.find(idx) != shapeInputIdxsSet.end() ? &pluginShapeInputs : &pluginInputs;
         if (input.isNullTensor())
         {
             LOG_VERBOSE("Found unset input for " << pluginName << ".");
-            pluginInputs.push_back(nullptr);
+            pluginInputVec->push_back(nullptr);
             continue;
         }
         nvinfer1::ITensor* inputTensor = &convertToTensor(input, ctx);
         if (onlySupportInt32TRTPlugin(pluginName) && inputTensor->getType() == nvinfer1::DataType::kINT64)
         {
             LOG_VERBOSE("The TRT plugin (" << pluginName << ") doesn't support INT64 for inputs, will cast to INT32.");
-            pluginInputs.emplace_back(castHelper(ctx, inputTensor, nvinfer1::DataType::kINT32));
+            pluginInputVec->emplace_back(castHelper(ctx, inputTensor, nvinfer1::DataType::kINT32));
         }
         else
         {
-            pluginInputs.emplace_back(inputTensor);
+            pluginInputVec->emplace_back(inputTensor);
         }
     }
+
     LOG_INFO("Successfully created plugin: " << pluginName);
 
-    auto* layer = addPluginLayer(ctx, pluginInputs, *plugin);
+    auto* layer = addPluginLayer(ctx, pluginInputs, pluginShapeInputs, *plugin);
     ASSERT_NODE(layer, "Could not add the plugin layer.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     ctx->registerLayer(layer, node);
     RETURN_ALL_OUTPUTS(layer, node, nodeIdx);
