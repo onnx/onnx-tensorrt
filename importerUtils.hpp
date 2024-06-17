@@ -227,6 +227,10 @@ NodeImportResult greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(nvinfer1::Dims const& shape);
 
+// Helper function to use modulatedDeformableConv2D plugin
+NodeImportResult modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
+
 // Helper function to use optimized 3D instanceNorm plugin
 NodeImportResult instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
@@ -248,9 +252,6 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, nvinf
 
 // Helper function to return the identity of a TensorOrWeights
 TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input);
-
-// Helper function to determine if a transpose is required
-bool isTransposeRequired(nvinfer1::Dims const& shape, nvinfer1::Permutation const& perm);
 
 // Helper function to create and fill a Dims object with defined values
 nvinfer1::Dims makeDims(int nbDims, int val);

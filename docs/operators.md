@@ -7,7 +7,9 @@ TensorRT 10.0 supports operators in the inclusive range of opset 9 to opset 20. 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, INT4, UINT8, and BOOL
 
 > Note: There is limited support for DOUBLE type. TensorRT will attempt to cast DOUBLE down to FLOAT, clamping values to `+-FLT_MAX` if necessary.
-> Note: INT8, INT4, and FP8 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision.
+
+> Note: INT8, INT4, and FP8 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision. See [section 7.4.2](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#qat-models-work) of the developer guide for more information.
+
 > Note: UINT8 is only supported as network input or output tensor types.
 
 ## Operator Support Matrix
@@ -35,8 +37,8 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | BitwiseOr                 | N          |
 | BitwiseXor                | N          |
 | BlackmanWindow            | N          |
-| Cast                      | Y          | FP32, FP16, BF16, INT32, INT64, , UINT8, BOOL |                                                                                                       |
-| CastLike                  | Y          | FP32, FP16, BF16, INT32, INT64, , UINT8, BOOL |                                                                                                       |
+| Cast                      | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
+| CastLike                  | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
 | Ceil                      | Y          | FP32, FP16, BF16 |
 | Col2Im                    | N          |
 | Celu                      | Y          | FP32, FP16, BF16 |
@@ -45,8 +47,8 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Compress                  | N          |
 | Concat                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | ConcatFromSequence        | N          |
-| Constant                  | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| ConstantOfShape           | Y          | FP32 |
+| Constant                  | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `sparse_value`, `value_string`, and `value_strings` attributes are unsupported.
+| ConstantOfShape           | Y          | FP32, FP16, BF16, INT32, INF64, BOOL |
 | Conv                      | Y          | FP32, FP16, BF16 |
 | ConvInteger               | N          |
 | ConvTranspose             | Y          | FP32, FP16, BF16 |
@@ -54,11 +56,12 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Cosh                      | Y          | FP32, FP16, BF16 |
 | CumSum                    | Y          | FP32, FP16, BF16 | `axis` must be an initializer                                                                                                            |
 | DFT                       | N          |
+| DeformConv                | Y          | FP32, FP16 | `input` must have 1D or 2D spatial dimensions. `pads` for the beginning and end along each spatial axis must be the same
 | DepthToSpace              | Y          | FP32, FP16, BF16, INT32, INT64 |
 | DequantizeLinear          | Y          | INT8, FP8, INT4 | `x_zero_point` must be zero                                                                                    |
 | Det                       | N          |
 | Div                       | Y          | FP32, FP16, BF16, INT32, INT64 |
-| Dropout                   | Y          | FP32, FP16, BF16 |
+| Dropout                   | Y          | FP32, FP16, BF16 | `is_traning` must be an initializer and evaluate to False.
 | DynamicQuantizeLinear     | N          |
 | Einsum                    | Y          | FP32, FP16, BF16 |
 | Elu                       | Y          | FP32, FP16, BF16 |
@@ -66,7 +69,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Erf                       | Y          | FP32, FP16, BF16 |
 | Exp                       | Y          | FP32, FP16, BF16 |
 | Expand                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| EyeLike                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
+| EyeLike                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `input` must have static dimensions
 | Flatten                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Floor                     | Y          | FP32, FP16, BF16|
 | Gather                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
@@ -79,7 +82,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | GlobalMaxPool             | Y          | FP32, FP16, BF16 |
 | Greater                   | Y          | FP32, FP16, BF16, INT32, INT64 |
 | GreaterOrEqual            | Y          | FP32, FP16, BF16, INT32, INT64 |
-| GridSample                | Y          | FP32, FP16 |
+| GridSample                | Y          | FP32, FP16 | Input must be 4D input.
 | GroupNormalization        | Y          | FP32, FP16, BF16 |
 | GRU                       | Y          | FP32, FP16, BF16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
 | HammingWindow             | N          |
@@ -88,21 +91,21 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | HardSwish                 | Y          | FP32, FP16, BF16 |
 | Hardmax                   | Y          | FP32, FP16, BF16 | `axis` dimension of input must be a build-time constant
 | Identity                  | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| If                        | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | Output tensors of the two conditional branches must have broadcastable shapes, and must have different names
+| If                        | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | Output tensors of the two conditional branches must have the same rank and must have different names
 | ImageScaler               | Y          | FP32, FP16, BF16|
 | ImageDecoder              | N          |
 | InstanceNormalization     | Y          | FP32, FP16, BF16 |
 | IsInf                     | Y          | FP32, FP16, BF16 |
 | IsNaN                     | Y          | FP32, FP16, BF16, INT32, INT64 |
-| LayerNormalization        | Y          | FP32, FP16, BF16
+| LayerNormalization        | Y          | FP32, FP16, BF16 | Only the first output `Y` is supported.
 | LeakyRelu                 | Y          | FP32, FP16, BF16 |
 | Less                      | Y          | FP32, FP16, BF16, INT32, INT64 |
 | LessOrEqual               | Y          | FP32, FP16, BF16, INT32, INT64 |
 | Log                       | Y          | FP32, FP16, BF16 |
 | LogSoftmax                | Y          | FP32, FP16, BF16 |
-| Loop                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
+| Loop                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | Scan output length cannot be dynamic. The shape of Loop carried dependencies must be the same across all loop iterations.
 | LRN                       | Y          | FP32, FP16, BF16 |
-| LSTM                      | Y          | FP32, FP16, BF16 | For bidirectional LSTMs, activation functions must be the same for both the forward and reverse pass
+| LSTM                      | Y          | FP32, FP16, BF16 | For bidirectional LSTMs, activation functions must be the same for both the forward and reverse pass. `input_forget` attribute must be 0. `layout` attribute must be 0.
 | LpNormalization           | Y          | FP32, FP16, BF16 |
 | LpPool                    | Y          | FP32, FP16, BF16 | `dilations` must be empty or all ones
 | MatMul                    | Y          | FP32, FP16, BF16 |
@@ -187,7 +190,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Softplus                  | Y          | FP32, FP16, BF16 |
 | Softsign                  | Y          | FP32, FP16, BF16 |
 | SpaceToDepth              | Y          | FP32, FP16, BF16, INT32, INT64 |
-| Split                     | Y          | FP32, FP16, BF16, INT32, INT64 BOOL |                                                                                                          |
+| Split                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |                                                                                                          |
 | SplitToSequence           | N          |
 | Sqrt                      | Y          | FP32, FP16, BF16 |
 | Squeeze                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be an initializer                                                                                                            |
@@ -201,7 +204,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | TfIdfVectorizer           | N          |
 | ThresholdedRelu           | Y          | FP32, FP16, BF16 |
 | Tile                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| TopK                      | Y          | FP32, FP16, BF16, INT32, INT64 |
+| TopK                      | Y          | FP32, FP16, BF16, INT32, INT64 | `sorted` must be 1. `K` input must be less than 3840.
 | Transpose                 | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Trilu                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Unique                    | N          |

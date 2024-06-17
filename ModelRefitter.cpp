@@ -24,7 +24,7 @@ Status deserializeOnnxModelFile(char const* onnxModelFile, ::ONNX_NAMESPACE::Mod
 {
     // Define S_ISREG macro for Windows
 #if !defined(S_ISREG)
-#define S_ISREG(mode) (((mode) &S_IFMT) == S_IFREG)
+#define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
 #endif
 
     struct stat sb;
@@ -393,52 +393,62 @@ Status ModelRefitter::refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node)
 bool ModelRefitter::refitFromBytes(
     void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath) noexcept
 {
-    if (modelPath)
+    ONNXTRT_TRY
     {
-        // Keep track of the absolute path to the ONNX file.
-        mWeightsContext.setOnnxFileLocation(modelPath);
-    }
+        if (modelPath)
+        {
+            // Keep track of the absolute path to the ONNX file.
+            mWeightsContext.setOnnxFileLocation(modelPath);
+        }
 
-    Status status
-        = deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &onnx_model);
-    if (status.is_error())
-    {
-        mErrors.push_back(status);
-        return false;
-    }
+        Status status = deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &onnx_model);
+        if (status.is_error())
+        {
+            mErrors.push_back(status);
+            return false;
+        }
 
-    refittableWeights = getRefittableWeights();
-    status = refitOnnxWeights(onnx_model);
-    if (status.is_error())
-    {
-        mErrors.push_back(status);
-        return false;
-    }
-    return true;
-}
-
-bool ModelRefitter::refitFromFile(char const* onnxModelFile) noexcept
-{
-    // Keep track of the absolute path to the ONNX file.
-    mWeightsContext.setOnnxFileLocation(onnxModelFile);
-
-    Status status = deserializeOnnxModelFile(onnxModelFile, onnx_model);
-    if (status.is_error())
-    {
-        mErrors.push_back(status);
-        return false;
-    }
-
-    refittableWeights = getRefittableWeights();
-    if (!refittableWeights.empty())
-    {
+        refittableWeights = getRefittableWeights();
         status = refitOnnxWeights(onnx_model);
         if (status.is_error())
         {
             mErrors.push_back(status);
             return false;
         }
+        return true;
     }
-    return true;
+    ONNXTRT_CATCH_LOG(mLogger)
+    return false;
+}
+
+bool ModelRefitter::refitFromFile(char const* onnxModelFile) noexcept
+{
+    ONNXTRT_TRY
+    {
+        // Keep track of the absolute path to the ONNX file.
+        mWeightsContext.setOnnxFileLocation(onnxModelFile);
+
+        Status status = deserializeOnnxModelFile(onnxModelFile, onnx_model);
+        if (status.is_error())
+        {
+            mErrors.push_back(status);
+            return false;
+        }
+
+        refittableWeights = getRefittableWeights();
+        if (!refittableWeights.empty())
+        {
+            status = refitOnnxWeights(onnx_model);
+            if (status.is_error())
+            {
+                mErrors.push_back(status);
+                return false;
+            }
+        }
+        return true;
+    }
+    ONNXTRT_CATCH_LOG(mLogger)
+
+    return false;
 }
 } // namespace onnx2trt
