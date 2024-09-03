@@ -439,17 +439,6 @@ Status importLocalFunctions(ImporterContext* ctx, ::ONNX_NAMESPACE::ModelProto c
     return Status::success();
 }
 
-// Internal helper function used for ONNXRT-TRT EP to filter out DDS nodes
-bool isDDSOp(char const* op_name)
-{
-    auto is = [op_name](char const* name) { return std::strcmp(op_name, name) == 0; };
-    if (is("NonMaxSuppression") || is("NonZero") || is("RoiAlign"))
-    {
-        return true;
-    }
-    return false;
-}
-
 std::pair<bool, ModelImporter::SubGraphSupportVector_t> ModelImporter::doSupportsModel(
     void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path)
 {
@@ -525,10 +514,9 @@ std::pair<bool, ModelImporter::SubGraphSupportVector_t> ModelImporter::doSupport
         //     1. It is not a node that requires DDS
         //     2. It is not directly connected to an unsupported input
         //     3. The importer function did not throw an assertion
-        bool unsupportedDDS = isDDSOp(node.op_type().c_str());
         bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
         bool unsuccessfulParse = node_idx == error_node;
-        if (!unsupportedDDS && !unsupportedInput && !unsuccessfulParse)
+        if (!unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
