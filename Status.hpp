@@ -203,6 +203,7 @@ static std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& 
     case nvinfer1::DataType::kBOOL: return stream << "bool";
     case nvinfer1::DataType::kFP8: return stream << "float8";
     case nvinfer1::DataType::kINT4: return stream << "int4";
+
     default: throw std::runtime_error("Unknown dtype");
     }
 }

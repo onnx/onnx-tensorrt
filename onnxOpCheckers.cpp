@@ -17,7 +17,6 @@
 #include "importerUtils.hpp"
 
 #include <array>
-#include <cmath>
 #include <iostream>
 #include <iterator>
 #include <tuple>
@@ -174,6 +173,8 @@ DEFINE_OP_CHECKER(BatchNormalization)
     STATIC_CHECK(!isTraining && "This version of TensorRT does not support training_mode == 1 in BatchNormalization.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
+
+DEFINE_OP_EMPTY_CHECKER(BlackmanWindow)
 
 DEFINE_OP_CHECKER(Cast)
 {
@@ -358,6 +359,10 @@ DEFINE_OP_CHECKER(GRU)
             && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
 }
+
+DEFINE_OP_EMPTY_CHECKER(HammingWindow)
+
+DEFINE_OP_EMPTY_CHECKER(HannWindow)
 
 DEFINE_OP_EMPTY_CHECKER(Hardmax)
 
@@ -1046,27 +1051,12 @@ DEFINE_OP_CHECKER(Bernoulli)
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
-DEFINE_OP_CHECKER(BlackmanWindow)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
 DEFINE_OP_CHECKER(CenterCropPad)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
 DEFINE_OP_CHECKER(DynamicQuantizeLinear)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(HammingWindow)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(HannWindow)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }

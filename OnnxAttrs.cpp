@@ -129,9 +129,9 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(std::string cons
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
 
-    ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->t() : this->at(key)->t();
+    ::ONNX_NAMESPACE::TensorProto const& onnxTensor = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->t() : this->at(key)->t();
     onnx2trt::ShapedWeights weights;
-    bool success = mCtx->getWeightsContext().convertOnnxWeights(onnx_weights_tensor, &weights);
+    bool success = mCtx->getWeightsContext().convertOnnxWeights(onnxTensor, &weights, true);
     if (!success)
     {
         throw std::runtime_error{"Unable to convert ONNX weights"};

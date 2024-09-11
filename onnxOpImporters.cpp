@@ -2,7 +2,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "onnxOpImporters.hpp"
+#if defined(_MSC_VER)
+#define _USE_MATH_DEFINES
+#endif
+#include <cmath>
+
 #include "ConditionalHelpers.hpp"
 #include "LoopHelpers.hpp"
 #include "ModelImporter.hpp"
@@ -15,10 +19,10 @@
 #include "bfloat16.hpp"
 #include "half.h"
 #include "importerUtils.hpp"
+#include "onnxOpImporters.hpp"
 
 #include <algorithm> // For std::min, std::max
 #include <array>
-#include <cmath>
 #include <cstring> // For std::memcpy, std::memset
 #include <iostream>
 #include <iterator>
@@ -380,6 +384,63 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
 
     return scaleHelper(ctx, node, nodeIdx, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combinedBias, combinedScale,
         ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto::FLOAT), combinedBias.getName(), combinedScale.getName());
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(BlackmanWindow)
+{
+
+    /***
+
+    Operation returns a window vector, where
+
+    Y[n] = 0.42 - 0.5cos(2pi*n / N) + 0.08cos(4pi*n / N)
+
+    Where N is the window length, and n is each element in the window.
+
+    Note that if `periodic == 0`, the denominator becomes N - 1.
+
+    This can be represented by creating a range 'n' from 0 -> N, and performing the operations elementwise.
+
+    ***/
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t outputDtype = attrs.get<int32_t>("output_datatype", 1);
+    int32_t periodic = attrs.get<int32_t>("periodic", 1);
+    ASSERT_NODE(outputDtype == 1, "Output must be float32-type!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    constexpr float alpha = 0.42F;
+    constexpr float beta = 0.5F;
+    constexpr float gamma = 0.08F;
+
+    auto* N = &convertToTensor(inputs.at(0), ctx);
+    ASSERT_NODE(
+        N->getDimensions().nbDims == 0, "Window length must be a scalar!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    auto* window = generateWindow(ctx, N);
+
+    auto lhsCosOutput = windowHelper(ctx, 2.F * M_PI, window, N, nvinfer1::UnaryOperation::kCOS, periodic);
+
+    auto betaTensor = N_CHECK(addConstantScalar(ctx, beta, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
+        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto betaLayer
+        = N_CHECK(ctx->network()->addElementWise(*betaTensor, *lhsCosOutput, nvinfer1::ElementWiseOperation::kPROD));
+    auto betaOutput = N_CHECK(betaLayer->getOutput(0));
+
+    auto rhsCosOutput = windowHelper(ctx, 4.F * M_PI, window, N, nvinfer1::UnaryOperation::kCOS, periodic);
+    auto gammaTensor = N_CHECK(addConstantScalar(ctx, gamma, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
+        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto gammaLayer
+        = N_CHECK(ctx->network()->addElementWise(*gammaTensor, *rhsCosOutput, nvinfer1::ElementWiseOperation::kPROD));
+    auto gammaOutput = N_CHECK(gammaLayer->getOutput(0));
+
+    auto alphaTensor = N_CHECK(addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
+        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto alphaMinusBeta
+        = N_CHECK(ctx->network()->addElementWise(*alphaTensor, *betaOutput, nvinfer1::ElementWiseOperation::kSUB));
+    auto alphaMinusBetaTensor = N_CHECK(alphaMinusBeta->getOutput(0));
+
+    auto plusGamma = N_CHECK(
+        ctx->network()->addElementWise(*alphaMinusBetaTensor, *gammaOutput, nvinfer1::ElementWiseOperation::kSUM));
+    RETURN_FIRST_OUTPUT(plusGamma, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Cast)
@@ -1652,6 +1713,9 @@ NodeImportResult QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE
         layer->setInput(2, *zeroPointInput);
     }
 
+    // Register the Q/DQ layer.
+    ctx->registerLayer(layer, node);
+
     // Return layer output
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -2492,9 +2556,11 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
 
     // H(t) = (1 - z(t)) . h(t) + (z(t) . H(t-1))
     // Constant `1` needs to be the same type as the inputs, either FP16 or FP32.
-    auto onnxType = zt->getType() == nvinfer1::DataType::kHALF ? ::ONNX_NAMESPACE::TensorProto::FLOAT16
-                                                               : ::ONNX_NAMESPACE::TensorProto::FLOAT;
-    auto* constOne = N_CHECK(addConstantScalar(ctx, 1.f, onnxType, Dims3{1, 1, 1})->getOutput(0));
+    auto* constOne = zt->getType() == nvinfer1::DataType::kHALF
+        ? N_CHECK(addConstantScalar(
+            ctx, static_cast<half_float::half>(1), ::ONNX_NAMESPACE::TensorProto::FLOAT16, Dims3{1, 1, 1})
+                      ->getOutput(0))
+        : N_CHECK(addConstantScalar(ctx, 1.f, ::ONNX_NAMESPACE::TensorProto::FLOAT, Dims3{1, 1, 1})->getOutput(0));
     nvinfer1::ITensor* Ht = getElementWiseResult(ctx,
         *getElementWiseResult(ctx, *getElementWiseResult(ctx, *constOne, *zt, eOp::kSUB), *ht, eOp::kPROD),
         *getElementWiseResult(ctx, *zt, *Ht1Output, eOp::kPROD), eOp::kSUM);
@@ -2524,6 +2590,90 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     // Yh = last value of H(t)
     outputs.emplace_back(N_CHECK(loop->addLoopOutput(*Ht1Output, nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0)));
     return {{outputs}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(HammingWindow)
+{
+    /***
+
+    Operation returns a window vector, where:
+
+    Y[n] = alpha - beta * cos(2*pi*n / N)
+
+    Where N is the window length, and n is each element in the window.
+
+    Note that if `periodic == 0`, the denominator becomes N - 1.
+
+    This can be represented by creating a range 'n' from 0 -> N, and performing the operations elementwise.
+
+    Note that in the ONNX op definition alpha and beta are not provided. We will use the default values defined in ONNX:
+
+        alpha = 25/46
+        beta = 1 - alpha
+
+    ***/
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t outputDtype = attrs.get<int32_t>("output_datatype", 1);
+    int32_t periodic = attrs.get<int32_t>("periodic", 1);
+    ASSERT_NODE(outputDtype == 1, "Output must be float32-type!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    constexpr float alpha = 25.F / 46.F;
+    constexpr float beta = 1.F - alpha;
+
+    auto* N = &convertToTensor(inputs.at(0), ctx);
+    ASSERT_NODE(
+        N->getDimensions().nbDims == 0, "Window length must be a scalar!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    auto* window = generateWindow(ctx, N);
+
+    auto* cosOutput = windowHelper(ctx, 2.F * M_PI, window, N, nvinfer1::UnaryOperation::kCOS, periodic);
+
+    auto betaTensor = N_CHECK(addConstantScalar(ctx, beta, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
+        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto betaLayer
+        = N_CHECK(ctx->network()->addElementWise(*betaTensor, *cosOutput, nvinfer1::ElementWiseOperation::kPROD));
+    auto betaOutput = N_CHECK(betaLayer->getOutput(0));
+
+    auto alphaTensor = N_CHECK(addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
+        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto alphaLayer
+        = N_CHECK(ctx->network()->addElementWise(*alphaTensor, *betaOutput, nvinfer1::ElementWiseOperation::kSUB));
+
+    RETURN_FIRST_OUTPUT(alphaLayer, node, nodeIdx);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(HannWindow)
+{
+    /*** 
+    
+    Operation returns a window vector, where:
+
+    Y[n] = sin^2(pi*n / N)
+
+    Where N is the window length, and n is each element in the window.
+
+    Note that if `periodic == 0`, the denominator becomes N - 1.
+
+    This can be represented by creating a range 'n' from 0 -> N, and performing the operations elementwise.
+
+    ***/
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t outputDtype = attrs.get<int32_t>("output_datatype", 1);
+    int32_t periodic = attrs.get<int32_t>("periodic", 1);
+    ASSERT_NODE(outputDtype == 1, "Output must be float32-type!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    auto* N = &convertToTensor(inputs.at(0), ctx);
+    ASSERT_NODE(
+        N->getDimensions().nbDims == 0, "Window length must be a scalar!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    auto* window = generateWindow(ctx, N);
+
+    auto sinOutput = windowHelper(ctx, M_PI, window, N, nvinfer1::UnaryOperation::kSIN, periodic);
+
+    auto sinSquaredLayer
+        = N_CHECK(ctx->network()->addElementWise(*sinOutput, *sinOutput, nvinfer1::ElementWiseOperation::kPROD));
+
+    RETURN_FIRST_OUTPUT(sinSquaredLayer, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Hardmax)
@@ -3795,7 +3945,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad)
     float value{0.F};
     nvinfer1::ITensor* valuePtr = nullptr;
     std::vector<int64_t> onnxPadding;
-    std::vector<int32_t> padAxes;
 
     if (ctx->getOpsetVersion() < 11)
     {
@@ -3847,106 +3996,15 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad)
                 valuePtr = &convertToTensor(inputs.at(2), ctx);
             }
         }
-        // Opset 16 optional `axes` input.
-        if (inputs.size() == 4 && !inputs.at(3).isNullTensor())
-        {
-            // Currently, `axes` input is supported only as an initializer.
-            if (inputs.at(3).is_weights())
-            {
-                // `axes` is an initializer input.
-                CHECK_STATUS(weightsToVector<int32_t>(inputs.at(3).weights(), &padAxes));
-                // Sanity check.
-                ASSERT_NODE(std::unordered_set<int32_t>(padAxes.begin(), padAxes.end()).size() == padAxes.size(),
-                    "The input axes must have unique elements.", node, nodeIdx, ErrorCode::kINVALID_NODE);
-                // Accepted range of axis is [-r, r-1] where r = rank(data).
-                for (int32_t& axis : padAxes)
-                {
-                    CHECK_STATUS(convertAxis(axis, nbDims, node, nodeIdx));
-                }
-            }
-            else
-            {
-                // `axes` is a non-null tensor input.
-                ASSERT_NODE(false, "TensorRT does not support dynamic axes for pad!", node, nodeIdx,
-                    ErrorCode::kUNSUPPORTED_NODE_INPUT);
-            }
-        }
     }
 
-    nvinfer1::ITensor* start{};
-    nvinfer1::ITensor* size{};
-    if (onnxPadding.empty())
-    {
-        // `pads` is from activation instead of initializer or attributes.
-        nvinfer1::ITensor* onnxPaddingPtr = &convertToTensor(inputs.at(1), ctx);
-        ASSERT_NODE((onnxPaddingPtr->getDimensions().nbDims == 1),
-            "The padding input must be 1D. The rank of padding input = " << onnxPaddingPtr->getDimensions().nbDims
-                                                                         << ".",
-            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    auto padAxes
+        = inputs.size() == 4 && !inputs.at(3).isNullTensor() ? ShapeTensor(ctx, inputs.at(3)) : iotaShapeVector(nbDims);
 
-        // If `axes` is a non-empty input, onnxPaddingPtr needs to be updated with information from `axes`.
-        // Currently, `axes` is supported only if it's an initializer input.
-        if (!padAxes.empty())
-        {
-            ASSERT_NODE(static_cast<size_t>(onnxPaddingPtr->getDimensions().d[0]) == padAxes.size() * 2,
-                "pads should be twice the length of input axes i.e. "
-                    << 2 * padAxes.size() << ", actual length is: " << onnxPaddingPtr->getDimensions().d[0],
-                node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-
-            // onnxPaddingPtr is of the format [x1_begin, x2_begin, ..., x1_end, x2_end,...].
-            ShapeTensor const paddingLen = gather(ctx, shapeOf(*onnxPaddingPtr), shapeVector(0));
-            ShapeTensor const halfPaddingLen = floorDiv(ctx, paddingLen, shapeVector(2));
-            // Obtain begins [x1_begin, x2_begin, ...,].
-            nvinfer1::ISliceLayer* beginSliceLayer
-                = addSlice(ctx, *onnxPaddingPtr, shapeVector(0), halfPaddingLen, shapeVector(1));
-            ctx->registerLayer(beginSliceLayer, node);
-            nvinfer1::ITensor* beginPads = beginSliceLayer->getOutput(0);
-            // Obtain ends [x1_end, x2_end, ...].
-            nvinfer1::ISliceLayer* endSliceLayer
-                = addSlice(ctx, *onnxPaddingPtr, halfPaddingLen, halfPaddingLen, shapeVector(1));
-            ctx->registerLayer(endSliceLayer, node);
-            nvinfer1::ITensor* endPads = endSliceLayer->getOutput(0);
-
-            // Map axes to corresponding begins & ends and create ordered begins & ends.
-            std::vector<int64_t> padAxesLongInt(padAxes.begin(), padAxes.end());
-            ShapeTensor const subscripts{axesToInterlaceSubscripts(ShapeTensor(1, std::move(padAxesLongInt)), nbDims)};
-            ShapeTensor const orderedBeginPads
-                = interlace(ctx, similar(ctx, tensorDims, 0), ShapeTensor(*beginPads), subscripts);
-            ShapeTensor const orderedEndPads
-                = interlace(ctx, similar(ctx, tensorDims, 0), ShapeTensor(*endPads), subscripts);
-
-            // Concatenate ordered begins & ends along zeroth dimension.
-            std::vector<nvinfer1::ITensor*> tensors{&orderedBeginPads.tensor(ctx), &orderedEndPads.tensor(ctx)};
-            auto* concatLayer = N_CHECK(ctx->network()->addConcatenation(tensors.data(), tensors.size()));
-            ctx->registerLayer(concatLayer, node);
-            ASSERT_NODE(concatLayer, "Failed to register layer.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-            concatLayer->setAxis(0);
-            onnxPaddingPtr = N_CHECK(concatLayer->getOutput(0));
-        }
-
-        ASSERT_NODE(onnxPaddingPtr->getDimensions().d[0] == nbDims * 2,
-            "pads should be a 1D tensor of shape " << 2 * nbDims
-                                                   << ", actual shape is: " << onnxPaddingPtr->getDimensions().d[0],
-            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-
-        auto pre = ctx->network()
-                       ->addSlice(
-                           *onnxPaddingPtr, nvinfer1::Dims{1, {0}}, nvinfer1::Dims{1, {nbDims}}, nvinfer1::Dims{1, {1}})
-                       ->getOutput(0);
-        auto post = ctx->network()
-                        ->addSlice(*onnxPaddingPtr, nvinfer1::Dims{1, {nbDims}}, nvinfer1::Dims{1, {nbDims}},
-                            nvinfer1::Dims{1, {1}})
-                        ->getOutput(0);
-
-        std::vector<int64_t> const zerosVal(nbDims, 0);
-        auto const zeros = addConstant(ctx, zerosVal, ::ONNX_NAMESPACE::TensorProto::INT64,
-            nvinfer1::Dims{
-                1, {nbDims}})->getOutput(0);
-        start = getElementWiseResult(ctx, *zeros, *pre, nvinfer1::ElementWiseOperation::kSUB);
-        auto const totalPadding = getElementWiseResult(ctx, *pre, *post, nvinfer1::ElementWiseOperation::kSUM);
-        size = getElementWiseResult(ctx, shapeOf(*tensorPtr).tensor(ctx), *totalPadding, nvinfer1::ElementWiseOperation::kSUM);
-    }
-    else
+    ShapeTensor beginPads;
+    ShapeTensor endPads;
+    int32_t const padAxesSize = padAxes.size();
+    if (!onnxPadding.empty() && padAxes.allValuesKnown())
     {
         // The pads is from initializer or attributes.
         // Passthrough path for no-op padding.
@@ -3955,45 +4013,64 @@ DEFINE_BUILTIN_OP_IMPORTER(Pad)
             LOG_VERBOSE("Found no-op pad in node: " + getNodeName(node));
             RETURN_IDENTITY(inputs.at(0), node, nodeIdx);
         }
-        // If padAxes is non-empty, update onnxPadding combining information from padAxes.
-        if (!padAxes.empty())
-        {
 
-            // Sanity check.
-            ASSERT_NODE(onnxPadding.size() == padAxes.size() * 2,
-                "Length of pads input must be twice the length of axes input.", node, nodeIdx,
-                ErrorCode::kINVALID_NODE);
+        // Sanity check.
+        ASSERT_NODE(static_cast<int32_t>(onnxPadding.size()) == padAxesSize * 2,
+            "Length of pads input must be twice the length of axes input.", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
-            // Map axes to onnxPadding and build a temporary vector combining the information held by onnxPadding &
-            // padAxes. It is: a) of length 2 * rank(input) b) ordered by axis c) of the format [x1_begin, x2_begin,
-            // ..., x1_end, x2_end,...]
-            std::vector<int64_t> tempOnnxPadding(2 * nbDims, 0);
-            for (size_t idx = 0; idx < padAxes.size(); idx++)
-            {
-                int32_t const currAxis = padAxes[idx];
-                tempOnnxPadding[currAxis] = onnxPadding[idx];                           // x_begin.
-                tempOnnxPadding[nbDims + currAxis] = onnxPadding[padAxes.size() + idx]; // x_end.
-            }
-
-            // Update onnxPadding to hold the combined information.
-            onnxPadding = std::move(tempOnnxPadding);
-        }
-        nvinfer1::ITensor* totalPadding = nullptr;
-        ASSERT_NODE(convertOnnxPadding(ctx, nbDims, onnxPadding, start, totalPadding), "Failed to convert padding!",
+        std::vector<int64_t> beginPadsVec(onnxPadding.begin(), onnxPadding.begin() + padAxesSize);
+        std::vector<int64_t> endPadsVec(onnxPadding.begin() + padAxesSize, onnxPadding.end());
+        beginPads = ShapeTensor(1, std::move(beginPadsVec));
+        endPads = ShapeTensor(1, std::move(endPadsVec));
+    }
+    else
+    {
+        nvinfer1::ITensor* onnxPaddingPtr = &convertToTensor(inputs.at(1), ctx);
+        ASSERT_NODE((onnxPaddingPtr->getDimensions().nbDims == 1),
+            "The padding input must be 1D. The rank of padding input = " << onnxPaddingPtr->getDimensions().nbDims
+                                                                         << ".",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-        size
-            = ctx->network()
-                  ->addElementWise(shapeOf(*tensorPtr).tensor(ctx), *totalPadding, nvinfer1::ElementWiseOperation::kSUM)
-                  ->getOutput(0);
+        ASSERT_NODE(onnxPaddingPtr->getDimensions().d[0] == padAxesSize * 2,
+            "pads should be twice the length of input axes i.e. "
+                << 2 * padAxesSize << ", actual length is: " << onnxPaddingPtr->getDimensions().d[0],
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+        // onnxPaddingPtr is of the format [x1_begin, x2_begin, ..., x1_end, x2_end,...].
+        ShapeTensor const paddingLen = gather(ctx, shapeOf(*onnxPaddingPtr), shapeVector(0));
+        ShapeTensor const halfPaddingLen = floorDiv(ctx, paddingLen, shapeVector(2));
+        // Obtain begins [x1_begin, x2_begin, ...,].
+        nvinfer1::ISliceLayer* beginSliceLayer
+            = addSlice(ctx, *onnxPaddingPtr, shapeVector(0), halfPaddingLen, shapeVector(1));
+        ctx->registerLayer(beginSliceLayer, node);
+        beginPads = ShapeTensor{*(beginSliceLayer->getOutput(0))};
+        // Obtain ends [x1_end, x2_end, ...].
+        nvinfer1::ISliceLayer* endSliceLayer
+            = addSlice(ctx, *onnxPaddingPtr, halfPaddingLen, halfPaddingLen, shapeVector(1));
+        ctx->registerLayer(endSliceLayer, node);
+        endPads = ShapeTensor{*(endSliceLayer->getOutput(0))};
     }
 
-    // add slice node
-    auto const stride = makeDims(nbDims, 1);
-    auto const& dummy = stride;
-    auto* layer = N_CHECK(ctx->network()->addSlice(*tensorPtr, dummy, dummy, stride));
+    if (padAxes.allValuesKnown())
+    {
+        // gather() requires indices to be normalized if their values are known
+        CHECK_STATUS(normalizeAxes(padAxes, nbDims));
+    }
+    auto axesDims = gather(ctx, tensorDims, padAxes);
+    ShapeTensor const zeros = similar(ctx, beginPads, 0);
+    ShapeTensor start = sub(ctx, zeros, beginPads);
+    ShapeTensor size = add(ctx, axesDims, add(ctx, beginPads, endPads));
+    ShapeTensor const stride = similar(ctx, start, 1);
+
+    auto* layer = N_CHECK(addSlice(ctx, *tensorPtr, start, size, stride));
     ASSERT_NODE(layer, "Could not create padding layer", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-    layer->setInput(1, *start);
-    layer->setInput(2, *size);
+    if (padAxes.allValuesKnown())
+    {
+        layer->setAxes(shapeTensorToDims(padAxes, "slice axes", -nbDims, nbDims - 1));
+    }
+    else
+    {
+        layer->setInput(5, convertToTensor(inputs.at(3), ctx));
+    }
     if (mode == "constant")
     {
         layer->setMode(nvinfer1::SampleMode::kFILL);
@@ -5348,24 +5425,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
     if (axes.allValuesKnown())
     {
         // gather() requires indices to be normalized if their values are known
-        std::vector<int64_t> newAxes;
-        newAxes.reserve(axes.size());
-        for (int64_t axis : axes)
-        {
-            // "Accepted range is [-r, r-1] where r = rank(data)."
-            int32_t const r = dims.size();
-            ASSERT_NODE((-r <= axis && axis < r),
-                "The range of axis must be in [-r, r-1], where r is the rank of input data. Provided axis = "
-                    << axis << ", r = " << r << ".",
-                node, nodeIdx, ErrorCode::kINVALID_VALUE);
-            // "Negative value means counting dimensions from the back."
-            if (axis < 0)
-            {
-                axis += r;
-            }
-            newAxes.push_back(axis);
-        }
-        axes = ShapeTensor(1, std::move(newAxes));
+        CHECK_STATUS(normalizeAxes(axes, dims.size()));
     }
     // Get dimensions of dims that correspond to axes for the computation of sizes
     auto const axesDims = gather(ctx, dims, axes);

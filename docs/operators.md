@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.0 supports operators in the inclusive range of opset 9 to opset 20. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.4 supports operators in the inclusive range of opset 9 to opset 20. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, INT4, UINT8, and BOOL
 
@@ -36,7 +36,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | BitwiseNot                | N          |
 | BitwiseOr                 | N          |
 | BitwiseXor                | N          |
-| BlackmanWindow            | N          |
+| BlackmanWindow            | Y          |
 | Cast                      | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
 | CastLike                  | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
 | Ceil                      | Y          | FP32, FP16, BF16 |
@@ -85,8 +85,8 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | GridSample                | Y          | FP32, FP16 | Input must be 4D input.
 | GroupNormalization        | Y          | FP32, FP16, BF16 |
 | GRU                       | Y          | FP32, FP16, BF16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
-| HammingWindow             | N          |
-| HannWindow                | N          |
+| HammingWindow             | Y          |
+| HannWindow                | Y          |
 | HardSigmoid               | Y          | FP32, FP16, BF16 |
 | HardSwish                 | Y          | FP32, FP16, BF16 |
 | Hardmax                   | Y          | FP32, FP16, BF16 | `axis` dimension of input must be a build-time constant
@@ -132,7 +132,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | OptionalGetElement        | N          |
 | OptionalHasElement        | N          |
 | Or                        | Y          | BOOL |
-| Pad                       | Y          | FP32, FP16, BF16, INT32, INT64 | `axes` must be an initializer |
+| Pad                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | ParametricSoftplus        | Y          | FP32, FP16, BF16 |
 | Pow                       | Y          | FP32, FP16, BF16 |
 | PRelu                     | Y          | FP32, FP16, BF16 |
@@ -184,7 +184,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Sin                       | Y          | FP32, FP16, BF16 |
 | Sinh                      | Y          | FP32, FP16, BF16 |
 | Size                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| Slice                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | 
+| Slice                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Softmax                   | Y          | FP32, FP16, BF16 |
 | SoftmaxCrossEntropyLoss   | N          |
 | Softplus                  | Y          | FP32, FP16, BF16 |

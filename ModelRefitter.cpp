@@ -20,7 +20,7 @@ namespace onnx2trt
 {
 namespace
 {
-Status deserializeOnnxModelFile(char const* onnxModelFile, ::ONNX_NAMESPACE::ModelProto& onnx_model)
+void deserializeOnnxModelFile(char const* onnxModelFile, ::ONNX_NAMESPACE::ModelProto& onnx_model)
 {
     // Define S_ISREG macro for Windows
 #if !defined(S_ISREG)
@@ -28,15 +28,14 @@ Status deserializeOnnxModelFile(char const* onnxModelFile, ::ONNX_NAMESPACE::Mod
 #endif
 
     struct stat sb;
-    ASSERT(!(stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode))
-            && "Failed to parse the ONNX model; input is not a regular file.",
-        ErrorCode::kMODEL_DESERIALIZE_FAILED);
+    ONNXTRT_CHECK(!(stat(onnxModelFile, &sb) == 0 && !S_ISREG(sb.st_mode)),
+        MAKE_ERROR(
+            "Failed to parse the ONNX model; input is not a regular file.", ErrorCode::kMODEL_DESERIALIZE_FAILED));
 
     GOOGLE_PROTOBUF_VERIFY_VERSION;
 
     bool const fileLoadSuccess = ParseFromFileAsBinary(&onnx_model, onnxModelFile);
-    ASSERT(fileLoadSuccess && "Failed to parse the ONNX model!", ErrorCode::kMODEL_DESERIALIZE_FAILED);
-    return Status::success();
+    ONNXTRT_CHECK(fileLoadSuccess, MAKE_ERROR("Failed to parse the ONNX model!", ErrorCode::kMODEL_DESERIALIZE_FAILED));
 }
 } // anonymous namespace
 
@@ -49,7 +48,7 @@ std::unordered_set<std::string> ModelRefitter::getRefittableWeights()
 }
 
 template <typename T, typename TConvertFunc>
-ValueOrStatus<size_t> ModelRefitter::batchnormWeightRefitter(
+size_t ModelRefitter::batchnormWeightRefitter(
     ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f)
 {
     auto const& scale = inputs.at(0);
@@ -88,7 +87,8 @@ ValueOrStatus<size_t> ModelRefitter::batchnormWeightRefitter(
     // Validate that all the weights have the same amount of values
     bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
         && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
-    ASSERT(allSame && "Inputs to BatchNormalization must have the same shape!", ErrorCode::kREFIT_FAILED);
+    ONNXTRT_CHECK(
+        allSame, MAKE_ERROR("Inputs to BatchNormalization must have the same shape!", ErrorCode::kREFIT_FAILED));
 
     for (int32_t i = 0; i < nbChannels; ++i)
     {
@@ -99,16 +99,15 @@ ValueOrStatus<size_t> ModelRefitter::batchnormWeightRefitter(
     if (refittableWeights.count(combinedScale.name))
     {
         refittableWeights.erase(combinedScale.name);
-        ASSERT(
-            mRefitter->setNamedWeights(combinedScale.name, std::move(combinedScale)) && "Failed to set named weights",
-            ErrorCode::kREFIT_FAILED);
+        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedScale.name, std::move(combinedScale)),
+            MAKE_ERROR("Failed to set named weights", ErrorCode::kREFIT_FAILED));
         ++successfullyRefittedWeights;
     }
     if (refittableWeights.count(combinedBias.name))
     {
         refittableWeights.erase(combinedBias.name);
-        ASSERT(mRefitter->setNamedWeights(combinedBias.name, std::move(combinedBias)) && "Failed to set named weights",
-            ErrorCode::kREFIT_FAILED);
+        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedBias.name, std::move(combinedBias)),
+            MAKE_ERROR("Failed to set named weights", ErrorCode::kREFIT_FAILED));
         ++successfullyRefittedWeights;
     }
     return successfullyRefittedWeights;
@@ -125,18 +124,17 @@ public:
     };
 };
 
-Status ModelRefitter::refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model)
+void ModelRefitter::refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model)
 {
     nestedDepth = 0;
     successfullyRefittedWeights = 0;
     size_t const numberOfWeightsToRefit = refittableWeights.size();
-    CHECK_STATUS(refitOnnxGraph(onnx_model.graph()));
-    ASSERT(successfullyRefittedWeights == numberOfWeightsToRefit && "Failed to refit all the weights.",
-        ErrorCode::kREFIT_FAILED);
-    return Status::success();
+    refitOnnxGraph(onnx_model.graph());
+    ONNXTRT_CHECK(successfullyRefittedWeights == numberOfWeightsToRefit,
+        MAKE_ERROR("Failed to refit all the weights.", ErrorCode::kREFIT_FAILED));
 }
 
-Status ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
+void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
 {
     for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
     {
@@ -159,66 +157,62 @@ Status ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
             refittedWeights.insert(initializer.name());
         }
         ShapedWeights weights;
-        ASSERT(mWeightsContext.convertOnnxWeights(initializer, &weights, /*ownAllWeights=*/true)
-                && "Failed to import initializer.",
-            ErrorCode::kUNSUPPORTED_NODE);
-        ASSERT(
-            mRefitter->setNamedWeights(initializer.name().c_str(), std::move(weights)) && "Failed to set named weights",
-            ErrorCode::kREFIT_FAILED);
+        ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(initializer, &weights, /*ownAllWeights=*/true),
+            MAKE_ERROR("Failed to import initializer.", ErrorCode::kUNSUPPORTED_NODE));
+        ONNXTRT_CHECK(mRefitter->setNamedWeights(initializer.name().c_str(), std::move(weights)),
+            MAKE_ERROR("Failed to set named weights", ErrorCode::kREFIT_FAILED));
         ++successfullyRefittedWeights;
     }
 
     std::vector<size_t> topoOrder;
-    ASSERT(toposort(graph.node(), &topoOrder) && "Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH);
+    ONNXTRT_CHECK(toposort(graph.node(), &topoOrder),
+        MAKE_ERROR("Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH));
 
     for (auto const& nodeIdx : topoOrder)
     {
         ::ONNX_NAMESPACE::NodeProto const& node = graph.node(nodeIdx);
-        CHECK_STATUS(refitOnnxNode(node, graph));
+        refitOnnxNode(node, graph);
     }
-    return Status::success();
 }
 
-Status ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph)
+void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph)
 {
     // For nodes that contain subgraphs (Ifs, Loops, Scans),
     // ensure that the recursion depth is limited to a set amount.
     ++nestedDepth;
     static size_t const MAX_NESTED_SUBGRAPHS = 24;
-    ASSERT((nestedDepth <= MAX_NESTED_SUBGRAPHS)
-            && "ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!",
-        ErrorCode::kUNSUPPORTED_GRAPH);
+    ONNXTRT_CHECK((nestedDepth <= MAX_NESTED_SUBGRAPHS),
+        MAKE_ERROR("ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!",
+            ErrorCode::kUNSUPPORTED_GRAPH));
 
-    Status status{ErrorCode::kSUCCESS};
     if (node.op_type() == "Constant")
     {
-        status = refitOnnxConstantNode(node, graph.name());
+        refitOnnxConstantNode(node, graph.name());
     }
     else if (node.op_type() == "BatchNormalization")
     {
-        status = refitOnnxBatchNormNode(node, graph);
+        refitOnnxBatchNormNode(node, graph);
     }
     else if (node.op_type() == "If")
     {
-        status = refitOnnxIfNode(node);
+        refitOnnxIfNode(node);
     }
     else if (node.op_type() == "Loop")
     {
-        status = refitOnnxLoopNode(node);
+        refitOnnxLoopNode(node);
     }
     else if (node.op_type() == "Scan")
     {
-        status = refitOnnxScanNode(node);
+        refitOnnxScanNode(node);
     }
     --nestedDepth;
-    return status;
 }
 
-Status ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
+void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
 {
     if (!refittableWeights.count(node.output(0)))
     {
-        return Status::success();
+        return;
     }
     refittableWeights.erase(node.output(0));
     if (refittedWeights.count(node.output(0)))
@@ -237,7 +231,8 @@ Status ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& n
     {
         weights = mWeightsContext.createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0, {}});
         float value = nodeAttribute.f();
-        ASSERT(weights.count() == 1 && "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(
+            weights.count() == 1, MAKE_ERROR("Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE));
         std::memcpy(weights.values, &value, sizeof(float));
     }
     else if (nodeAttribute.name() == "value_floats")
@@ -245,14 +240,16 @@ Status ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& n
         std::vector<float> values{nodeAttribute.floats().begin(), nodeAttribute.floats().end()};
         int64_t valueSize = values.size();
         weights = mWeightsContext.createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {1, {valueSize}});
-        ASSERT(weights.count() == values.size() && "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(weights.count() == values.size(),
+            MAKE_ERROR("Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE));
         std::memcpy(weights.values, values.data(), weights.count() * sizeof(float));
     }
     else if (nodeAttribute.name() == "value_int")
     {
         weights = mWeightsContext.createTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, {0, {}});
         int64_t value = nodeAttribute.i();
-        ASSERT(weights.count() == 1 && "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(
+            weights.count() == 1, MAKE_ERROR("Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE));
         std::memcpy(weights.values, &value, sizeof(int64_t));
     }
     else if (nodeAttribute.name() == "value_ints")
@@ -260,25 +257,26 @@ Status ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& n
         std::vector<int64_t> values{nodeAttribute.ints().begin(), nodeAttribute.ints().end()};
         int64_t valueSize = values.size();
         weights = mWeightsContext.createTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, {1, {valueSize}});
-        ASSERT(weights.count() == values.size() && "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(weights.count() == values.size(),
+            MAKE_ERROR("Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE));
         std::memcpy(weights.values, values.data(), weights.count() * sizeof(int64_t));
     }
     else
     {
         ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = nodeAttribute.t();
-        ASSERT(mWeightsContext.convertOnnxWeights(onnx_weights_tensor, &weights) && "Failed to import Constant node.",
-            ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(onnx_weights_tensor, &weights),
+            MAKE_ERROR("Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE));
     }
-    ASSERT(mRefitter->setNamedWeights(node.output(0).c_str(), std::move(weights)) && "Failed to set named weights",
-        ErrorCode::kREFIT_FAILED);
+    ONNXTRT_CHECK(mRefitter->setNamedWeights(node.output(0).c_str(), std::move(weights)),
+        MAKE_ERROR("Failed to set named weights", ErrorCode::kREFIT_FAILED));
     ++successfullyRefittedWeights;
-    return Status::success();
 }
 
-Status ModelRefitter::refitOnnxBatchNormNode(
+void ModelRefitter::refitOnnxBatchNormNode(
     ::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph)
 {
-    ASSERT(node.input().size() == 5 && "BatchNorm node does not have five required inputs.", ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK(node.input().size() == 5,
+        MAKE_ERROR("BatchNorm node does not have five required inputs.", ErrorCode::kINVALID_NODE));
     std::vector<ShapedWeights> batchNormInputs;
     // The following looping construct is due to the fact that some tensors
     // might be shared among the BatchNorm's inputs
@@ -290,8 +288,8 @@ Status ModelRefitter::refitOnnxBatchNormNode(
             if (inputNames.at(inputIdx) == initializer.name())
             {
                 ShapedWeights weights;
-                ASSERT(mWeightsContext.convertOnnxWeights(initializer, &weights) && "Failed to import initializer.",
-                    ErrorCode::kUNSUPPORTED_NODE);
+                ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(initializer, &weights),
+                    MAKE_ERROR("Failed to import initializer.", ErrorCode::kUNSUPPORTED_NODE));
                 weights.name = initializer.name().c_str();
                 batchNormInputs.push_back(std::move(weights));
                 break;
@@ -304,9 +302,9 @@ Status ModelRefitter::refitOnnxBatchNormNode(
     // we must have already refitted the weights directly in refitOnnxGraph()
     if (batchNormInputs.size() < 4)
     {
-        return Status::success();
+        return;
     }
-    ValueOrStatus<size_t> batchnormRefittedWeights{0};
+    size_t batchnormRefittedWeights{0};
     auto const scaleType = batchNormInputs.at(0).type;
     bool const typesEqual = scaleType == batchNormInputs.at(1).type && scaleType == batchNormInputs.at(2).type
         && scaleType == batchNormInputs.at(3).type;
@@ -314,34 +312,21 @@ Status ModelRefitter::refitOnnxBatchNormNode(
     {
         batchnormRefittedWeights
             = batchnormWeightRefitter<half_float::half>(node, batchNormInputs, QuickCast<half_float::half>());
-        if (batchnormRefittedWeights.is_error())
-        {
-            return batchnormRefittedWeights.error();
-        }
     }
     else if (typesEqual && scaleType == ::ONNX_NAMESPACE::TensorProto::BFLOAT16)
     {
         batchnormRefittedWeights = batchnormWeightRefitter<BFloat16>(node, batchNormInputs, QuickCast<BFloat16>());
-        if (batchnormRefittedWeights.is_error())
-        {
-            return batchnormRefittedWeights.error();
-        }
     }
     else
     {
         // Do calculations in FP32, possibly promoting/demoting arithmetic types of some operands.
         batchnormRefittedWeights = batchnormWeightRefitter<float>(
             node, batchNormInputs, [this](ShapedWeights const& w) { return mWeightsContext.getFP32Values(w); });
-        if (batchnormRefittedWeights.is_error())
-        {
-            return batchnormRefittedWeights.error();
-        }
     }
-    successfullyRefittedWeights += batchnormRefittedWeights.value();
-    return Status::success();
+    successfullyRefittedWeights += batchnormRefittedWeights;
 }
 
-Status ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
+void ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
     size_t thenGraphOutputSize{};
     size_t elseGraphOutputSize{};
@@ -350,44 +335,40 @@ Status ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
         if (attr.name() == "then_branch")
         {
             ::ONNX_NAMESPACE::GraphProto const& thenGraph = static_cast<::ONNX_NAMESPACE::GraphProto const&>(attr.g());
-            CHECK_STATUS(refitOnnxGraph(thenGraph));
+            refitOnnxGraph(thenGraph);
             thenGraphOutputSize = thenGraph.output_size();
         }
         else if (attr.name() == "else_branch")
         {
             ::ONNX_NAMESPACE::GraphProto const& elseGraph = static_cast<::ONNX_NAMESPACE::GraphProto const&>(attr.g());
-            CHECK_STATUS(refitOnnxGraph(elseGraph));
+            refitOnnxGraph(elseGraph);
             elseGraphOutputSize = elseGraph.output_size();
         }
     }
 
     // Number of outputs are the same between the two branches.
-    ASSERT(thenGraphOutputSize == elseGraphOutputSize
-            && "then/else subgraphs within the IF node should have the same number of outputs",
-        ErrorCode::kREFIT_FAILED);
-
-    return Status::success();
+    ONNXTRT_CHECK(thenGraphOutputSize == elseGraphOutputSize,
+        MAKE_ERROR(
+            "then/else subgraphs within the IF node should have the same number of outputs", ErrorCode::kREFIT_FAILED));
 }
 
-Status ModelRefitter::refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node)
+void ModelRefitter::refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
     ::ONNX_NAMESPACE::GraphProto const& body = static_cast<::ONNX_NAMESPACE::GraphProto const&>(node.attribute(0).g());
-    CHECK_STATUS(refitOnnxGraph(body));
-    return Status::success();
+    refitOnnxGraph(body);
 }
 
-Status ModelRefitter::refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node)
+void ModelRefitter::refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
     for (auto const& attr : node.attribute())
     {
         if (attr.name() == "body")
         {
             ::ONNX_NAMESPACE::GraphProto const& body = static_cast<::ONNX_NAMESPACE::GraphProto const&>(attr.g());
-            CHECK_STATUS(refitOnnxGraph(body));
+            refitOnnxGraph(body);
             break;
         }
     }
-    return Status::success();
 }
 
 bool ModelRefitter::refitFromBytes(
@@ -401,20 +382,10 @@ bool ModelRefitter::refitFromBytes(
             mWeightsContext.setOnnxFileLocation(modelPath);
         }
 
-        Status status = deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &onnx_model);
-        if (status.is_error())
-        {
-            mErrors.push_back(status);
-            return false;
-        }
+        deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &onnx_model);
 
         refittableWeights = getRefittableWeights();
-        status = refitOnnxWeights(onnx_model);
-        if (status.is_error())
-        {
-            mErrors.push_back(status);
-            return false;
-        }
+        refitOnnxWeights(onnx_model);
         return true;
     }
     ONNXTRT_CATCH_LOG(mLogger)
@@ -428,22 +399,11 @@ bool ModelRefitter::refitFromFile(char const* onnxModelFile) noexcept
         // Keep track of the absolute path to the ONNX file.
         mWeightsContext.setOnnxFileLocation(onnxModelFile);
 
-        Status status = deserializeOnnxModelFile(onnxModelFile, onnx_model);
-        if (status.is_error())
-        {
-            mErrors.push_back(status);
-            return false;
-        }
-
+        deserializeOnnxModelFile(onnxModelFile, onnx_model);
         refittableWeights = getRefittableWeights();
         if (!refittableWeights.empty())
         {
-            status = refitOnnxWeights(onnx_model);
-            if (status.is_error())
-            {
-                mErrors.push_back(status);
-                return false;
-            }
+            refitOnnxWeights(onnx_model);
         }
         return true;
     }

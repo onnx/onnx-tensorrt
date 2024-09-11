@@ -134,7 +134,10 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& 
             mConstantLayers.insert({uniqueName, static_cast<nvinfer1::IConstantLayer*>(layer)});
         }
     }
-    if (node != nullptr && layer != nullptr)
+    // Set metadata only if the layer is associated with an ONNX node.
+    // Skip constant layers because constants are represented as initializers in ONNX and should not be associated
+    // with any ONNX node.
+    if (node != nullptr && layer != nullptr && layer->getType() != nvinfer1::LayerType::kCONSTANT)
     {
         processMetadata(this, *node, layer);
     }

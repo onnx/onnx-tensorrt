@@ -60,17 +60,17 @@ private:
     //! TConvertFunc is a functor for converting ShapedWeights to an array of type T.
     //! It should return a T*.
     template <typename T, typename TConvertFunc>
-    ValueOrStatus<size_t> batchnormWeightRefitter(
+    size_t batchnormWeightRefitter(
         ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f);
 
-    Status refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model);
-    Status refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph);
-    Status refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
-    Status refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName);
-    Status refitOnnxBatchNormNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
-    Status refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node);
-    Status refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node);
-    Status refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node);
+    void refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model);
+    void refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph);
+    void refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
+    void refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName);
+    void refitOnnxBatchNormNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
+    void refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node);
+    void refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node);
+    void refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node);
 
 public:
     ModelRefitter(nvinfer1::IRefitter* refitter, nvinfer1::ILogger* logger)

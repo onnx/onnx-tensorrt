@@ -542,7 +542,7 @@ nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, c
     constexpr int32_t minDim = std::numeric_limits<int32_t>::min();
     constexpr int32_t maxDim = std::numeric_limits<int32_t>::max();
     nvinfer1::ISliceLayer* slice = N_CHECK(ctx->network()->addSlice(data,
-        shapeTensorToDims(starts, "slice start", 0, maxDim), shapeTensorToDims(sizes, "slice size", 0, maxDim),
+        shapeTensorToDims(starts, "slice start", minDim, maxDim), shapeTensorToDims(sizes, "slice size", 0, maxDim),
         shapeTensorToDims(strides, "slide strides", minDim, maxDim)));
     setShapeInputIfDynamic(ctx, slice, 1, starts);
     setShapeInputIfDynamic(ctx, slice, 2, sizes);

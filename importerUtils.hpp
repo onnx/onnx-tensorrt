@@ -259,6 +259,10 @@ nvinfer1::Dims makeDims(int nbDims, int val);
 NodeImportResult normalizationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
 
+// Given a list of axes in the range of [-rank, rank-1], where rank is the rank
+// of the corresponding data tensor, normalize to [0, rank-1].
+Status normalizeAxes(ShapeTensor& axes, int32_t const rank);
+
 // Helper function to parse activation values for LSTM nodes
 std::vector<float> parseLSTMActivationValues(std::vector<nvinfer1::ActivationType> const& activationTypes,
     std::vector<float> const& activationValues, bool isAlpha);
@@ -430,7 +434,15 @@ Status processEllipsisAndImplicitOutput(
 nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation);
 
+// Helper function to convert TensorRT datatype enum into a human-readable string.
 std::string getTrtDtypeName(nvinfer1::DataType TrtDtype);
+
+// Helper fucntion to generate a Window tensor for Window operations (HannWindow, HammingWindow, BlackmanWindow).
+nvinfer1::ITensor* generateWindow(ImporterContext* ctx, nvinfer1::ITensor* N);
+
+// Helper function to handle Window generation ops. Calculates TrigOp(numerator*n / N) and returns the output tensor.
+nvinfer1::ITensor* windowHelper(ImporterContext* ctx, float numerator, nvinfer1::ITensor* n, nvinfer1::ITensor* N,
+    nvinfer1::UnaryOperation op, int32_t periodic);
 
 //! Describes occurrence of a named dimension.
 class NamedDimension

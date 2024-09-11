@@ -2,6 +2,14 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.4 GA Release - 2024-9-5
+For more details, see the 10.4 GA release notes.
+
+- Added support for tensor `axes` for `Pad` operations
+- Added support for `BlackmanWindow`, `HammingWindow`, and `HannWindow` operations
+- Improved error handling in `IParserRefitter`
+- Fixed kernel shape inference in multi-input convolutions
+
 # TensorRT 10.3 GA Release - 2024-8-7
 For more details, see the 10.3 GA release notes.
 
@@ -14,13 +22,14 @@ For more details, see the 10.2 GA release notes.
 - Improved error handling with new macros and classes
 - Minor changes to op importers for `GRU` and `Squeeze`
 
-# TensorRT 10.1 GA Release - 2024-6-17
+# TensorRT 10.1 GA Release - 2024-6-10
 For more details, see the 10.1 GA release notes.
 
 - Added `supportsModelV2` API
 - Added support for `DeformConv` operation
 - Added support for `PluginV3` TensorRT Plugins
 - Marked all IParser and IParserRefitter APIs as `noexcept`
+- Shape inputs can be passed to custom ops supported by `IPluginV3`-based plugins by indicating the input indices to be interpreted as shape inputs by a node attribute named `tensorrt_plugin_shape_input_indices`.
 
 # TensorRT 10.0 GA Release - 2024-4-25
 For more details, see the 10.0 GA release notes.
