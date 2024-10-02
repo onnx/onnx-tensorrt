@@ -13,7 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <list>
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx.pb.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -371,9 +371,9 @@ public:
     }
 };
 
-typedef ValueOrStatus<std::vector<TensorOrWeights>> NodeImportResult;
-typedef std::function<NodeImportResult(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)>
+typedef std::vector<TensorOrWeights> NodeOutputs;
+typedef std::function<NodeOutputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    std::vector<TensorOrWeights>& inputs)>
     NodeImporter;
 
 typedef std::function<void(

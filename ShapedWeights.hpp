@@ -5,7 +5,7 @@
 #pragma once
 
 #include <NvInfer.h>
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx.pb.h>
 
 namespace onnx2trt
 {

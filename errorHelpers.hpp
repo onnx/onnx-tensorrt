@@ -39,17 +39,19 @@
 
 #define ONNXTRT_THROW(status) throw OnnxTrtException(status)
 
-#define ONNXTRT_CHECK(cond, status)                                                                                    \
+#define ONNXTRT_CHECK(cond, code)                                                                                      \
     if (!(cond))                                                                                                       \
     {                                                                                                                  \
         std::ostringstream ss;                                                                                         \
         ss << "Assertion failed: " << #cond;                                                                           \
-        ONNXTRT_THROW(status);                                                                                         \
+        ONNXTRT_THROW(MAKE_ERROR(ss.str(), (code)));                                                                   \
     }
 
 #define ONNXTRT_CHECK_NODE(cond, desc, node, nodeIdx, code)                                                            \
     if (!(cond))                                                                                                       \
     {                                                                                                                  \
+        std::ostringstream ss;                                                                                         \
+        ss << "Assertion failed: " << #cond << ": " << desc;                                                           \
         ONNXTRT_THROW(MAKE_NODE_ERROR((ss.str()), (code), (node), (nodeIdx)));                                         \
     }
 

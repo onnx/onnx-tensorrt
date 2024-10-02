@@ -15,13 +15,13 @@
 namespace onnx2trt
 {
 
-Status parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     bool deserializingINetwork = false);
 
 void parseNodeStaticCheck(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex);
 
-Status parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
+void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
     bool deserializingINetwork = false, int32_t* currentNode = nullptr);
 
 class ModelImporter : public nvonnxparser::IParser
@@ -31,7 +31,7 @@ class ModelImporter : public nvonnxparser::IParser
 
 protected:
     StringMap<NodeImporter> _op_importers;
-    virtual Status importModel(::ONNX_NAMESPACE::ModelProto const& model) noexcept;
+    virtual void importModel(::ONNX_NAMESPACE::ModelProto const& model);
 
 private:
     ImporterContext mImporterCtx;

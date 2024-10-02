@@ -5,7 +5,7 @@
 #include "OnnxAttrs.hpp"
 #include "ShapedWeights.hpp"
 #include "importerUtils.hpp"
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx.pb.h>
 
 bool isExternalAttribute(std::string const& key, onnx2trt::ImporterContext* ctx)
 {

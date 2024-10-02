@@ -67,11 +67,8 @@ ShapeTensor::ShapeTensor(ImporterContext* ctx, TensorOrWeights& t)
         assert(d.nbDims <= 1 && "shape tensor must be 0D or 1D");
         mRank = d.nbDims;
         mSize = d.nbDims == 0 ? 1 : d.d[0];
-        auto status = weightsToVector(weights, &mValues);
-        if (status.code() != ErrorCode::kSUCCESS)
-        {
-            throw std::runtime_error("constant " + t.getName() + " is not a valid shape tensor");
-        }
+
+        weightsToVector(weights, &mValues);
         mAllValuesKnown = true;
     }
 }

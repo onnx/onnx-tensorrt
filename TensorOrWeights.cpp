@@ -24,6 +24,9 @@ std::string TensorOrWeights::getType() const
         case nvinfer1::DataType::kBOOL: return "BOOL";
         case nvinfer1::DataType::kFP8: return "FP8";
         case nvinfer1::DataType::kINT4: return "INT4";
+#if ENABLE_LONG_TERM
+        case nvinfer1::DataType::kFP4: return "FP4";
+#endif /*ENABLE_LONG_TERM*/
         }
     }
     else
@@ -81,6 +84,9 @@ ShapedWeights::DataType TensorOrWeights::convertTRTDataType(nvinfer1::DataType d
         case nvinfer1::DataType::kINT64: return ::ONNX_NAMESPACE::TensorProto::INT64;
         case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
         case nvinfer1::DataType::kINT4: return ::ONNX_NAMESPACE::TensorProto::INT4;
+#if ENABLE_LONG_TERM
+        case nvinfer1::DataType::kFP4: assert(false && "FP4 is not implemented in ONNX");
+#endif /*ENABLE_LONG_TERM*/
         }
         assert(false && "Unknown datatype");
         return ::ONNX_NAMESPACE::TensorProto::FLOAT;

@@ -976,10 +976,7 @@ DEFINE_OP_CHECKER(RegexFullMatch)
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
-DEFINE_OP_CHECKER(STFT)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
+DEFINE_OP_EMPTY_CHECKER(STFT)
 
 DEFINE_OP_CHECKER(SequenceAt)
 {
