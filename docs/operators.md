@@ -163,7 +163,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | RNN                       | Y          | FP32, FP16, BF16| For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | Y          | FP32, FP16 |
 | Round                     | Y          | FP32, FP16, BF16 |
-| STFT                      | N          |
+| STFT                      | Y          | FP32| `frame_step` and `window` must be an initializer. Input must be real-valued.
 | ScaledTanh                | Y          | FP32, FP16, BF16 |
 | Scan                      | Y          | FP32, FP16, BF16|
 | Scatter                   | Y          | FP32, FP16, BF16, INT32, INT64 |

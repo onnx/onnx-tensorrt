@@ -2,6 +2,12 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.5 GA Release - 2024-10-1
+For more details, see the 10.5 GA release notes.
+
+- Added support for real-valued `STFT` operations
+- Improved error handling in `IParser`
+
 # TensorRT 10.4 GA Release - 2024-9-5
 For more details, see the 10.4 GA release notes.
 

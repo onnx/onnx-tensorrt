@@ -5,6 +5,7 @@
 #pragma once
 
 #include "Status.hpp"
+#include "errorHelpers.hpp"
 #include <iostream>
 #include <onnx/onnx_pb.h>
 #include <sstream>
@@ -55,7 +56,7 @@ std::string convertProtoToString(ProtoMessage const& message)
 
 // Deserializes an ONNX ModelProto passed in as a protobuf::Message or a protobuf::MessageLite.
 template <typename ProtoMessage>
-Status deserializeOnnxModel(void const* serializedModel, size_t serializedModelSize, ProtoMessage* model)
+void deserializeOnnxModel(void const* serializedModel, size_t serializedModelSize, ProtoMessage* model)
 {
     google::protobuf::io::ArrayInputStream rawInput(serializedModel, serializedModelSize);
     google::protobuf::io::CodedInputStream codedInput(&rawInput);
@@ -66,9 +67,8 @@ Status deserializeOnnxModel(void const* serializedModel, size_t serializedModelS
     // Note: This WARs the very low default size limit (64MB)
     codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
 #endif
-    ASSERT((model->ParseFromCodedStream(&codedInput)) && "Failed to parse the ONNX model.",
+    ONNXTRT_CHECK(model->ParseFromCodedStream(&codedInput) && "Failed to parse the ONNX model.",
         ErrorCode::kMODEL_DESERIALIZE_FAILED);
-    return Status::success();
 }
 
 // Helper function to dispatch to deserializeOnnxModel when user provides a path to the model.
@@ -93,8 +93,8 @@ bool ParseFromFileAsBinary(ProtoMessage* msg, char const* filename)
         return false;
     }
 
-    auto result = deserializeOnnxModel(buffer.data(), buffer.size(), msg);
-    return !result.is_error();
+    deserializeOnnxModel(buffer.data(), buffer.size(), msg);
+    return true;
 }
 
 // ostream overload for printing NodeProtos.
