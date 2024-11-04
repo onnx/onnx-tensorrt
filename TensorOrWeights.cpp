@@ -62,9 +62,9 @@ nvinfer1::DataType TensorOrWeights::convertONNXDataType(ShapedWeights::DataType 
         case ::ONNX_NAMESPACE::TensorProto::INT64: return nvinfer1::DataType::kINT64;
         case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return nvinfer1::DataType::kFP8;
         case ::ONNX_NAMESPACE::TensorProto::INT4: return nvinfer1::DataType::kINT4;
-    }
-    assert(false && "Unknown datatype");
-    return nvinfer1::DataType::kFLOAT;
+        }
+        assert(false && "Unknown datatype");
+        return nvinfer1::DataType::kFLOAT;
 }
 
 ShapedWeights::DataType TensorOrWeights::convertTRTDataType(nvinfer1::DataType datatype) const

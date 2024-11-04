@@ -2,6 +2,15 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.6 GA Release - 2024-11-1
+For more details, see the 10.6 GA release notes
+
+- Updated ONNX submodule version to 1.17.0
+- Fix issue where conditional layers were incorrectly being added
+- Updated local function metadata to contain more information
+- Added support for parsing nodes with Quickly Deployable Plugins
+- Fixed handling of optional outputs
+
 # TensorRT 10.5 GA Release - 2024-10-1
 For more details, see the 10.5 GA release notes.
 

@@ -9,7 +9,7 @@
 
 bool isExternalAttribute(std::string const& key, onnx2trt::ImporterContext* ctx)
 {
-    return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().second.count(key);
+    return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().attrs.count(key);
 }
 
 template <>
@@ -17,7 +17,7 @@ float OnnxAttrs::get<float>(std::string const& key) const
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->f() : this->at(key)->f();
+    return isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->f() : this->at(key)->f();
 }
 
 template <>
@@ -25,7 +25,7 @@ int32_t OnnxAttrs::get<int32_t>(std::string const& key) const
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
+    return isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->i() : this->at(key)->i();
 }
 
 template <>
@@ -33,7 +33,7 @@ int64_t OnnxAttrs::get<int64_t>(std::string const& key) const
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
+    return isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->i() : this->at(key)->i();
 }
 
 template <>
@@ -41,7 +41,7 @@ bool OnnxAttrs::get<bool>(std::string const& key) const
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    int64_t value = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->i() : this->at(key)->i();
+    int64_t value = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->i() : this->at(key)->i();
     assert(value == bool(value));
     return static_cast<bool>(value);
 }
@@ -51,7 +51,7 @@ std::string OnnxAttrs::get<std::string>(std::string const& key) const
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    return isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->s() : this->at(key)->s();
+    return isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->s() : this->at(key)->s();
 }
 
 template <>
@@ -59,7 +59,7 @@ std::vector<int32_t> OnnxAttrs::get<std::vector<int32_t>>(std::string const& key
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->ints() : this->at(key)->ints();
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->ints() : this->at(key)->ints();
     return std::vector<int32_t>(attr.begin(), attr.end());
 }
 
@@ -68,7 +68,7 @@ std::vector<int64_t> OnnxAttrs::get<std::vector<int64_t>>(std::string const& key
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->ints() : this->at(key)->ints();
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->ints() : this->at(key)->ints();
     return std::vector<int64_t>(attr.begin(), attr.end());
 }
 
@@ -77,7 +77,7 @@ std::vector<float> OnnxAttrs::get<std::vector<float>>(std::string const& key) co
 {
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
-    auto attr = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->floats() : this->at(key)->floats();
+    auto attr = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->floats() : this->at(key)->floats();
     return std::vector<float>(attr.begin(), attr.end());
 }
 
@@ -129,7 +129,7 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(std::string cons
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
 
-    ::ONNX_NAMESPACE::TensorProto const& onnxTensor = isExtAttr ? mCtx->localFunctionStack().back().second.at(extName)->t() : this->at(key)->t();
+    ::ONNX_NAMESPACE::TensorProto const& onnxTensor = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->t() : this->at(key)->t();
     onnx2trt::ShapedWeights weights;
     bool success = mCtx->getWeightsContext().convertOnnxWeights(onnxTensor, &weights, true);
     if (!success)

@@ -133,6 +133,26 @@ void randomNormalCheckHelper(
     }
 }
 
+void emptyOutputChecker(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,
+    size_t const nodeIndex, int32_t numSupportedOutputs)
+{
+    int32_t numOutputs = node.output().size();
+    for (int32_t i = 0; i < numOutputs; i++)
+    {
+        if (i < numSupportedOutputs)
+        {
+            continue;
+        }
+        if (!node.output(i).empty())
+        {
+            std::ostringstream ssMsg{};
+            ssMsg << "This version of TensorRT doesn't support mode than " << numSupportedOutputs << " outputs for "
+                  << node.op_type() << " nodes!";
+            ADD_STATIC_ERROR(ssMsg.str(), ErrorCode::kUNSUPPORTED_NODE, node, nodeIndex, errors);
+        }
+    }
+}
+
 DEFINE_OP_EMPTY_CHECKER(Abs)
 
 DEFINE_OP_EMPTY_CHECKER(Acos)
@@ -172,6 +192,8 @@ DEFINE_OP_CHECKER(BatchNormalization)
     auto const isTraining = attrs.get<int32_t>("training_mode", 0);
     STATIC_CHECK(!isTraining && "This version of TensorRT does not support training_mode == 1 in BatchNormalization.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
+    // Also check the number of outputs. TRT only supports the first output.
+    emptyOutputChecker(ctx, node, errors, nodeIndex, 1);
 }
 
 DEFINE_OP_EMPTY_CHECKER(BlackmanWindow)
@@ -246,6 +268,7 @@ DEFINE_OP_EMPTY_CHECKER(TRT_FP8DequantizeLinear)
 DEFINE_OP_EMPTY_CHECKER(TRT_INT4QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(TRT_INT4DequantizeLinear)
+
 
 DECLARE_OP_CHECKER(Mul);
 
@@ -390,7 +413,11 @@ DEFINE_OP_EMPTY_CHECKER(IsInf)
 
 DEFINE_OP_EMPTY_CHECKER(IsNaN)
 
-DEFINE_OP_EMPTY_CHECKER(LayerNormalization)
+DEFINE_OP_CHECKER(LayerNormalization)
+{
+    // TRT only expects one valid output. Other outputs are training artifacts that should've been removed for inference graphs.
+    emptyOutputChecker(ctx, node, errors, nodeIndex, 1);
+}
 
 DEFINE_OP_EMPTY_CHECKER(LeakyRelu)
 
@@ -470,8 +497,8 @@ DEFINE_OP_EMPTY_CHECKER(Max)
 
 DEFINE_OP_CHECKER(MaxPool)
 {
-    STATIC_CHECK(node.output().size() == 1 && "TensorRT does not support the indices output in MaxPool!",
-        ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
+    // TRT only expects one valid output. `Indices` output is unsupported.
+    emptyOutputChecker(ctx, node, errors, nodeIndex, 1);
     poolingCheckHelper(ctx, node, errors, nodeIndex);
 }
 
@@ -807,7 +834,7 @@ DEFINE_OP_CHECKER(LocalFunctionImporter)
     }
 
     // Push current function name to top of stack in order to properly set layer metadata and track attributes
-    ctx->localFunctionStack().push_back({node.op_type(), attrMap});
+    ctx->localFunctionStack().push_back({node.op_type(), getNodeName(node), attrMap});
 
     for (auto const& node : function.node())
     {

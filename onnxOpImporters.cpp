@@ -839,7 +839,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
             << nbSpatialDims << ", number of kernel dimensions = " << kernelWeights.shape.nbDims << ".",
         node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
-    nvinfer1::Weights bias_weights;
+    nvinfer1::Weights biasWeights;
     if (inputs.size() == 3)
     {
         assertIsWeights(inputs.at(2), "The bias tensor is required to be an initializer for the Conv operator.");
@@ -855,11 +855,11 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
             "The shape of the bias tensor misaligns with the weight tensor. Shape of bias weights = "
                 << shapedBiasWeights.shape.d[0] << ", shape of kernel weights = " << kernelWeights.shape.d[0] << ".",
             node, nodeIdx, ErrorCode::kINVALID_NODE);
-        bias_weights = shapedBiasWeights;
+        biasWeights = shapedBiasWeights;
     }
     else
     {
-        bias_weights = ShapedWeights::empty(kernelWeights.type);
+        biasWeights = ShapedWeights::empty(kernelWeights.type);
     }
     nvinfer1::Dims kernelSize;
     kernelSize.nbDims = nbSpatialDims;
@@ -889,7 +889,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     int32_t nchan = dims.d[1];
     int32_t noutput = kernelWeights.shape.d[0];
     nvinfer1::IConvolutionLayer* layer
-        = N_CHECK(ctx->network()->addConvolutionNd(*tensorPtr, noutput, kernelSize, kernelWeights, bias_weights));
+        = N_CHECK(ctx->network()->addConvolutionNd(*tensorPtr, noutput, kernelSize, kernelWeights, biasWeights));
 
     layer->setStrideNd(strides);
     layer->setPaddingMode(paddingMode);
@@ -906,7 +906,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     ctx->network()->setWeightsName(kernelWeights, inputs.at(1).weights().getName());
     if (inputs.size() == 3)
     {
-        ctx->network()->setWeightsName(bias_weights, inputs.at(2).weights().getName());
+        ctx->network()->setWeightsName(biasWeights, inputs.at(2).weights().getName());
     }
     tensorPtr = N_CHECK(layer->getOutput(0));
     dims = tensorPtr->getDimensions();
@@ -1650,11 +1650,11 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
 
     // INT4 requires an even last-dimension due to packing restrictions
-    if (!isDynamic(inputDims))
+    if (!isDynamic(inputDims) && (chosenDataType == DataType::kINT4))
     {
-        ONNXTRT_CHECK_NODE((chosenDataType != DataType::kINT4 || inputDims.d[inputDims.nbDims - 1] % 2 == 0),
-            "Quantization to INT4 is not supported for tensors with an odd last dimension.", node, nodeIdx,
-            nvonnxparser::ErrorCode::kINVALID_NODE);
+        auto const inputSize = volume(inputDims);
+        ONNXTRT_CHECK_NODE((inputSize % 2 == 0), "4-bit quantization requies an even number of elements.", node,
+            nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
     }
 
     nvinfer1::ILayer* layer = nullptr;
@@ -1726,6 +1726,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     // Return layer output
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
+
 
 DEFINE_BUILTIN_OP_IMPORTER(QuantizeLinear)
 {
@@ -2413,14 +2414,14 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     // Get a shape tensor containing: (numDirections, batchSize, hiddenSize)
     auto const initialStateShape = [&ctx, &numDirections, &hiddenSize, &input, &net]() -> nvinfer1::ITensor* {
         // Get batchSize from input shape
-        nvinfer1::ITensor* numDirectionsTensor = addConstantScalar(ctx, numDirections,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            Dims{1, {1}})->getOutput(0);
+        nvinfer1::ITensor* numDirectionsTensor
+            = addConstantScalar(ctx, numDirections, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, Dims{1, {1}})
+                  ->getOutput(0);
         LOG_VERBOSE("numDirections is: " << numDirections
                                          << ", numDirections Tensor shape: " << numDirectionsTensor->getDimensions());
-        nvinfer1::ITensor* hiddenSizeTensor = addConstantScalar(ctx, hiddenSize,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            Dims{1, {1}})->getOutput(0);
+        nvinfer1::ITensor* hiddenSizeTensor
+            = addConstantScalar(ctx, hiddenSize, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, Dims{1, {1}})
+                  ->getOutput(0);
         LOG_VERBOSE(
             "hiddenSize is: " << hiddenSize << ", hiddenSizeTensor shape: " << hiddenSizeTensor->getDimensions());
         nvinfer1::ITensor* batchSizeTensor = getAxisLength(ctx, input, 1, Dims{1, {1}});
@@ -2495,7 +2496,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
         isolateGate->setInput(1,
             *addConstant(ctx, std::vector<int32_t>{0, 0, gateIndex * hiddenSize},
                 ::ONNX_NAMESPACE::TensorProto_DataType_INT32, Dims{1, {3}})
-                 ->getOutput(0));                   // Start
+                ->getOutput(0));                    // Start
         isolateGate->setInput(2, *gateOutputShape); // Size
         return N_CHECK(isolateGate->getOutput(0));
     };
@@ -2595,11 +2596,21 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     LOG_VERBOSE("H(t) -> " << Ht->getDimensions());
 
     std::vector<TensorOrWeights> outputs{};
+
+    // Add outputs. In ONNX, all GRU outputs are optional, so check for them here.
+    auto shouldAddOutput = [&node](int32_t index) { return index < node.output().size() && !node.output(index).empty(); };
+
     // Y = concatenation of all H(t) for each element of the sequence
-    outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
-        numDirections, inputs, direction == "reverse"));
+    if (shouldAddOutput(0))
+    {
+        outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
+            numDirections, inputs, direction == "reverse"));
+    }
     // Yh = last value of H(t)
-    outputs.emplace_back(N_CHECK(loop->addLoopOutput(*Ht1Output, nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0)));
+    if (shouldAddOutput(1))
+    {
+        outputs.emplace_back(N_CHECK(loop->addLoopOutput(*Ht1Output, nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0)));
+    }
     return {{outputs}};
 }
 
@@ -2742,6 +2753,9 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
     OnnxAttrs attrs(node, ctx);
     auto cond = inputs.at(0);
 
+    // Push current scope name to top of stack in order to properly set layer metadata and print error message.
+    ctx->localFunctionStack().push_back({node.op_type(), getNodeName(node), {}});
+
     ::ONNX_NAMESPACE::GraphProto const& thenGraph = attrs.get<::ONNX_NAMESPACE::GraphProto const&>("then_branch");
     ::ONNX_NAMESPACE::GraphProto const& elseGraph = attrs.get<::ONNX_NAMESPACE::GraphProto const&>("else_branch");
 
@@ -2788,25 +2802,37 @@ DEFINE_BUILTIN_OP_IMPORTER(If)
     std::vector<nvinfer1::ILayer*> thenLayers, elseLayers;
     std::vector<TensorOrWeights> thenSubgraphTensors;
     std::vector<TensorOrWeights> elseSubgraphTensors;
+
+    ctx->localFunctionStack().push_back({"then_branch", thenGraph.name(), {}});
     importSubgraph(ctx, thenGraph, thenLayers, thenSubgraphTensors);
+    ctx->localFunctionStack().pop_back();
+
+    ctx->localFunctionStack().push_back({"else_branch", elseGraph.name(), {}});
     importSubgraph(ctx, elseGraph, elseLayers, elseSubgraphTensors);
+    ctx->localFunctionStack().pop_back();
 
     using InputsMap = std::unordered_map<std::string, nvinfer1::IIfConditionalInputLayer*>;
     InputsMap inputsMap;
-    addIfInputLayers(ctx, conditional, inputsMap, thenLayers);
-    addIfInputLayers(ctx, conditional, inputsMap, elseLayers);
+    ctx->localFunctionStack().push_back({"then_branch", thenGraph.name(), {}});
+    addIfInputLayers(ctx, conditional, inputsMap, thenLayers, &node);
+    ctx->localFunctionStack().pop_back();
+    ctx->localFunctionStack().push_back({"else_branch", elseGraph.name(), {}});
+    addIfInputLayers(ctx, conditional, inputsMap, elseLayers, &node);
+    ctx->localFunctionStack().pop_back();
 
     ONNXTRT_CHECK_NODE(thenSubgraphTensors.size() == elseSubgraphTensors.size(),
         "Found different number of output tensors in If conditional subgraphs! then outputs = "
             << thenSubgraphTensors.size() << ", else outputs = " << elseSubgraphTensors.size() << ".",
         node, nodeIdx, ErrorCode::kINVALID_NODE);
 
+    ctx->localFunctionStack().pop_back();
+
     for (size_t i = 0; i < thenSubgraphTensors.size(); i++)
     {
         auto* thenOut = &convertToTensor(thenSubgraphTensors[i], ctx);
         auto* elseOut = &convertToTensor(elseSubgraphTensors[i], ctx);
         auto* outputLayer = N_CHECK(conditional->addOutput(*thenOut, *elseOut));
-        ctx->registerLayer(outputLayer, std::string(conditional->getName()) + "_OutputLayer", nullptr);
+        ctx->registerLayer(outputLayer, std::string(conditional->getName()) + "_OutputLayer", &node);
         graphOutputs.emplace_back(N_CHECK(outputLayer->getOutput(0)));
     }
 
@@ -2961,7 +2987,11 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
 
     auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
-    layer->setComputePrecision(computeType);
+    auto const stronglyTyped = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    if (!stronglyTyped)
+    {
+        layer->setComputePrecision(computeType);
+    }
     ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -3194,13 +3224,13 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     // Get a shape tensor containing: (numDirections, batchSize, hiddenSize)
     auto const initialStateShape = [&ctx, &numDirections, &hiddenSize, &input]() -> nvinfer1::ITensor* {
         // Get batchSize from input shape
-        nvinfer1::ITensor* numDirectionsTensor = addConstantScalar(ctx, numDirections,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            nvinfer1::Dims{1, {1}})->getOutput(0);
+        nvinfer1::ITensor* numDirectionsTensor = addConstantScalar(
+            ctx, numDirections, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, nvinfer1::Dims{1, {1}})
+                                                     ->getOutput(0);
         LOG_VERBOSE("numDirectionsTensor shape: " << numDirectionsTensor->getDimensions());
-        nvinfer1::ITensor* hiddenSizeTensor = addConstantScalar(ctx, hiddenSize,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            nvinfer1::Dims{1, {1}})->getOutput(0);
+        nvinfer1::ITensor* hiddenSizeTensor
+            = addConstantScalar(ctx, hiddenSize, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, nvinfer1::Dims{1, {1}})
+                  ->getOutput(0);
         LOG_VERBOSE("hiddenSizeTensor shape: " << hiddenSizeTensor->getDimensions());
         nvinfer1::ITensor* batchSizeTensor = getAxisLength(ctx, input, 1, nvinfer1::Dims{1, {1}});
         LOG_VERBOSE("batchSizeTensor shape: " << batchSizeTensor->getDimensions());
@@ -3399,17 +3429,29 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     LOG_VERBOSE("H(t) -> " << Ht->getDimensions());
 
     std::vector<TensorOrWeights> outputs{};
+
+    // Add outputs. In ONNX, all LSTM outputs are optional, so check for them here.
+    auto shouldAddOutput = [&node](int32_t index) { return index < node.output().size() && !node.output(index).empty(); };
+
     // Y = concatenation of all H(t) for each element of the sequence
     // singlePassShape = (1, batchSize, hiddenSize)
-
-    outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
-        numDirections, inputs, direction == "reverse"));
+    if (shouldAddOutput(0))
+    {
+        outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
+            numDirections, inputs, direction == "reverse"));
+    }
     // Yh = last value of H(t)
-    auto yhLayer = N_CHECK(loop->addLoopOutput(*Ht1Output, nvinfer1::LoopOutput::kLAST_VALUE));
-    outputs.emplace_back(N_CHECK(yhLayer->getOutput(0)));
+    if (shouldAddOutput(1))
+    {
+        auto yhLayer = N_CHECK(loop->addLoopOutput(*Ht1Output, nvinfer1::LoopOutput::kLAST_VALUE));
+        outputs.emplace_back(N_CHECK(yhLayer->getOutput(0)));
+    }
     // Yc = last value of C(t)
-    auto ycLayer = N_CHECK(loop->addLoopOutput(*Ct1Output, nvinfer1::LoopOutput::kLAST_VALUE));
-    outputs.emplace_back(N_CHECK(ycLayer->getOutput(0)));
+    if (shouldAddOutput(2))
+    {
+        auto ycLayer = N_CHECK(loop->addLoopOutput(*Ct1Output, nvinfer1::LoopOutput::kLAST_VALUE));
+        outputs.emplace_back(N_CHECK(ycLayer->getOutput(0)));
+    }
 
     return {{outputs}};
 }
@@ -4873,13 +4915,13 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
     // Get a shape tensor containing: (numDirections, batchSize, hiddenSize)
     auto const initialStateShape = [&ctx, &numDirections, &hiddenSize, &input]() -> nvinfer1::ITensor* {
         // Get batchSize from input shape
-        nvinfer1::ITensor* numDirectionsTensor = N_CHECK(addConstantScalar(ctx, numDirections,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            nvinfer1::Dims{1, {1}})->getOutput(0));
+        nvinfer1::ITensor* numDirectionsTensor = N_CHECK(
+            addConstantScalar(ctx, numDirections, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, nvinfer1::Dims{1, {1}})
+                ->getOutput(0));
         LOG_VERBOSE("numDirectionsTensor shape: " << numDirectionsTensor->getDimensions());
-        nvinfer1::ITensor* hiddenSizeTensor = N_CHECK(addConstantScalar(ctx, hiddenSize,
-            ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
-            nvinfer1::Dims{1, {1}})->getOutput(0));
+        nvinfer1::ITensor* hiddenSizeTensor = N_CHECK(
+            addConstantScalar(ctx, hiddenSize, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, nvinfer1::Dims{1, {1}})
+                ->getOutput(0));
         LOG_VERBOSE("hiddenSizeTensor shape: " << hiddenSizeTensor->getDimensions());
         nvinfer1::ITensor* batchSizeTensor = getAxisLength(ctx, input, 1, nvinfer1::Dims{1, {1}});
         LOG_VERBOSE("batchSizeTensor shape: " << batchSizeTensor->getDimensions());
@@ -4963,12 +5005,22 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
     LOG_VERBOSE("H(t) -> " << Ht->getDimensions());
 
     std::vector<TensorOrWeights> outputs{};
+
+    // Add outputs. In ONNX, all RNN outputs are optional, so check for them here.
+    auto shouldAddOutput = [&node](int32_t index) { return index < node.output().size() && !node.output(index).empty(); };
+
     // Y = concatenation of all H(t) for each element of the sequence
-    outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
-        numDirections, inputs, direction == "reverse"));
+    if (shouldAddOutput(0))
+    {
+        outputs.emplace_back(concatenateRNNOutputs(ctx, node, loop, singlePassShape, getAxisLength(ctx, input, 0), Ht,
+            numDirections, inputs, direction == "reverse"));
+    }
     // Yh = last value of H(t)
-    outputs.emplace_back(
-        loop->addLoopOutput(*hiddenState->getOutput(0), nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0));
+    if (shouldAddOutput(1))
+    {
+        outputs.emplace_back(
+            loop->addLoopOutput(*hiddenState->getOutput(0), nvinfer1::LoopOutput::kLAST_VALUE)->getOutput(0));
+    }
 
     return {{outputs}};
 }
@@ -5022,7 +5074,7 @@ DEFINE_BUILTIN_OP_IMPORTER(RoiAlign)
     f.emplace_back("spatial_scale", &spatialScale, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node),
+    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ROIAlign plugin was not found in the plugin registry!", node, nodeIdx,
@@ -5259,7 +5311,7 @@ NodeOutputs scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     f.emplace_back("reduction", reduction.c_str(), nvinfer1::PluginFieldType::kCHAR, reduction.size());
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node),
+    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ScatterReduction plugin was not found in the plugin registry!", node,
@@ -5880,12 +5932,14 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
     auto signalReshaped = unsqueezeTensor(ctx, node, *input, {1, 2});
 
     // 1D Convolution to calculate the real part of the signal.
-    auto convReal = N_CHECK(ctx->network()->addConvolutionNd(*signalReshaped, dftUniqueBins, {2, {1, frameLength}}, realWeights, {}));
+    auto convReal = N_CHECK(
+        ctx->network()->addConvolutionNd(*signalReshaped, dftUniqueBins, {2, {1, frameLength}}, realWeights, {}));
     convReal->setStrideNd(nvinfer1::Dims{2, {1, frameStep}});
     auto* convRealOutput = N_CHECK(convReal->getOutput(0));
 
     // 1D Convolution to caclulate the imaginary part of the signal.
-    auto convImag = ctx->network()->addConvolutionNd(*signalReshaped, dftUniqueBins, {2, {1, frameLength}}, imaginaryWeights, {});
+    auto convImag
+        = ctx->network()->addConvolutionNd(*signalReshaped, dftUniqueBins, {2, {1, frameLength}}, imaginaryWeights, {});
     convImag->setStrideNd(nvinfer1::Dims{2, {1, frameStep}});
     auto* convImagOutput = N_CHECK(convImag->getOutput(0));
 
@@ -6462,7 +6516,8 @@ nvinfer1::IPluginV3Layer* addPluginLayer(ImporterContext* ctx, std::vector<nvinf
 
 template <typename TPluginCreator>
 NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const& nodeIdx,
-    std::vector<TensorOrWeights>& inputs, OnnxAttrs const& attrs, nvinfer1::IPluginCreatorInterface* creator)
+    std::string const& pluginNamespace, std::vector<TensorOrWeights>& inputs, OnnxAttrs const& attrs,
+    nvinfer1::IPluginCreatorInterface* creator)
 {
     ONNXTRT_CHECK_NODE(creator, "Invalid plugin creator.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
@@ -6510,7 +6565,7 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
 
     std::string const pluginName{node.op_type()};
 
-    auto const plugin = createPlugin(getNodeName(node), static_cast<TPluginCreator*>(creator), fields);
+    auto const plugin = createPlugin(getNodeName(node), pluginNamespace, static_cast<TPluginCreator*>(creator), fields);
 
     ONNXTRT_CHECK_NODE(plugin, "Could not create the plugin.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
@@ -6681,11 +6736,27 @@ DEFINE_BUILTIN_OP_IMPORTER(FallbackPluginImporter)
     ONNXTRT_CHECK_NODE(creator, "Plugin not found, are the plugin name, version, and namespace correct?", node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
 
-    if (std::strcmp(creator->getInterfaceInfo().kind, "PLUGIN CREATOR_V1") == 0)
+    auto const creatorVersion = getPluginCreatorVersion(creator);
+
+    switch (creatorVersion)
     {
-        return addPluginWithCreator<nvinfer1::IPluginCreator>(ctx, node, nodeIdx, inputs, attrs, creator);
+    case CreatorVersion::kV1:
+    {
+        return addPluginWithCreator<nvinfer1::IPluginCreator>(
+            ctx, node, nodeIdx, pluginNamespace, inputs, attrs, creator);
     }
-    return addPluginWithCreator<nvinfer1::IPluginCreatorV3One>(ctx, node, nodeIdx, inputs, attrs, creator);
+    case CreatorVersion::kV3ONE:
+    {
+        return addPluginWithCreator<nvinfer1::IPluginCreatorV3One>(
+            ctx, node, nodeIdx, pluginNamespace, inputs, attrs, creator);
+    }
+    case CreatorVersion::kV3QUICK:
+    {
+        return addPluginWithCreator<nvinfer1::IPluginCreatorV3Quick>(
+            ctx, node, nodeIdx, pluginNamespace, inputs, attrs, creator);
+    }
+    default: ONNXTRT_CHECK(false && "Unsupported plugin creator version.", ErrorCode::kUNSUPPORTED_NODE);
+    }
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
@@ -6738,7 +6809,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
     }
 
     // Push current function name to top of stack in order to properly set layer metadata and track attributes
-    ctx->localFunctionStack().push_back({node.op_type(), attrMap});
+    ctx->localFunctionStack().push_back({node.op_type(), getNodeName(node), attrMap});
 
     // Log current stack of functions for debugging nested functions.
     auto prettyPrintFunctionStack = [ctx]() {
@@ -6747,7 +6818,8 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
         size_t stackSize = ctx->localFunctionStack().size();
         for (size_t i = 0; i < stackSize; i++)
         {
-            stackStream << ctx->localFunctionStack()[i].first;
+            auto const& func = ctx->localFunctionStack()[i];
+            stackStream << func.nodeName << " (" << func.functionName << ")";
             if (i != stackSize - 1)
             {
                 stackStream << ", ";
@@ -6780,7 +6852,8 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
                 std::vector<char const*> localFunctionStackChar{};
                 for (size_t i = 0; i < stackSize; i++)
                 {
-                    localFunctionStackString.push_back(ctx->localFunctionStack()[i].first);
+                    auto const& func = ctx->localFunctionStack()[i];
+                    localFunctionStackString.push_back(func.nodeName + " (" + func.functionName + ")");
                 }
                 ctx->localFunctionErrors().push_back(localFunctionStackString);
                 for (size_t i = 0; i < stackSize; i++)

@@ -221,19 +221,27 @@ void parseNode(
         }
     }
 
-    ONNXTRT_CHECK_NODE((node.output().size() <= static_cast<int32_t>(outputs.size())),
+    int32_t nonEmptyOutputs
+        = std::count_if(node.output().begin(), node.output().end(), [](std::string const& str) { return !str.empty(); });
+    ONNXTRT_CHECK_NODE(nonEmptyOutputs == static_cast<int32_t>(outputs.size()),
         "Node has more output tensors than TRT expected, expected output size is "
-            << outputs.size() << ", actual output size is " << node.output().size() << ".",
+            << outputs.size() << ", actual output size is " << nonEmptyOutputs << ".",
         node, nodeIdx, ErrorCode::kINVALID_GRAPH);
 
     // Set output names and register outputs with the context.
     std::ostringstream ssOutputs{};
     ssOutputs << nodeName << " [" << node.op_type() << "] outputs: ";
-    for (int32_t i = 0; i < node.output().size(); ++i)
+    for (int32_t i = 0, trtCnt = 0; i < node.output().size(); ++i)
     {
         auto const& outputName = node.output(i);
-        auto& output = outputs.at(i);
-        ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]" << "], ";
+        // Empty strings denote null-tensor outputs. Ignore these.
+        if (outputName.empty())
+        {
+            continue;
+        }
+        auto& output = outputs.at(trtCnt);
+        ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]"
+                  << "], ";
         // Note: This condition is to allow ONNX outputs to be ignored
         // Always register output weights (even empty ones) as it may be mapped to an unused input
         if ((output || output.is_weights()) && !outputName.empty())
@@ -255,6 +263,7 @@ void parseNode(
             ONNXTRT_CHECK_NODE(legalUINT8, "TensorRT does not support UINT8 types for intermediate tensors!", node,
                 nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         }
+        trtCnt++;
     }
     LOG_VERBOSE(ssOutputs.str());
 }

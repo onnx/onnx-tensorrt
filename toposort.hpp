@@ -76,6 +76,11 @@ bool toposort(Container const& nodes, std::vector<size_t>* order)
         //       generalise it somehow.
         for (auto const& output : nodes.Get(i).output())
         {
+            // Empty output strings mean null outputs, do not register them.
+            if (output.empty())
+            {
+                continue;
+            }
             if (!node_map.emplace(output, i).second)
             {
                 // Output name appears more than once in graph!

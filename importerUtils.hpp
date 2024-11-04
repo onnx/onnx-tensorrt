@@ -12,6 +12,7 @@
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 
+#include "plugin.h"
 #include <NvInfer.h>
 
 #include "bfloat16.hpp"
@@ -26,6 +27,8 @@
 
 namespace onnx2trt
 {
+
+constexpr char const* kTRT_STD_PLUGIN_NAMESPACE = "";
 
 struct PluginDeleter
 {
@@ -241,15 +244,16 @@ nvinfer1::ITensor* iota(ImporterContext* ctx, ShapeTensor iotaDims, int32_t axis
 
 // Helper function to load a creator from the registry
 nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
-    std::string const& pluginVersion, std::string const& pluginNamespace = "");
+    std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
 
 // Helper function to get a plugin from the PluginRegistry
 std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(std::string const& name,
-    nvinfer1::IPluginCreator* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields);
+    std::string const& pluginNamespace, nvinfer1::IPluginCreator* pluginCreator,
+    std::vector<nvinfer1::PluginField> const& pluginFields);
 
 // Helper function to get a V3 plugin from the PluginRegistry
-std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, nvinfer1::IPluginCreatorV3One* pluginCreator,
-    std::vector<nvinfer1::PluginField> const& pluginFields);
+std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, std::string const& pluginNamespace,
+    nvinfer1::IPluginCreatorInterface* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields);
 
 // Helper function to return the identity of a TensorOrWeights
 TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input);
@@ -499,5 +503,16 @@ bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims, std::vec
     std::copy(onnxDimsVec.begin(), onnxDimsVec.end(), trtDims.d);
     return true;
 }
+
+//! Helper enum for TRT plugin creator versions
+enum class CreatorVersion : int32_t
+{
+    kV1,
+    kV3ONE,
+    kV3QUICK
+};
+
+//! Evaluate CreatorVersion given a pointer to a TensorRT plugin creator
+CreatorVersion getPluginCreatorVersion(nvinfer1::IPluginCreatorInterface const* pluginCreator);
 
 } // namespace onnx2trt

@@ -495,6 +495,7 @@ std::string getTrtDtypeName(nvinfer1::DataType TrtDtype)
     case nvinfer1::DataType::kFP8: return "FP8";
     case nvinfer1::DataType::kBF16: return "BF16";
     case nvinfer1::DataType::kINT64: return "INT64";
+    case nvinfer1::DataType::kINT4: return "INT4";
     default: return "<UNKNOWN>";
     }
 }
@@ -893,7 +894,8 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
 }
 
 std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(std::string const& name,
-    nvinfer1::IPluginCreator* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields)
+    std::string const& /* pluginNamespace */, nvinfer1::IPluginCreator* pluginCreator,
+    std::vector<nvinfer1::PluginField> const& pluginFields)
 {
     if (!pluginCreator)
     {
@@ -907,20 +909,71 @@ std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(std::string con
     return std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter>{pluginCreator->createPlugin(name.c_str(), &fc)};
 }
 
-std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, nvinfer1::IPluginCreatorV3One* pluginCreator,
-    std::vector<nvinfer1::PluginField> const& pluginFields)
+namespace
+{
+constexpr char const* kV1_CREATOR_IFACE_KIND = "PLUGIN CREATOR_V1";
+constexpr char const* kV3_CREATOR_ONE_IFACE_KIND = "PLUGIN CREATOR_V3ONE";
+constexpr char const* kV3_CREATOR_QUICK_IFACE_KIND = "PLUGIN CREATOR_V3QUICK";
+
+bool isKind(nvinfer1::InterfaceInfo const& info, char const* kind)
+{
+    ONNXTRT_CHECK(
+        info.kind != nullptr && "Invalid plugin creator interface with NULL kind.", ErrorCode::kUNSUPPORTED_NODE);
+    return std::strcmp(info.kind, kind) == 0;
+}
+
+} // namespace
+
+CreatorVersion getPluginCreatorVersion(nvinfer1::IPluginCreatorInterface const* pluginCreator)
+{
+    ONNXTRT_CHECK(pluginCreator != nullptr && "Null plugin creator.", ErrorCode::kINTERNAL_ERROR);
+    auto const ifaceInfo = pluginCreator->getInterfaceInfo();
+    if (isKind(ifaceInfo, kV1_CREATOR_IFACE_KIND))
+    {
+        return CreatorVersion::kV1;
+    }
+    if (isKind(ifaceInfo, kV3_CREATOR_ONE_IFACE_KIND))
+    {
+        return CreatorVersion::kV3ONE;
+    }
+    if (isKind(ifaceInfo, kV3_CREATOR_QUICK_IFACE_KIND))
+    {
+        return CreatorVersion::kV3QUICK;
+    }
+    ONNXTRT_CHECK(false && "Unknown plugin creator version.", ErrorCode::kINTERNAL_ERROR);
+}
+
+std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, std::string const& pluginNamespace,
+    nvinfer1::IPluginCreatorInterface* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields)
 {
     if (!pluginCreator)
     {
         return nullptr;
     }
 
+    auto const creatorVersion = getPluginCreatorVersion(pluginCreator);
+
+    ONNXTRT_CHECK((creatorVersion == CreatorVersion::kV3ONE || creatorVersion == CreatorVersion::kV3QUICK)
+            && "Only IPluginCreatorV3One and IPluginCreatorV3Quick are supported for V3 plugin imports.",
+        ErrorCode::kUNSUPPORTED_NODE);
+
     nvinfer1::PluginFieldCollection fc;
     fc.nbFields = pluginFields.size();
     fc.fields = pluginFields.data();
 
-    return std::unique_ptr<nvinfer1::IPluginV3>{
-        pluginCreator->createPlugin(name.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD)};
+    if (creatorVersion == CreatorVersion::kV3ONE)
+    {
+        return std::unique_ptr<nvinfer1::IPluginV3>{
+            static_cast<nvinfer1::IPluginCreatorV3One*>(pluginCreator)
+                ->createPlugin(name.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD)};
+    }
+    else if (creatorVersion == CreatorVersion::kV3QUICK)
+    {
+        return std::unique_ptr<nvinfer1::IPluginV3>{
+            static_cast<nvinfer1::IPluginCreatorV3Quick*>(pluginCreator)
+                ->createPlugin(name.c_str(), pluginNamespace.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD)};
+    }
+    ONNXTRT_CHECK(false && "Found invalid creator version when creating a V3 plugin.", ErrorCode::kINTERNAL_ERROR);
 }
 
 NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
@@ -1115,8 +1168,8 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     f.emplace_back("dilation", dilationValues.data(), nvinfer1::PluginFieldType::kINT32, listAttrSize);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(
-        pluginName, static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
+    auto const plugin = createPlugin(pluginName, kTRT_STD_PLUGIN_NAMESPACE,
+        static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ModulatedDeformConv2d plugin was not found in the plugin registry!", node,
         nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
@@ -1232,7 +1285,7 @@ NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     f.emplace_back("alpha", &alpha, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node),
+    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "InstanceNormalization plugin was not found in the plugin registry!", node,
@@ -1880,6 +1933,14 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
         layer->setInput(2, *biasTensor);
     }
     ctx->registerLayer(layer, node);
+    if (kernelWeights)
+    {
+        ctx->network()->setWeightsName(kernelWeights, inputs.at(1).getName().c_str());
+    }
+    if (biasWeights && inputs.size() == 3)
+    {
+        ctx->network()->setWeightsName(biasWeights, inputs.at(2).getName().c_str());
+    }
 
     nvinfer1::ITensor* outputTensor = N_CHECK(layer->getOutput(0));
     if (needToExpandDims)
@@ -2150,12 +2211,10 @@ void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
 
     std::string metadata = "[ONNX Layer: " + getNodeName(node);
 
-    // Get Local Function
-    if (!ctx->localFunctionStack().empty())
+    // Generate local function stack string.
+    for (auto it = ctx->localFunctionStack().crbegin(); it < ctx->localFunctionStack().crend(); ++it)
     {
-        // Log name only
-        std::string localFunction = " | Local Function: " + ctx->localFunctionStack().back().first;
-        metadata += localFunction;
+        metadata += " | " + it->nodeName + " (" + it->functionName + ")";
     }
 
     metadata += "]";

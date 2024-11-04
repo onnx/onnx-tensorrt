@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "NvInferRuntimeCommon.h"
+#include "NvInferRuntime.h"
 #include <atomic>
 #include <cstdint>
 #include <exception>

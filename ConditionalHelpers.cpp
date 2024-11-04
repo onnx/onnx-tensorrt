@@ -10,32 +10,17 @@
 namespace onnx2trt
 {
 
-using NodeName = std::string;
-using LayerName = std::string;
-using InputIndex = int32_t;
-
-// A SubgraphPortsMap maps either the inputs or outputs ports of each node in an ONNX graph.
-using SubgraphPortsMap = std::unordered_map<nvinfer1::ITensor*, std::set<InputIndex>>;
-
-// An InputsMap tracks which IIfConditionalInputLayer we've added to a layer's inputs,
-// so that we can reuse them if needed.
-using InputsMap = std::unordered_map<LayerName, nvinfer1::IIfConditionalInputLayer*>;
-
-// Search for a network Layer name in a SubgraphPortsMap using partial (prefix) name matching.
-// ONNX nodes are matched to network layers using prefix-matching because an ONNX node may have
-// several network layers associcated with it.
+// Search for a network Layer name in a SubgraphPortsMap.
 SubgraphPortsMap::const_iterator findLayer(const SubgraphPortsMap& inputs, const std::string layerName)
 {
-    return std::find_if(inputs.begin(), inputs.end(), [&](const auto& item) {
-        std::string const key = item.first->getName();
-        return layerName.compare(0, key.size(), key) == 0;
-    });
+    return std::find_if(
+        inputs.begin(), inputs.end(), [&](const auto& item) { return layerName == item.first->getName(); });
 }
 
 // Add an ConditionalInputLayer between `layer` and its inputs.
 // I.e. input[inIdx] -> layer ==> input[inIdx] -> ConditionalInputLayer -> layer.
 void addConditionalInputLayer(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    nvinfer1::ILayer& layer, int32_t inIdx)
+    nvinfer1::ILayer& layer, int32_t inIdx, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     auto input = layer.getInput(inIdx);
     if (input == nullptr)
@@ -57,7 +42,7 @@ void addConditionalInputLayer(ImporterContext* ctx, nvinfer1::IIfConditional* co
         inputLayer = N_CHECK(conditional->addInput(*input));
         inputsMap[name] = inputLayer;
         const std::string inputLayerName(name);
-        ctx->registerLayer(inputLayer, inputLayerName + "_InputLayer", nullptr);
+        ctx->registerLayer(inputLayer, inputLayerName + "_InputLayer", node);
         // Note: Since multiple conditionals may use the same external tensor, check unique names for output tensors of
         // IfConditionalInputLayers to avoid tensor name duplication.
         ctx->registerTensor(
@@ -100,7 +85,7 @@ void importSubgraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& su
 
 // Add an IConditionalInputLayer to `layer`'s inputs, if they don't already exist.
 void addConditionalInputIfNeeded(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    nvinfer1::ILayer& layer, SubgraphPortsMap subgraphInputsMap)
+    nvinfer1::ILayer& layer, SubgraphPortsMap subgraphInputsMap, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     // Return all of the layer's inputs that are external to the subgraph that
     // that the layer belongs to.
@@ -120,36 +105,29 @@ void addConditionalInputIfNeeded(ImporterContext* ctx, nvinfer1::IIfConditional*
     for (auto inIdx : inIndices)
     {
         LOG_VERBOSE("Adding Input layer for " << layer.getName());
-        addConditionalInputLayer(ctx, conditional, inputsMap, layer, inIdx);
+        addConditionalInputLayer(ctx, conditional, inputsMap, layer, inIdx, node);
     }
 }
 
 // Add IConditionalInputLayers to `layer`'s inputs.
 void addIfInputLayers(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    const std::vector<nvinfer1::ILayer*>& newLayers)
+    const std::vector<nvinfer1::ILayer*>& newLayers, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     // Find all of the tensors entering the subgraph.
-    // The node-names are from the ONNX context.
-    using InputIndex = int32_t;
-    std::unordered_map<nvinfer1::ITensor*, std::set<InputIndex>> subgraphInputsMap;
-    getSubgraphInputs(newLayers, subgraphInputsMap);
+    SubgraphPortsMap externalInputs;
+    getSubgraphInputs(newLayers, externalInputs);
 
     // Add a ConditionalInputLayer in front of each input that is external to the subgraph.
     for (const auto& layer : newLayers)
     {
-        addConditionalInputIfNeeded(ctx, conditional, inputsMap, *layer, subgraphInputsMap);
+        addConditionalInputIfNeeded(ctx, conditional, inputsMap, *layer, externalInputs, node);
     }
 }
 
-// Given a subgraph, find all of its external inputs/outputs (tensors entering/exiting the subgraph).
-void getSubgraphTensors(const std::vector<nvinfer1::ILayer*>& newLayers,
-    std::unordered_map<nvinfer1::ITensor*, std::set<int32_t>>& externalOutputs, bool extractOutputs,
-    const std::vector<std::string>* reportedOutputs = nullptr)
+// Given a subgraph, find all of its external inputs (tensors entering the subgraph).
+void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, SubgraphPortsMap& externalInputs)
 {
-    using NodeName = std::string;
-    using TensorName = std::string;
     using PortIndex = int32_t;
-    using Port = std::pair<NodeName, PortIndex>;
     using TensorsSet = std::unordered_set<nvinfer1::ITensor*>;
     TensorsSet outputTensors;
     TensorsSet inputTensors;
@@ -176,20 +154,14 @@ void getSubgraphTensors(const std::vector<nvinfer1::ILayer*>& newLayers,
     }
 
     using TensorsVec = std::vector<nvinfer1::ITensor*>;
-    auto getOutputs = [&](nvinfer1::ILayer const* l, TensorsVec& res) {
-        getTensors(l, false, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
-    };
-
     auto getInputs = [&](nvinfer1::ILayer const* l, TensorsVec& res) {
         getTensors(l, true, [&](nvinfer1::ITensor* t) { res.emplace_back(t); });
     };
 
     // Retrieve the list of tensors either exiting or entering the subgraph.
-    std::unordered_map<nvinfer1::ITensor*, std::vector<Port>> externalPortsMap;
     auto filterTensors = [&](TensorsSet const& tensors, auto getNodeAccessor) {
         for (nvinfer1::ILayer const* l : newLayers)
         {
-            const auto& nodeName = l->getName();
             PortIndex i = 0;
 
             TensorsVec nodeAccessor;
@@ -202,66 +174,14 @@ void getSubgraphTensors(const std::vector<nvinfer1::ILayer*>& newLayers,
                 }
                 if (tensors.count(tensor) == 0)
                 {
-                    TensorName tensorName = tensor->getName();
-                    auto prefixFound = false;
-                    if (reportedOutputs)
-                    {
-                        // reportedOutputs are the names of the outputs as reported by the ONNX parser and help
-                        // us further filter the output tensors.
-                        //      Exiting tensors := {outputs} - {inputs} - {unreported tensors}
-                        // An example: a Split node is internal to a subgraph and has 4 outputs, but only two are
-                        // connected to the rest of the graph.  To prevent mistaking the 2 unused outputs as subgraph
-                        // outputs, we look for them in reportedOutputs which leads us to ignore the 2 tensors.
-                        const auto iter = std::find_if(
-                            reportedOutputs->begin(), reportedOutputs->end(), [&](const auto& outputName) {
-                                // Prefix name matching.
-                                return tensorName.compare(0, outputName.size(), outputName) == 0;
-                            });
-                        prefixFound = iter != reportedOutputs->end();
-                    }
-                    if (!reportedOutputs || prefixFound)
-                    {
-                        externalPortsMap[tensor].push_back(std::make_pair(nodeName, i));
-                    }
+                    externalInputs[l].insert(i);
                 }
                 i++;
             }
         }
     };
 
-    if (extractOutputs)
-    {
-        filterTensors(inputTensors, getOutputs);
-    }
-    else
-    {
-        filterTensors(outputTensors, getInputs);
-    }
-
-    // Create the user's view of the external inputs, which uses the node-name as the key for
-    // looking up input/output port index.
-    for (auto const& input : externalPortsMap)
-    {
-        for (const Port& inPort : input.second)
-        {
-            auto* tensor = input.first;
-            auto const portIndex = inPort.second;
-            externalOutputs[tensor].insert(portIndex);
-        }
-    }
-}
-
-void getSubgraphOutputs(const std::vector<nvinfer1::ILayer*>& newLayers,
-    std::unordered_map<nvinfer1::ITensor*, std::set<int32_t>>& externalOutputs,
-    const std::vector<std::string>& reportedOutputs)
-{
-    getSubgraphTensors(newLayers, externalOutputs, true, &reportedOutputs);
-}
-
-void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers,
-    std::unordered_map<nvinfer1::ITensor*, std::set<int32_t>>& externalInputs)
-{
-    getSubgraphTensors(newLayers, externalInputs, false);
+    filterTensors(outputTensors, getInputs);
 }
 
 } // namespace onnx2trt

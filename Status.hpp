@@ -83,7 +83,8 @@
         std::vector<char const*> localFunctionStackChar{};                                                             \
         for (size_t i = 0; i < stackSize; i++)                                                                         \
         {                                                                                                              \
-            localFunctionStackString.push_back(ctx->localFunctionStack()[i].first);                                    \
+            auto const& func = ctx->localFunctionStack()[i];                                                           \
+            localFunctionStackString.push_back(func.nodeName + " (" + func.functionName + ")");                        \
         }                                                                                                              \
         ctx->localFunctionErrors().push_back(localFunctionStackString);                                                \
         for (size_t i = 0; i < stackSize; i++)                                                                         \

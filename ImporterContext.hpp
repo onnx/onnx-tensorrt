@@ -138,8 +138,17 @@ class ImporterContext
     //! Map holding FunctionProtos
     StringMap<::ONNX_NAMESPACE::FunctionProto> mLocalFunctions;
 
+    //! Data type to keep track of a local function in mLocalFunctionStack.
+    //! It is a tuple of three elements: (1) function name (2) node name and (3) function attributes.
+    struct LocalFunctionMetadata
+    {
+        std::string functionName;
+        std::string nodeName;
+        StringMap<::ONNX_NAMESPACE::AttributeProto const*> attrs;
+    };
+
     //! Vector to hold current local function names and attributes
-    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>> mLocalFunctionStack;
+    std::vector<LocalFunctionMetadata> mLocalFunctionStack;
 
     //! Vector to hold the local function names at each error
     std::vector<std::vector<std::string>> mLocalFunctionErrors;
@@ -325,7 +334,7 @@ public:
     {
         return mLocalFunctions;
     }
-    std::vector<std::pair<std::string, StringMap<::ONNX_NAMESPACE::AttributeProto const*>>>& localFunctionStack()
+    std::vector<LocalFunctionMetadata>& localFunctionStack()
     {
         return mLocalFunctionStack;
     }
