@@ -209,23 +209,27 @@ NodeOutputs batchnormFallback(
     nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
     int32_t const rank = input.getDimensions().nbDims;
 
-    nvinfer1::ITensor* scale = &convertToTensor(inputs.at(1), ctx);
-    nvinfer1::ITensor* bias = &convertToTensor(inputs.at(2), ctx);
-    nvinfer1::ITensor* mean = &convertToTensor(inputs.at(3), ctx);
-    nvinfer1::ITensor* variance = &convertToTensor(inputs.at(4), ctx);
+    std::array<nvinfer1::ITensor*, 4> tensors = {
+        &convertToTensor(inputs.at(1), ctx),
+        &convertToTensor(inputs.at(2), ctx),
+        &convertToTensor(inputs.at(3), ctx),
+        &convertToTensor(inputs.at(4), ctx),
+    };
 
-    // Reshape batchnorm weights from [C] to [N, C, ...]
+    // Alias tensors for convenience
+    auto& [scale, bias, mean, variance] = tensors;
+
+    // Reshape batchnorm weights from [C] to [N, C, ...] for elementwise operations.
     bool const needsExpandDims = rank > 1;
     if (needsExpandDims)
     {
         std::vector<int32_t> axes(rank - 1);
         axes[0] = 0;
         std::iota(axes.begin() + 1, axes.end(), 2);
-
-        scale = unsqueezeTensor(ctx, node, *scale, axes);
-        bias = unsqueezeTensor(ctx, node, *bias, axes);
-        mean = unsqueezeTensor(ctx, node, *mean, axes);
-        variance = unsqueezeTensor(ctx, node, *variance, axes);
+        for (auto*& t : tensors)
+        {
+            t = unsqueezeTensor(ctx, *t, axes);
+        }
     }
 
     OnnxAttrs attrs(node, ctx);
@@ -251,6 +255,17 @@ NodeOutputs batchnormFallback(
         epsLayer = addConstantScalar(ctx, eps, ::ONNX_NAMESPACE::TensorProto::FLOAT, scalarShape);
     }
     nvinfer1::ITensor* epsilon = N_CHECK(epsLayer->getOutput(0));
+
+    // For stronglyTyped networks, cast BatchNormalization parameters to the same type as the input type.
+    if (ctx->isStronglyTyped())
+    {
+        LOG_VERBOSE("Casting BatchNormalization parameters to the same type as input for StronglyTyped networks.");
+        for (auto*& t : tensors)
+        {
+            t = castHelper(ctx, t, input.getType());
+        }
+        epsilon = castHelper(ctx, epsilon, input.getType());
+    }
 
     // batchnorm = scale * (input - mean) / sqrt(variance + epsilon) + bias
     // The WAR is split the single c++ code line into 3 to avoid the sequence swap by compiler.
@@ -326,15 +341,22 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     bool const allInputsWeights = inputs.at(1).is_weights() && inputs.at(2).is_weights() && inputs.at(3).is_weights()
         && inputs.at(4).is_weights();
 
+    // If any input is not an initializer, use fallback method implementing batchnorm as a combination of elementwise
+    // layers.
     if (!allInputsWeights)
     {
+        LOG_VERBOSE("Found BatchNormalization node with non-initializer inputs, using Elementwise fallback");
         return batchnormFallback(ctx, node, nodeIdx, inputs);
     }
 
+    // If all inputs are weights of the same type, then combine the weights into a single scale layer.
     auto tensorType = inputs.at(0).getType();
-    if (tensorType == inputs.at(1).getType() && tensorType == inputs.at(2).getType()
-        && tensorType == inputs.at(3).getType() && tensorType == inputs.at(4).getType())
+    bool allWeightsSameType = tensorType == inputs.at(1).getType() && tensorType == inputs.at(2).getType()
+        && tensorType == inputs.at(3).getType() && tensorType == inputs.at(4).getType();
+    if (allWeightsSameType)
     {
+        LOG_VERBOSE(
+            "Found BatchNormalization node with conforming initializer types. Combining into a single scale node.");
         if (tensorType == "FLOAT")
         {
             return batchnormWeightHelper<float>(ctx, node, nodeIdx, inputs);
@@ -350,7 +372,17 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
         ONNXTRT_CHECK_NODE(false, "Invalid data type provided for BatchNormalization", node, nodeIdx,
             ErrorCode::kUNSUPPORTED_NODE_DATATYPE);
     }
+    // With weights of different types, use fallback method to cast weights to the input type for stronglyTyped
+    // networks.
+    else if (ctx->isStronglyTyped())
+    {
+        return batchnormFallback(ctx, node, nodeIdx, inputs);
+    }
 
+    // For weakly-typed networks, cast everything to FP32 for consistency.
+    LOG_VERBOSE(
+        "Found BatchNormalization node with non-conforming initializer types. Casting parameters to FP32 and combining "
+        "into a single scale node.");
     auto const scale = inputs.at(1).weights();
     auto const bias = inputs.at(2).weights();
     auto const mean = inputs.at(3).weights();
@@ -821,7 +853,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> axes{3};
-        tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK_NODE(tensorPtr, "Failed to unsqueeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         dims = tensorPtr->getDimensions();
     }
@@ -915,7 +947,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> axes{3};
-        tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK_NODE(tensorPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
@@ -937,7 +969,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
         if (tensor && tensor->getDimensions().nbDims == 3)
         {
             std::vector<int32_t> const axes{3};
-            tensor = unsqueezeTensor(ctx, node, *tensor, axes);
+            tensor = unsqueezeTensor(ctx, *tensor, axes);
             tensorShape = tensor->getDimensions();
             return true;
         }
@@ -1173,7 +1205,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     if (needReshapeBack)
     {
         std::vector<int32_t> axes{3};
-        tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK_NODE(tensorPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
@@ -1255,7 +1287,7 @@ DEFINE_BUILTIN_OP_IMPORTER(CumSum)
     auto data = N_CHECK(iterator->getOutput(0));
 
     // Squeeze inputSliced down to same shape as `data`
-    inputSliced = squeezeTensor(ctx, node, *inputSliced, {axis});
+    inputSliced = squeezeTensor(ctx, *inputSliced, {axis});
     auto zeroTensor = createZeroTensor(ctx, inputSliced);
     auto runningSum = loop->addRecurrence(*zeroTensor);
     auto runningSumTensor = N_CHECK(runningSum->getOutput(0));
@@ -1482,9 +1514,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     auto const& scaleDims = scaleInput->getDimensions();
     auto const& scaleType = scaleInput->getType();
 
-    ONNXTRT_CHECK_NODE(!isDynamic(scaleDims), "Dynamic shape for scale tensor is not supported.", node, nodeIdx,
-        ErrorCode::kUNSUPPORTED_NODE_DYNAMIC);
-    auto const& scaleSize = volume(scaleDims);
+    auto const& scaleSize = isDynamic(scaleDims) ? 0 : volume(scaleDims);
 
     // Input 2 initializes the layer's zero-point.
     nvinfer1::ITensor* zeroPointInput = nullptr;
@@ -1566,7 +1596,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
                 zeroPointInput = addConstantLayer(*ctx->network(), fpZeroPoint);
             }
 
-            if (zeroPointInput)
+            if (zeroPointInput && !isDynamic(scaleDims))
             {
                 auto const zeroPointSize = volume(zeroPointInput->getDimensions());
                 // ONNX may represent a scalar using either 0-D or 1-D, so compare sizes instead of shapes.
@@ -1598,7 +1628,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         {
             axis = 0;
         }
-        if (scaleDims.nbDims == 1)
+        if (scaleDims.nbDims == 1 && !isDynamic(scaleDims))
         {
             // Ensure that number of scale-coefficients is equal to the number of output channels.
             int64_t const K = dataInput->getDimensions().d[axis];
@@ -1610,7 +1640,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         else if (scaleDims.nbDims == inputDims.nbDims)
         {
             // Exactly one dimension is blocked, other should have the same dimension as the input
-            if (!isDynamic(inputDims))
+            if (!isDynamic(inputDims) && !isDynamic(scaleDims))
             {
                 int32_t rank = inputDims.nbDims;
                 std::vector<int32_t> blockDims(rank);
@@ -1664,7 +1694,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             + getTrtDtypeName(chosenDataType) + ".",
         node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
 
-    bool stronglyTyped = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    bool stronglyTyped = ctx->isStronglyTyped();
     if (isDQ)
     {
         // Add and configure a DequantizeLayer.
@@ -2717,7 +2747,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Hardmax)
 
     auto* topKLayer = N_CHECK(ctx->network()->addTopK(*values, nvinfer1::TopKOperation::kMAX, /* k */ 1, axisMask));
 
-    auto* squeezedIndices = squeezeTensor(ctx, node, *topKLayer->getOutput(1), {axis});
+    auto* squeezedIndices = squeezeTensor(ctx, *topKLayer->getOutput(1), {axis});
     auto* zeroOneTensor = N_CHECK(addConstant(ctx, std::vector<int32_t>{0, 1},
         ::ONNX_NAMESPACE::TensorProto_DataType_INT32,
         nvinfer1::Dims{1, {2}})->getOutput(0));
@@ -2866,10 +2896,6 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     auto scaleDataType = inputs.at(1).getDataType();
     auto biasDataType = inputs.at(2).getDataType();
 
-    ONNXTRT_CHECK_NODE((inputDataType == DataType::kFLOAT || inputDataType == DataType::kHALF),
-        "Inputs must be either FLOAT or FLOAT16. Input type is " + getTrtDtypeName(inputDataType) + ".", node, nodeIdx,
-        ErrorCode::kINVALID_NODE);
-
     ONNXTRT_CHECK_NODE((inputDataType == scaleDataType && scaleDataType == biasDataType),
         "Inputs must be either all FLOAT or all FLOAT16. Input type = " + getTrtDtypeName(inputDataType)
             + ", scale type = " + getTrtDtypeName(scaleDataType) + ", bias type = " + getTrtDtypeName(biasDataType)
@@ -2883,6 +2909,10 @@ DEFINE_BUILTIN_OP_IMPORTER(InstanceNormalization)
     {
         return normalizationHelper(ctx, node, nodeIdx, inputs);
     }
+    ONNXTRT_CHECK_NODE((inputDataType == DataType::kFLOAT || inputDataType == DataType::kHALF),
+        "Inputs to InstanceNorm plugin must be either FLOAT or FLOAT16. Input type is " + getTrtDtypeName(inputDataType)
+            + ".",
+        node, nodeIdx, ErrorCode::kINVALID_NODE);
     return instanceNormPluginHelper(ctx, node, nodeIdx, inputs);
 }
 
@@ -2987,7 +3017,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
 
     auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
-    auto const stronglyTyped = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    auto const stronglyTyped = ctx->isStronglyTyped();
     if (!stronglyTyped)
     {
         layer->setComputePrecision(computeType);
@@ -3327,7 +3357,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
         nvinfer1::ISliceLayer* isolatePeephole
             = N_CHECK(ctx->network()->addSlice(*peephole, nvinfer1::Dims2{0, gateIndex * hiddenSize},
                 nvinfer1::Dims2{numDirections, hiddenSize}, nvinfer1::Dims2{1, 1}));
-        auto* peepholeWeights = unsqueezeTensor(ctx, node, *isolatePeephole->getOutput(0), std::vector<int32_t>{1});
+        auto* peepholeWeights = unsqueezeTensor(ctx, *isolatePeephole->getOutput(0), std::vector<int32_t>{1});
         LOG_VERBOSE("Peephole weight for gate: " << gateIndex << " shape: " << peepholeWeights->getDimensions());
 
         return getElementWiseResult(
@@ -3629,7 +3659,7 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     {
         // The second input is 1-D vector, promote to matrix by appending 1 in shape.
         std::vector<int32_t> axes{1};
-        inputB = unsqueezeTensor(ctx, node, *inputB, axes);
+        inputB = unsqueezeTensor(ctx, *inputB, axes);
         needSqueezeTail = true;
     }
     else if (t1Dims < t2Dims && t1Dims == 1)
@@ -3656,13 +3686,13 @@ DEFINE_BUILTIN_OP_IMPORTER(MatMul)
     {
         // After MM we need remove the prepended 1.
         std::vector<int32_t> axes{0};
-        outputTensor = squeezeTensor(ctx, node, *outputTensor, axes);
+        outputTensor = squeezeTensor(ctx, *outputTensor, axes);
     }
     if (needSqueezeTail)
     {
         // After MM we need remove the appended 1.
         std::vector<int32_t> axes{outputTensor->getDimensions().nbDims - 1};
-        outputTensor = squeezeTensor(ctx, node, *outputTensor, axes);
+        outputTensor = squeezeTensor(ctx, *outputTensor, axes);
     }
 
     return {{outputTensor}};
@@ -5732,24 +5762,13 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
     // "data : T
     // Tensor with at least max(dims) dimensions."
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
-    std::vector<int32_t> axes;
+    nvinfer1::ITensor* axesTensor{nullptr};
     // In opset >= 13, axes are an optional input
     if (ctx->getOpsetVersion() >= 13)
     {
         if (inputs.size() == 2)
         {
-            assertIsWeights(inputs.at(1), "Squeeze axes input must be an initializer!");
-            // Map weights value to axes
-            auto axesWeights = inputs.at(1).weights();
-            int64_t* axesValues = static_cast<int64_t*>(axesWeights.values);
-            for (size_t i = 0; i < axesWeights.count(); i++)
-            {
-                int64_t axesValue = axesValues[i];
-                ONNXTRT_CHECK_NODE(axesValue >= std::numeric_limits<int32_t>::min()
-                        && axesValue <= std::numeric_limits<int32_t>::max(),
-                    "Axes value truncated.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_DATATYPE);
-                axes.push_back(axesValues[i]);
-            }
+            axesTensor = &convertToTensor(inputs.at(1), ctx);
         }
     }
     // Pre-opset 13 axes are provided as an attribute
@@ -5758,18 +5777,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
         OnnxAttrs attrs(node, ctx);
         if (attrs.count("axes"))
         {
-            axes = attrs.get<std::vector<int>>("axes");
+            std::vector<int64_t> axes = attrs.get<std::vector<int64_t>>("axes");
+            axesTensor = N_CHECK(
+                addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT64, {1, {static_cast<int64_t>(axes.size())}})
+                    ->getOutput(0));
         }
     }
 
     // If axes are ommitted, squeeze all dimensions with values 1
-    if (axes.size() == 0)
+    if (!axesTensor)
     {
         auto const shape = data.getDimensions();
         ONNXTRT_CHECK_NODE(!isDynamic(shape),
             "Cannot infer squeeze dimensions from a dynamic shape! Please re-export your model with the Squeeze axes "
             "input set.",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_DYNAMIC);
+        std::vector<int64_t> axes{};
         for (int32_t i = 0; i < shape.nbDims; i++)
         {
             if (shape.d[i] == 1)
@@ -5777,21 +5800,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
                 axes.push_back(i);
             }
         }
+        axesTensor = N_CHECK(
+            addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT64, {1, {static_cast<int64_t>(axes.size())}})
+                ->getOutput(0));
     }
 
-    int32_t rank = data.getDimensions().nbDims;
-    for (auto& axis : axes)
-    {
-        convertAxis(axis, rank, node, nodeIdx);
-    }
+    ONNXTRT_CHECK_NODE(
+        axesTensor != nullptr, "Failed to create squeeze axes!", node, nodeIdx, ErrorCode::kINTERNAL_ERROR);
+
+    // Unsqueeze axes may be a scalar. Convert to a vector if neccessary.
+    axesTensor = convertScalarToVector(ctx, axesTensor);
 
     // "squeezed : T
     // Reshaped tensor with same data as input."
-    auto* squeezed = squeezeTensor(ctx, node, data, axes, true);
-
-    ONNXTRT_CHECK_NODE(squeezed, "Failed to squeeze tensor!", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-
-    return {{squeezed}};
+    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(data, *axesTensor));
+    ctx->registerLayer(squeezeLayer, node);
+    RETURN_FIRST_OUTPUT(squeezeLayer, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(STFT)
@@ -5838,7 +5862,7 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
     if (dims.nbDims == 3)
     {
         std::vector<int32_t> const axes{2};
-        input = squeezeTensor(ctx, node, *input, axes);
+        input = squeezeTensor(ctx, *input, axes);
     }
 
     // Float only support.
@@ -5929,7 +5953,7 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
     }
 
     // Unsqueeze input to [batch, 1, 1, numFrames]
-    auto signalReshaped = unsqueezeTensor(ctx, node, *input, {1, 2});
+    auto signalReshaped = unsqueezeTensor(ctx, *input, {1, 2});
 
     // 1D Convolution to calculate the real part of the signal.
     auto convReal = N_CHECK(
@@ -6025,7 +6049,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int> axes{1};
-        tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK_NODE(tensorPtr, "Failed to unsqueeze input x.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
@@ -6060,9 +6084,9 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> axes{1};
-        values = squeezeTensor(ctx, node, *values, axes);
+        values = squeezeTensor(ctx, *values, axes);
         ONNXTRT_CHECK_NODE(values, "Failed to squeeze the input values.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-        indices = squeezeTensor(ctx, node, *indices, axes);
+        indices = squeezeTensor(ctx, *indices, axes);
         ONNXTRT_CHECK_NODE(
             indices, "Failed to squeeze the input indices.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
@@ -6141,8 +6165,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Trilu)
     {
         std::vector<int32_t> batchDims(nbDims - 2);
         std::iota(batchDims.begin(), batchDims.end(), 0);
-        rows = unsqueezeTensor(ctx, node, *rows, batchDims);
-        cols = unsqueezeTensor(ctx, node, *cols, batchDims);
+        rows = unsqueezeTensor(ctx, *rows, batchDims);
+        cols = unsqueezeTensor(ctx, *cols, batchDims);
     }
 
     // For lower Trilus, use greaterOrEquals. For upper Trilus, use lessOrEquals
@@ -6159,7 +6183,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
     // "data : T
     // Original tensor"
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
-    std::vector<int32_t> axes;
+    nvinfer1::ITensor* axesTensor{nullptr};
 
     if (ctx->getOpsetVersion() >= 13)
     {
@@ -6168,37 +6192,31 @@ DEFINE_BUILTIN_OP_IMPORTER(Unsqueeze)
         // https://github.com/onnx/onnx/blob/master/docs/Changelog.md#unsqueeze-13
         if (inputs.size() == 2)
         {
-            ShapeTensor const axesInput{ctx, inputs.at(1)};
-            ONNXTRT_CHECK_NODE(axesInput.allValuesKnown(),
-                "Axes input for unsqueeze operation should be a constant tensor.", node, nodeIdx,
-                ErrorCode::kUNSUPPORTED_NODE);
-            for (auto& a : axesInput)
-            {
-                axes.push_back(a);
-            }
+            axesTensor = &convertToTensor(inputs.at(1), ctx);
         }
     }
 
-    if (axes.empty())
+    if (!axesTensor)
     {
         OnnxAttrs attrs(node, ctx);
         // "axes : list of ints (required)
         // List of integers indicating the dimensions to be inserted."
-        axes = attrs.get<std::vector<int32_t>>("axes");
+        std::vector<int64_t> axes = attrs.get<std::vector<int64_t>>("axes");
+        axesTensor = N_CHECK(
+            addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT64, {1, {static_cast<int64_t>(axes.size())}})
+                ->getOutput(0));
     }
-    // "Negative value means counting dimensions from the back."
-    int32_t const newSize = data.getDimensions().nbDims + axes.size();
-    for (auto& axis : axes)
-    {
-        convertAxis(axis, newSize, node, nodeIdx);
-    }
+
+    // Unsqueeze axes may be a scalar. Convert to a vector if neccessary.
+    axesTensor = convertScalarToVector(ctx, axesTensor);
+
+    ONNXTRT_CHECK_NODE(
+        axesTensor != nullptr, "Failed to create unsqueeze axes!", node, nodeIdx, ErrorCode::kINTERNAL_ERROR);
     // "expanded : T
     // Reshaped tensor with same data as input."
-    auto* expanded = unsqueezeTensor(ctx, node, data, axes, true);
-
-    ONNXTRT_CHECK_NODE(expanded, "Failed to unsqueeze tensor!", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-
-    return {{expanded}};
+    auto* unsqueezeLayer = N_CHECK(ctx->network()->addUnsqueeze(data, *axesTensor));
+    ctx->registerLayer(unsqueezeLayer, node);
+    RETURN_FIRST_OUTPUT(unsqueezeLayer, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Upsample)

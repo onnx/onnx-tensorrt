@@ -378,6 +378,13 @@ public:
     {
         return mBaseNameScopeStack.size();
     }
+
+    // Returns if the underlying network was created with the KSTRONGLY_TYPED flag.
+    bool const isStronglyTyped()
+    {
+        assert(mNetwork != nullptr);
+        return mNetwork->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
+    }
 };
 
 typedef std::vector<TensorOrWeights> NodeOutputs;

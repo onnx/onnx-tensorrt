@@ -175,6 +175,9 @@ protected:
 //!
 //! \brief an object for parsing ONNX models into a TensorRT network definition
 //!
+//! \warning If the ONNX model has a graph output with the same name as a graph input,
+//!          the output will be renamed by prepending "__".
+//!
 //! \warning Do not inherit from this class, as doing so will break forward-compatibility of the API and ABI.
 //!
 class IParser

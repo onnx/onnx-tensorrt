@@ -159,7 +159,7 @@ NodeOutputs argMinMaxHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePr
     if (!keepdims)
     {
         std::vector<int32_t> axes{axis};
-        indices = squeezeTensor(ctx, node, *indices, axes);
+        indices = squeezeTensor(ctx, *indices, axes);
     }
     // TensorRT doesn't support int64 for TopK indices
     indices = castHelper(ctx, indices, nvinfer1::DataType::kINT64);
@@ -475,6 +475,16 @@ nvinfer1::ITensor* convertToScalar(TensorOrWeights& input, ImporterContext* ctx)
     }
     auto* scalarLayer = N_CHECK(ctx->network()->addConstant(nvinfer1::Dims{0, {0}}, weights));
     return N_CHECK(scalarLayer->getOutput(0));
+}
+
+nvinfer1::ITensor* convertScalarToVector(ImporterContext* ctx, nvinfer1::ITensor* input)
+{
+    if (input->getDimensions().nbDims != 0)
+    {
+        return input;
+    }
+    std::vector<int32_t> axes{0};
+    return unsqueezeTensor(ctx, *input, axes);
 }
 
 int divCeil(int n, int d)
@@ -1070,9 +1080,9 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> const axes{3};
-        inputXPtr = unsqueezeTensor(ctx, node, *inputXPtr, axes);
-        weightPtr = unsqueezeTensor(ctx, node, *weightPtr, axes);
-        offsetPtr = unsqueezeTensor(ctx, node, *offsetPtr, axes);
+        inputXPtr = unsqueezeTensor(ctx, *inputXPtr, axes);
+        weightPtr = unsqueezeTensor(ctx, *weightPtr, axes);
+        offsetPtr = unsqueezeTensor(ctx, *offsetPtr, axes);
         ONNXTRT_CHECK(inputXPtr && "Failed to unsqueeze the input tensor.", ErrorCode::kUNSUPPORTED_NODE);
         ONNXTRT_CHECK(weightPtr && "Failed to unsqueeze the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
         ONNXTRT_CHECK(offsetPtr && "Failed to unsqueeze the offset tensor.", ErrorCode::kUNSUPPORTED_NODE);
@@ -1187,7 +1197,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
         {
             // Expand spatial dims from 1D to 2D
             std::vector<int32_t> const axes{3};
-            maskPtr = unsqueezeTensor(ctx, node, *maskPtr, axes);
+            maskPtr = unsqueezeTensor(ctx, *maskPtr, axes);
             ONNXTRT_CHECK(maskPtr && "Failed to unsqueeze the mask tensor.", ErrorCode::kUNSUPPORTED_NODE);
         }
     }
@@ -1233,7 +1243,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> const axes{3};
-        outputPtr = squeezeTensor(ctx, node, *outputPtr, axes);
+        outputPtr = squeezeTensor(ctx, *outputPtr, axes);
         ONNXTRT_CHECK_NODE(outputPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
@@ -1259,7 +1269,7 @@ NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> const axes{3};
-        tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK(tensorPtr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
     }
     auto scaleWeights = inputs.at(1).weights();
@@ -1299,7 +1309,7 @@ NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> const axes{3};
-        tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK_NODE(tensorPtr, "Failed to squeeze tensor.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
@@ -1381,8 +1391,8 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
         unsqueezeAxes.push_back(i);
     }
 
-    scale = unsqueezeTensor(ctx, node, *scale, unsqueezeAxes);
-    bias = unsqueezeTensor(ctx, node, *bias, unsqueezeAxes);
+    scale = unsqueezeTensor(ctx, *scale, unsqueezeAxes);
+    bias = unsqueezeTensor(ctx, *bias, unsqueezeAxes);
 
     auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
@@ -1457,7 +1467,7 @@ NodeOutputs poolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> axes{3};
-        tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
         ONNXTRT_CHECK(tensorPtr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
         dims = tensorPtr->getDimensions();
     }
@@ -1509,7 +1519,7 @@ NodeOutputs poolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> axes{3};
-        tensorPtr = squeezeTensor(ctx, node, *tensorPtr, axes);
+        tensorPtr = squeezeTensor(ctx, *tensorPtr, axes);
     }
     return {{tensorPtr}};
 }
@@ -1597,7 +1607,7 @@ NodeOutputs scaleHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
         {
             std::vector<int> expandAxes(4 - origShape.size());
             std::iota(expandAxes.begin(), expandAxes.end(), origShape.size());
-            tensorPtr = unsqueezeTensor(ctx, node, *tensorPtr, expandAxes);
+            tensorPtr = unsqueezeTensor(ctx, *tensorPtr, expandAxes);
         }
         else
         {
@@ -1672,31 +1682,16 @@ nvinfer1::ITensor* sliceAcrossAxis(
     return N_CHECK(sliceLayer->getOutput(0));
 }
 
-nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
-    nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes, bool regLayer)
+nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes)
 {
-    auto const dims = shapeOf(tensor);
-
-    // Set subscripts to ShapeTensor containing positions of axes to be kept.
-    // For example, if there are 6 dimensions and axes = {1,5}, set subscripts to {0,2,3,4}.
-    std::vector<int64_t> subscripts(dims.size());
-    std::iota(subscripts.begin(), subscripts.end(), 0);
-    auto p = std::remove_if(subscripts.begin(), subscripts.end(),
-        [axes](int x) { return std::find(axes.begin(), axes.end(), x) != axes.end(); });
-    subscripts.resize(p - subscripts.begin());
-
-    auto newDims = gather(ctx, dims, ShapeTensor(1, std::move(subscripts)));
-    LOG_VERBOSE("Original shape: " << dims << ", squeezing to: " << newDims);
-    nvinfer1::IShuffleLayer* squeezeLayer = N_CHECK(addShuffle(ctx, tensor, newDims));
-    if (regLayer)
-    {
-        ctx->registerLayer(squeezeLayer, node);
-    }
-    else
-    {
-        ctx->registerLayer(squeezeLayer, "ONNXTRT_squeezeTensor", nullptr);
-    }
-    return N_CHECK(squeezeLayer->getOutput(0));
+    auto* axesTensor
+        = N_CHECK(addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axes.size())}})
+                      ->getOutput(0));
+    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(tensor, *axesTensor));
+    auto* squeezedTensor = N_CHECK(squeezeLayer->getOutput(0));
+    LOG_VERBOSE("Original shape: " << shapeOf(tensor) << ", squeezing to: " << shapeOf(*squeezedTensor));
+    ctx->registerLayer(squeezeLayer, "ONNXTRT_squeezeTensor", nullptr);
+    return squeezedTensor;
 }
 
 nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
@@ -1827,7 +1822,7 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
     {
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> const axes{3};
-        input = unsqueezeTensor(ctx, node, *input, axes);
+        input = unsqueezeTensor(ctx, *input, axes);
         dims = input->getDimensions();
     }
     auto const nbSpatialDims = dims.nbDims - 2;
@@ -1875,7 +1870,7 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
         {
             // Expand spatial dims from 1D to 2D
             std::vector<int32_t> const axes{3};
-            kernelTensor = unsqueezeTensor(ctx, node, *kernelTensor, axes);
+            kernelTensor = unsqueezeTensor(ctx, *kernelTensor, axes);
             ONNXTRT_CHECK(kernelTensor && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
         }
         ONNXTRT_CHECK(checkSpatialDims(kernelTensor->getDimensions())
@@ -1947,43 +1942,21 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
     {
         // Un-expand spatial dims back to 1D
         std::vector<int32_t> const axes{3};
-        outputTensor = squeezeTensor(ctx, node, *outputTensor, axes);
+        outputTensor = squeezeTensor(ctx, *outputTensor, axes);
     }
 
     return {{outputTensor}};
 }
 
-nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
-    nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes, bool regLayer)
+nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes)
 {
-    auto const dims = shapeOf(tensor);
-    std::set<int32_t> const axesSet(axes.begin(), axes.end());
-
-    // Ensure that result fits maximum allowed dimensions.
-    if (dims.size() + axesSet.size() > nvinfer1::Dims::MAX_DIMS)
-    {
-        return nullptr;
-    }
-
-    // Compute interlacing subscripts.
-    std::vector<int64_t> subscripts(dims.size());
-    std::iota(subscripts.begin(), subscripts.end(), 0);
-    for (auto const& axis : axesSet)
-    {
-        subscripts.insert(subscripts.begin() + axis, dims.size());
-    }
-
-    auto const newDims = interlace(ctx, dims, shapeVector(1), ShapeTensor(1, std::move(subscripts)));
-    LOG_VERBOSE("Original shape: " << dims << ", unsqueezing to: " << newDims);
-    nvinfer1::IShuffleLayer* unsqueezeLayer = N_CHECK(addShuffle(ctx, tensor, newDims));
-    if (regLayer)
-    {
-        ctx->registerLayer(unsqueezeLayer, node);
-    }
-    else
-    {
-        ctx->registerLayer(unsqueezeLayer, "ONNXTRT_unsqueezeTensor", nullptr);
-    }
+    auto* axesTensor
+        = N_CHECK(addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axes.size())}})
+                      ->getOutput(0));
+    auto* unsqueezeLayer = N_CHECK(ctx->network()->addUnsqueeze(tensor, *axesTensor));
+    auto* unsqueezedTensor = N_CHECK(unsqueezeLayer->getOutput(0));
+    LOG_VERBOSE("Original shape: " << shapeOf(tensor) << ", unsqueezing to: " << shapeOf(*unsqueezedTensor));
+    ctx->registerLayer(unsqueezeLayer, "ONNXTRT_unsqueezeTensor", nullptr);
     return N_CHECK(unsqueezeLayer->getOutput(0));
 }
 

@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.7 GA Release - 2024-12-3
+For more details, see the 10.7 GA release notes
+
+- Now prioritizes using plugins over local functions when a corresponding plugin is available in the registry
+- Added dynamic axes support for `Squeeze` and `Unsqueeze` operations
+- Added support for parsing mixed-precision `BatchNormalization` nodes in strongly-typed mode
+
 # TensorRT 10.6 GA Release - 2024-11-1
 For more details, see the 10.6 GA release notes
 

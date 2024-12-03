@@ -24,7 +24,7 @@ nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
 
     if (direction == "forward")
     {
-        iterationInput = unsqueezeTensor(ctx, node, *N_CHECK(loop->addIterator(*input)->getOutput(0)), std::vector<int>{0});
+        iterationInput = unsqueezeTensor(ctx, *N_CHECK(loop->addIterator(*input)->getOutput(0)), std::vector<int>{0});
 
         if (isRagged)
         {
@@ -38,7 +38,7 @@ nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
         nvinfer1::IIteratorLayer* reverseIterator = N_CHECK(loop->addIterator(*input));
         reverseIterator->setReverse(true);
         auto reverseIteratorOutput = N_CHECK(reverseIterator->getOutput(0));
-        iterationInput = unsqueezeTensor(ctx, node, *reverseIteratorOutput, std::vector<int>{0});
+        iterationInput = unsqueezeTensor(ctx, *reverseIteratorOutput, std::vector<int>{0});
         if (isRagged)
         {
             nvinfer1::ITensor* seqLens = &convertToTensor(inputs.at(sequenceLenIndex), ctx);
@@ -52,8 +52,8 @@ nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
         nvinfer1::IIteratorLayer* reverse = N_CHECK(loop->addIterator(*input));
         reverse->setReverse(true);
 
-        auto forwardInput = unsqueezeTensor(ctx, node, *N_CHECK(forward->getOutput(0)), std::vector<int>{0});
-        auto reverseInput = unsqueezeTensor(ctx, node, *N_CHECK(reverse->getOutput(0)), std::vector<int>{0});
+        auto forwardInput = unsqueezeTensor(ctx, *N_CHECK(forward->getOutput(0)), std::vector<int>{0});
+        auto reverseInput = unsqueezeTensor(ctx, *N_CHECK(reverse->getOutput(0)), std::vector<int>{0});
         if (isRagged)
         {
             nvinfer1::ITensor* seqLens = &convertToTensor(inputs.at(sequenceLenIndex), ctx);
@@ -165,8 +165,8 @@ nvinfer1::ITensor* getRaggedMask(ImporterContext* ctx, const ::ONNX_NAMESPACE::N
     nvinfer1::ITensor* seqMask;
     if (reverse)
     {
-        counter
-            = getElementWiseResult(ctx, *unsqueezeTensor(ctx, node, *maxLen, {0}), *counter, nvinfer1::ElementWiseOperation::kSUB);
+        counter = getElementWiseResult(
+            ctx, *unsqueezeTensor(ctx, *maxLen, {0}), *counter, nvinfer1::ElementWiseOperation::kSUB);
         seqMask = getElementWiseResult(ctx, *seqLens, *counter, nvinfer1::ElementWiseOperation::kLESS);
         seqMask = getUnaryResult(ctx, *seqMask, nvinfer1::UnaryOperation::kNOT);
     }
@@ -174,7 +174,7 @@ nvinfer1::ITensor* getRaggedMask(ImporterContext* ctx, const ::ONNX_NAMESPACE::N
     {
         seqMask = getElementWiseResult(ctx, *counter, *seqLens, nvinfer1::ElementWiseOperation::kLESS);
     }
-    return unsqueezeTensor(ctx, node, *seqMask, std::vector<int>{0, 2});
+    return unsqueezeTensor(ctx, *seqMask, std::vector<int>{0, 2});
 }
 
 } // namespace onnx2trt

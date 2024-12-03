@@ -108,6 +108,18 @@ static std::string makeErrorExplanation(std::exception const& e, std::string con
     return result.str();
 }
 
+bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node)
+{
+    OnnxAttrs attrs(node, ctx);
+    std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
+    std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
+    LOG_INFO("Checking if node can be treated as plugin: " << node.op_type() << ", plugin_version: " << pluginVersion
+                                                           << ", plugin_namespace: " << pluginNamespace);
+    nvinfer1::IPluginCreatorInterface* creator
+        = importPluginCreator(ctx, node.op_type(), pluginVersion, pluginNamespace);
+    return creator;
+}
+
 void parseNode(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, bool deserializingINetwork)
 {
@@ -158,8 +170,17 @@ void parseNode(
     }
     else if (ctx->localFunctions().count(nodeType))
     {
-        LOG_INFO("Found regisitered local function: " << nodeType << ". Importing as a local function.");
-        importFunc = &opImporters.at("LocalFunctionImporter");
+        // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
+        if (isNodeInPluginRegistry(ctx, node))
+        {
+            LOG_INFO("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
+            importFunc = &opImporters.at("FallbackPluginImporter");
+        }
+        else
+        {
+            LOG_INFO("Found registered local function: " << nodeType << ". Importing as a local function.");
+            importFunc = &opImporters.at("LocalFunctionImporter");
+        }
     }
     else
     {
@@ -295,8 +316,17 @@ void parseNodeStaticCheck(
     }
     else if (ctx->localFunctions().count(nodeType))
     {
-        LOG_INFO("Found regisitered local function: " << nodeType << ". Checking as a local function.");
-        checkerFunc = &opCheckers.at("LocalFunctionImporter");
+        // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
+        if (isNodeInPluginRegistry(ctx, node))
+        {
+            LOG_INFO("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
+            checkerFunc = &opCheckers.at("FallbackPluginImporter");
+        }
+        else
+        {
+            LOG_INFO("Found registered local function: " << nodeType << ". Importing as a local function.");
+            checkerFunc = &opCheckers.at("LocalFunctionImporter");
+        }
     }
     else
     {
@@ -447,17 +477,6 @@ void importLocalFunctions(ImporterContext* ctx, ::ONNX_NAMESPACE::ModelProto con
     }
 }
 
-// Internal helper function used for ONNXRT-TRT EP to filter out DDS nodes
-bool isDDSOp(char const* op_name)
-{
-    auto is = [op_name](char const* name) { return std::strcmp(op_name, name) == 0; };
-    if (is("NonMaxSuppression") || is("NonZero") || is("RoiAlign"))
-    {
-        return true;
-    }
-    return false;
-}
-
 std::pair<bool, ModelImporter::SubGraphSupportVector_t> ModelImporter::doSupportsModel(
     void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path)
 {
@@ -524,13 +543,11 @@ std::pair<bool, ModelImporter::SubGraphSupportVector_t> ModelImporter::doSupport
     {
         ::ONNX_NAMESPACE::NodeProto const& node = model.graph().node(node_idx);
         // Add the node to the subgraph if:
-        //     1. It is not a node that requires DDS
-        //     2. It is not directly connected to an unsupported input
-        //     3. The importer function did not throw an assertion
-        bool unsupportedDDS = isDDSOp(node.op_type().c_str());
+        //     1. It is not directly connected to an unsupported input
+        //     2. The importer function did not throw an assertion
         bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
         bool unsuccessfulParse = node_idx == error_node;
-        if (!unsupportedDDS && !unsupportedInput && !unsuccessfulParse)
+        if (!unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
             {

@@ -165,6 +165,9 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, ImporterContext* ctx)
 // Helper function to convert a ShapedWeights object into a scalar
 nvinfer1::ITensor* convertToScalar(TensorOrWeights& input, ImporterContext* ctx);
 
+// Helper function to convert a scalar into a vector.
+nvinfer1::ITensor* convertScalarToVector(ImporterContext* ctx, nvinfer1::ITensor* input);
+
 // Helper function to provide a ceiling-rounding division between two integers
 int divCeil(int n, int d);
 
@@ -302,8 +305,7 @@ nvinfer1::ITensor* sliceAcrossAxis(
     ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* data, int32_t const axis);
 
 // Helper function to squeeze a tensor on a given set of axes
-nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
-    nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes, bool regLayer = false);
+nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes);
 
 // Helper function to transpose a tensor given a permutation
 nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
@@ -316,8 +318,7 @@ NodeOutputs unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
     TensorOrWeights& input, nvinfer1::UnaryOperation op);
 
 // Helper function to unsqueeze tensors on a given set of axes
-nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
-    nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes, bool regLayer = false);
+nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes);
 
 // Helper function to calculate and return the expected output shape of a resize given the resize scale weights or scale
 // tensor.

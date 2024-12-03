@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.6 supports operators in the inclusive range of opset 9 to opset 22. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.7 supports operators in the inclusive range of opset 9 to opset 22. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, INT4, UINT8, and BOOL
 
@@ -193,7 +193,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Split                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |                                                                                                          |
 | SplitToSequence           | N          |
 | Sqrt                      | Y          | FP32, FP16, BF16 |
-| Squeeze                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be an initializer                                                                                                            |
+| Squeeze                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be resolvable to a constant.                    |
 | StringConcat              | N          |
 | StringNormalizer          | N          |
 | StringSplit               | N          |
@@ -208,7 +208,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Transpose                 | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Trilu                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Unique                    | N          |
-| Unsqueeze                 | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be a constant tensor                                                                                                         |
+| Unsqueeze                 | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be resolvable to a constant.                       |
 | Upsample                  | Y          | FP32, FP16, BF16 |
 | Where                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Xor                       | Y          | BOOL
