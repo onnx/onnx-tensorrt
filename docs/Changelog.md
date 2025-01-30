@@ -2,7 +2,7 @@
 
 # ONNX-TensorRT Changelog
 
-# TensorRT 10.8 GA Release - 2025-1-23
+# TensorRT 10.8 GA Release - 2025-1-30
 For more details, see the 10.8 GA release notes
 
 - Added support for `FLOAT4E2M1` types for quantized networks
