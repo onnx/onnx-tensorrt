@@ -1229,79 +1229,23 @@ DEFINE_BUILTIN_OP_IMPORTER(CumSum)
     int32_t const reverse = attrs.get<int32_t>("reverse", 0);
 
     nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
-    auto dims = input->getDimensions();
+    nvinfer1::ITensor* axis = &convertToTensor(inputs.at(1), ctx);
 
-    assertIsWeights(inputs.at(1), "Axis input for CumSum must be an initializer!");
-    ShapedWeights axisWeights = inputs.at(1).weights();
-    int32_t axis = static_cast<int32_t*>(axisWeights.values)[0];
-    convertAxis(axis, dims.nbDims, node, nodeIdx);
-
-    // Create "inputSliced" tensor that is sliced on dimension[axis] to length 1
-    auto inputSliced = sliceAcrossAxis(ctx, node, input, axis);
-
-    /* For exclusive CumSums, it is equivalent as a non-exclusive CumSum on a modified input tensor
-
-        Forward summations:
-            concat(0, data[0:length-1:1])
-
-        Reverse summations:
-            concat(data[1:length:1], 0)
-
-    */
-    if (exclusive)
+    // TensorRT requires axis to be a scalar.
+    if (axis->getDimensions().nbDims == 1)
     {
-        auto zero = createZeroTensor(ctx, inputSliced);
-        std::vector<nvinfer1::ITensor*> concatTensors = reverse == 1 ? std::vector<nvinfer1::ITensor*>{input, zero}
-                                                                     : std::vector<nvinfer1::ITensor*>{zero, input};
-
-        auto* concat = N_CHECK(ctx->network()->addConcatenation(concatTensors.data(), concatTensors.size()));
-        concat->setAxis(axis);
-        input = N_CHECK(concat->getOutput(0));
-
-        if (reverse == 0)
-        {
-            ShapeTensor const subscripts{axesToInterlaceSubscripts(shapeVector(axis), dims.nbDims)};
-            ShapeTensor starts = fillShapeVector(ctx, 0, shapeVector(dims.nbDims));
-            ShapeTensor sizes = interlace(ctx, shapeOf(*input),
-                sub(ctx, gather(ctx, shapeOf(*input), shapeVector(axis)), shapeVector(1)), subscripts);
-            ShapeTensor strides = fillShapeVector(ctx, 1, shapeVector(dims.nbDims));
-            input = N_CHECK(addSlice(ctx, *input, starts, sizes, strides)->getOutput(0));
-        }
-        else
-        {
-            ShapeTensor const subscripts{axesToInterlaceSubscripts(shapeVector(axis), dims.nbDims)};
-            ShapeTensor starts
-                = interlace(ctx, fillShapeVector(ctx, 0, shapeVector(dims.nbDims)), shapeVector(1), subscripts);
-            ShapeTensor sizes = interlace(ctx, shapeOf(*input),
-                sub(ctx, gather(ctx, shapeOf(*input), shapeVector(axis)), shapeVector(1)), subscripts);
-            ShapeTensor strides = fillShapeVector(ctx, 1, shapeVector(dims.nbDims));
-            input = N_CHECK(addSlice(ctx, *input, starts, sizes, strides)->getOutput(0));
-        }
+        std::vector<int32_t> const squeezeAxes{0};
+        axis = squeezeTensor(ctx, *axis, squeezeAxes);
     }
 
-    // Scan through each slice across summation axis and add it to the running sum
-    auto loop = N_CHECK(ctx->network()->addLoop());
-    nvinfer1::ITensor* tripLimit = getAxisLength(ctx, input, axis);
-    loop->addTripLimit(*tripLimit, nvinfer1::TripLimit::kCOUNT);
-    auto iterator = loop->addIterator(*input, axis, reverse);
-    auto data = N_CHECK(iterator->getOutput(0));
+    auto layer = N_CHECK(ctx->network()->addCumulative(*input, *axis, nvinfer1::CumulativeOperation::kSUM, exclusive, reverse));
+    ctx->registerLayer(layer, node);
 
-    // Squeeze inputSliced down to same shape as `data`
-    inputSliced = squeezeTensor(ctx, *inputSliced, {axis});
-    auto zeroTensor = createZeroTensor(ctx, inputSliced);
-    auto runningSum = loop->addRecurrence(*zeroTensor);
-    auto runningSumTensor = N_CHECK(runningSum->getOutput(0));
+    layer->setOperation(nvinfer1::CumulativeOperation::kSUM);
+    layer->setExclusive(exclusive);
+    layer->setReverse(reverse);
 
-    auto curSum
-        = N_CHECK(ctx->network()->addElementWise(*data, *runningSumTensor, nvinfer1::ElementWiseOperation::kSUM));
-    auto* curSumOutput = N_CHECK(curSum->getOutput(0));
-    runningSum->setInput(1, *curSumOutput);
-
-    auto reverseFlag = reverse == 1 ? nvinfer1::LoopOutput::kREVERSE : nvinfer1::LoopOutput::kCONCATENATE;
-    nvinfer1::ILoopOutputLayer* loopOut = loop->addLoopOutput(*curSumOutput, reverseFlag, axis);
-    loopOut->setInput(1, *tripLimit);
-
-    RETURN_FIRST_OUTPUT(loopOut, node, nodeIdx);
+    RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(DeformConv)
@@ -1545,7 +1489,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
                                                        << zeroPointDataType << ".",
             node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
         if (zeroPointDataType == DataType::kFP8 || zeroPointDataType == DataType::kINT8
-            || zeroPointDataType == DataType::kINT4)
+            || zeroPointDataType == DataType::kINT4 || zeroPointDataType == DataType::kFP4)
         {
             chosenDataType = zeroPointDataType;
         }
@@ -1609,8 +1553,8 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
     else if (isOutputDtypeSet)
     {
-        ONNXTRT_CHECK_NODE(
-            outputDtype == DataType::kFP8 || outputDtype == DataType::kINT8 || outputDtype == DataType::kINT4,
+        ONNXTRT_CHECK_NODE(outputDtype == DataType::kFP8 || outputDtype == DataType::kINT8
+                || outputDtype == DataType::kINT4 || outputDtype == DataType::kFP4,
             "Attribute output_dtype specifies an invalid data type " << outputDtype << ".", node, nodeIdx,
             nvonnxparser::ErrorCode::kINVALID_NODE);
         chosenDataType = outputDtype;
@@ -1680,7 +1624,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
 
     // INT4 requires an even last-dimension due to packing restrictions
-    if (!isDynamic(inputDims) && (chosenDataType == DataType::kINT4))
+    if (!isDynamic(inputDims) && (chosenDataType == DataType::kINT4 || chosenDataType == DataType::kFP4))
     {
         auto const inputSize = volume(inputDims);
         ONNXTRT_CHECK_NODE((inputSize % 2 == 0), "4-bit quantization requies an even number of elements.", node,
@@ -1688,9 +1632,9 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
 
     nvinfer1::ILayer* layer = nullptr;
-    ONNXTRT_CHECK_NODE(
-        (chosenDataType == DataType::kINT8 || chosenDataType == DataType::kFP8 || chosenDataType == DataType::kINT4),
-        "TensorRT only allows FP8, INT8, and INT4 quantization. The requested quantization type is"
+    ONNXTRT_CHECK_NODE((chosenDataType == DataType::kINT8 || chosenDataType == DataType::kFP8
+                           || chosenDataType == DataType::kINT4 || chosenDataType == DataType::kFP4),
+        "TensorRT only allows FP8, INT8, INT4, and FP4 quantization. The requested quantization type is"
             + getTrtDtypeName(chosenDataType) + ".",
         node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
 
@@ -1757,6 +1701,62 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(TRT_FP4DynamicQuantize)
+{
+    nvinfer1::ITensor* dataInput = &convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor* scaleInput = &convertToTensor(inputs.at(1), ctx);
+    int32_t const rank = dataInput->getDimensions().nbDims;
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t axis = attrs.get<int32_t>("axis", 1);
+    convertAxis(axis, rank, node, nodeIdx);
+
+    auto const blockSizeOnnx = attrs.get<int32_t>("block_size", ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+    auto const scaleTypeOnnx = attrs.get<int32_t>("scale_type", ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+
+    DataType scaleType;
+    bool isScaleTypeSet = (scaleTypeOnnx != ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+    if (isScaleTypeSet)
+    {
+        isScaleTypeSet = convertDtype(scaleTypeOnnx, &scaleType);
+        ONNXTRT_CHECK_NODE(isScaleTypeSet,
+            "Attribute scale_type specifies an unsupported data type " << scaleType << ".", node, nodeIdx,
+            nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK_NODE(scaleType == DataType::kFP8, "scale_type must be FP8.", node, nodeIdx,
+            nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+        LOG_WARNING("scale_type is not set. Defaulting to FP8.");
+        scaleType = DataType::kFP8;
+    }
+
+    int32_t blockSize = -1;
+    bool isBlockSizeSet = (blockSizeOnnx != ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+    if (isBlockSizeSet)
+    {
+        ONNXTRT_CHECK_NODE(blockSizeOnnx == 16, "Only block_size == 16 is supported for now.", node, nodeIdx,
+            nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+        blockSize = blockSizeOnnx;
+    }
+    else
+    {
+        LOG_WARNING("block_size is not set. Defaulting to 16.");
+        blockSize = 16;
+    }
+
+    ONNXTRT_CHECK_NODE(inputs.at(1).is_weights(), "Scale input must be an initializer.", node, nodeIdx,
+        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK_NODE(inputs.at(1).weights().count() == 1, "Scale input must be a scalar.", node, nodeIdx,
+        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::IDynamicQuantizeLayer* dq
+        = N_CHECK(ctx->network()->addDynamicQuantize(*dataInput, axis, blockSize, DataType::kFP4, scaleType));
+    dq->setInput(1, *scaleInput);
+    ctx->registerLayer(dq, node);
+
+    RETURN_ALL_OUTPUTS(dq, node, nodeIdx);
+}
 
 DEFINE_BUILTIN_OP_IMPORTER(QuantizeLinear)
 {
@@ -4230,6 +4230,18 @@ DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus)
 
 DEFINE_BUILTIN_OP_IMPORTER(Pow)
 {
+    // TensorRT doesn't support integer values for the exponent in POW operations. Cast any integer-exponents to
+    // the type of the exponent base as a work-around.
+    if (inputs.at(1).isInt32() || inputs.at(1).isInt64())
+    {
+        auto baseType = inputs.at(0).getDataType();
+        LOG_VERBOSE(
+            "Found integer-typed value for exponent in POW operation. Casting exponent to the same type as the base ("
+            << baseType << ")");
+        auto* expTensor = &convertToTensor(inputs.at(1), ctx);
+        inputs[1] = TensorOrWeights(castHelper(ctx, expTensor, baseType));
+    }
+
     return elementwiseHelper(ctx, node, nodeIdx, inputs, nvinfer1::ElementWiseOperation::kPOW);
 }
 
@@ -5104,7 +5116,7 @@ DEFINE_BUILTIN_OP_IMPORTER(RoiAlign)
     f.emplace_back("spatial_scale", &spatialScale, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
+    auto const plugin = createPlugin(ctx, node, getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ROIAlign plugin was not found in the plugin registry!", node, nodeIdx,
@@ -5341,7 +5353,7 @@ NodeOutputs scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     f.emplace_back("reduction", reduction.c_str(), nvinfer1::PluginFieldType::kCHAR, reduction.size());
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
+    auto const plugin = createPlugin(ctx, node, getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ScatterReduction plugin was not found in the plugin registry!", node,
@@ -6583,7 +6595,8 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
 
     std::string const pluginName{node.op_type()};
 
-    auto const plugin = createPlugin(getNodeName(node), pluginNamespace, static_cast<TPluginCreator*>(creator), fields);
+    auto const plugin
+        = createPlugin(ctx, node, getNodeName(node), pluginNamespace, static_cast<TPluginCreator*>(creator), fields);
 
     ONNXTRT_CHECK_NODE(plugin, "Could not create the plugin.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
@@ -6788,24 +6801,35 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
     // Create a namescope local to the subgraph in the local function
     NameScope nameScope(*ctx);
 
-    // We need to map local input names to the tensors from the outside scope. Keep track of
-    // local input names in order to remove them later
+    // We need to map local input names to the tensors from the outside scope. These are the cases
+    // to consider:
+    //
+    // When the insideScopeName != outsideScopeName, there are two cases:
+    //     1. The insideScopeName does not intersect with any names from the outer scope. We can add
+    //        it directly to ctx->tensors() and remove it when we exit the local function.
+    //     2. The insideScopeName is the same as one from the outer scope. In this case we need to
+    //        save the original tensor before adding the new inside scope mapping. We will move the
+    //        saved tensor back into ctx->tensors() once we exit the local function.
+    //
+    // When the insideScopeName == outsideScopeName, we just use the tensor from the outside scope directly.
+
     std::vector<std::string> localInputs;
+    StringMap<TensorOrWeights> savedTensors;
     for (int32_t i = 0; i < function.input().size(); i++)
     {
         auto outsideScopeName = node.input(i);
         auto insideScopeName = function.input(i);
         if (outsideScopeName != insideScopeName)
         {
-            if (ctx->tensors().count(insideScopeName))
+            // Case one: simply keep track of the name to remove after.
+            localInputs.push_back(insideScopeName);
+
+            // Case two: also save the original tensor to restore it after.
+            if (auto handle = ctx->tensors().extract(insideScopeName))
             {
-                LOG_WARNING("Found input: "
-                    << insideScopeName
-                    << " that does not correspond to an outside scope name. Behavior may be incorrect.");
-                continue;
+                savedTensors.insert(std::move(handle));
             }
             ctx->tensors().insert({insideScopeName, ctx->tensors().at(outsideScopeName)});
-            localInputs.push_back(insideScopeName);
         }
         ONNXTRT_CHECK_NODE(ctx->tensors().count(insideScopeName), "Could not find mapping of local function input!",
             node, nodeIdx, ErrorCode::kINVALID_NODE);
@@ -6897,11 +6921,16 @@ DEFINE_BUILTIN_OP_IMPORTER(LocalFunctionImporter)
         outputs.push_back(TensorOrWeights(ctx->tensors().at(output)));
     }
 
-    // Remove all localInputs as we exit the local function scope, and pop the current function name from the stack
+    // When exiting the function scope, remove all localInputs and restore the tensors in savedTensors.
     for (auto& name : localInputs)
     {
         ctx->tensors().erase(name);
+        if (auto handle = savedTensors.extract(name))
+        {
+            ctx->tensors().insert(std::move(handle));
+        }
     }
+
     ctx->localFunctionStack().pop_back();
 
     return outputs;

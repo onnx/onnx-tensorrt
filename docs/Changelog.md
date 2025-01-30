@@ -2,7 +2,15 @@
 
 # ONNX-TensorRT Changelog
 
-# TensorRT 10.7 GA Release - 2024-12-3
+# TensorRT 10.8 GA Release - 2025-1-23
+For more details, see the 10.8 GA release notes
+
+- Added support for `FLOAT4E2M1` types for quantized networks
+- Added support for dynamic axes and improved performance of `CumSum` operations
+- Fixed the import of local functions when their input tensor names aliased one from an outside scope
+- Added support for `Pow` ops with integer-typed exponent values
+
+# TensorRT 10.7 GA Release - 2024-11-26
 For more details, see the 10.7 GA release notes
 
 - Now prioritizes using plugins over local functions when a corresponding plugin is available in the registry

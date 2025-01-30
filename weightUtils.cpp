@@ -37,6 +37,7 @@ char const* getDtypeName(int32_t onnxDtype)
     case ::ONNX_NAMESPACE::TensorProto::UINT64: return "UINT64";
     case ::ONNX_NAMESPACE::TensorProto::COMPLEX64: return "COMPLEX64";
     case ::ONNX_NAMESPACE::TensorProto::COMPLEX128: return "COMPLEX128";
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1: return "FLOAT4E2M1";
     default: return "<UNKNOWN>";
     }
 }
@@ -63,6 +64,7 @@ int32_t getDtypeSizeBits(int32_t onnxDtype)
     case ::ONNX_NAMESPACE::TensorProto::INT64: return 64;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return 8;
     case ::ONNX_NAMESPACE::TensorProto::INT4: return 4;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1: return 4;
     default: return -1;
     }
 }
@@ -71,8 +73,9 @@ size_t getTensorOrWeightsSizeBytes(int64_t count, int32_t onnxDtype)
 {
 
     int32_t dTypeSize = getDtypeSizeBits(onnxDtype);
-    
-    if (dTypeSize == -1 || static_cast<size_t>(count) > std::numeric_limits<size_t>::max() / static_cast<size_t>(dTypeSize))
+
+    if (dTypeSize == -1
+        || static_cast<size_t>(count) > std::numeric_limits<size_t>::max() / static_cast<size_t>(dTypeSize))
     {
         throw std::runtime_error("Size of weights exceeds maximum!");
     }
@@ -82,7 +85,8 @@ size_t getTensorOrWeightsSizeBytes(int64_t count, int32_t onnxDtype)
     {
         // This is a specific implementation to INT4, since this is currently the only sub-byte data type
         // we're supporting. Different data-types may have different padding.
-        assert(onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4);
+        assert(
+            onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1);
         sizeInBits += 4;
     }
     assert(sizeInBits % 8 == 0);

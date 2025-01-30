@@ -269,6 +269,7 @@ DEFINE_OP_EMPTY_CHECKER(TRT_INT4QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(TRT_INT4DequantizeLinear)
 
+DEFINE_OP_EMPTY_CHECKER(TRT_FP4DynamicQuantize)
 
 DECLARE_OP_CHECKER(Mul);
 
@@ -526,7 +527,12 @@ DEFINE_OP_EMPTY_CHECKER(Pad)
 
 DEFINE_OP_EMPTY_CHECKER(ParametricSoftplus)
 
-DEFINE_OP_EMPTY_CHECKER(Pow)
+DEFINE_OP_CHECKER(Pow)
+{
+    int32_t const nbInputs = node.input().size();
+    STATIC_CHECK(
+        nbInputs == 2 && "POW operator expects two inputs!", ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+}
 
 DEFINE_OP_EMPTY_CHECKER(PRelu)
 

@@ -250,13 +250,14 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
     std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
 
 // Helper function to get a plugin from the PluginRegistry
-std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(std::string const& name,
-    std::string const& pluginNamespace, nvinfer1::IPluginCreator* pluginCreator,
-    std::vector<nvinfer1::PluginField> const& pluginFields);
+std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(ImporterContext* ctx,
+    ::ONNX_NAMESPACE::NodeProto const& node, std::string const& name, std::string const& pluginNamespace,
+    nvinfer1::IPluginCreator* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields);
 
 // Helper function to get a V3 plugin from the PluginRegistry
-std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, std::string const& pluginNamespace,
-    nvinfer1::IPluginCreatorInterface* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields);
+std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::string const& name, std::string const& pluginNamespace, nvinfer1::IPluginCreatorInterface* pluginCreator,
+    std::vector<nvinfer1::PluginField> const& pluginFields);
 
 // Helper function to return the identity of a TensorOrWeights
 TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input);

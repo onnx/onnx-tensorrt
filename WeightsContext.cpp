@@ -356,7 +356,7 @@ bool WeightsContext::convertOnnxWeights(
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT32 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT64
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT16 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BFLOAT16
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT8 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BOOL
-        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4)
+        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1)
     {
         if (onnxTensor.raw_data().size() > 0)
         {
@@ -399,6 +399,8 @@ bool WeightsContext::convertOnnxWeights(
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT4:
                 // int4 data is packed, each int32 element contains one byte (two int4 nibbles)
+            case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1:
+                // int4/fp4 data is packed, each int32 element contains one byte (two int4/fp4 nibbles)
                 nbytes = onnxTensor.int32_data().size();
                 dataPtr = convertPackedInt32Data(onnxTensor.int32_data().data(), shape, nbytes, onnxDtype);
                 break;

@@ -24,6 +24,7 @@ std::string TensorOrWeights::getType() const
         case nvinfer1::DataType::kBOOL: return "BOOL";
         case nvinfer1::DataType::kFP8: return "FP8";
         case nvinfer1::DataType::kINT4: return "INT4";
+        case nvinfer1::DataType::kFP4: return "FP4";
         }
     }
     else
@@ -42,6 +43,7 @@ std::string TensorOrWeights::getType() const
         case ::ONNX_NAMESPACE::TensorProto::INT64: return "INT64";
         case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return "FP8";
         case ::ONNX_NAMESPACE::TensorProto::INT4: return "INT4";
+        case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1: return "FP4";
         }
     }
     return "UNKNOWN TYPE";
@@ -62,6 +64,7 @@ nvinfer1::DataType TensorOrWeights::convertONNXDataType(ShapedWeights::DataType 
         case ::ONNX_NAMESPACE::TensorProto::INT64: return nvinfer1::DataType::kINT64;
         case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: return nvinfer1::DataType::kFP8;
         case ::ONNX_NAMESPACE::TensorProto::INT4: return nvinfer1::DataType::kINT4;
+        case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1: return nvinfer1::DataType::kFP4;
         }
         assert(false && "Unknown datatype");
         return nvinfer1::DataType::kFLOAT;
@@ -81,6 +84,7 @@ ShapedWeights::DataType TensorOrWeights::convertTRTDataType(nvinfer1::DataType d
         case nvinfer1::DataType::kINT64: return ::ONNX_NAMESPACE::TensorProto::INT64;
         case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
         case nvinfer1::DataType::kINT4: return ::ONNX_NAMESPACE::TensorProto::INT4;
+        case nvinfer1::DataType::kFP4: return ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1;
         }
         assert(false && "Unknown datatype");
         return ::ONNX_NAMESPACE::TensorProto::FLOAT;

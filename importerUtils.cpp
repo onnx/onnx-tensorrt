@@ -333,6 +333,7 @@ bool convertDtype(int32_t onnx_dtype, nvinfer1::DataType* trt_dtype)
     case ::ONNX_NAMESPACE::TensorProto::INT64: *trt_dtype = nvinfer1::DataType::kINT64; break;
     case ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN: *trt_dtype = nvinfer1::DataType::kFP8; break;
     case ::ONNX_NAMESPACE::TensorProto::INT4: *trt_dtype = nvinfer1::DataType::kINT4; break;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1: *trt_dtype = nvinfer1::DataType::kFP4; break;
     default:
         std::cerr << "Unsupported ONNX data type: " << getDtypeName(onnx_dtype) << " (" << std::to_string(onnx_dtype)
                   << ")" << std::endl;
@@ -506,6 +507,7 @@ std::string getTrtDtypeName(nvinfer1::DataType TrtDtype)
     case nvinfer1::DataType::kBF16: return "BF16";
     case nvinfer1::DataType::kINT64: return "INT64";
     case nvinfer1::DataType::kINT4: return "INT4";
+    case nvinfer1::DataType::kFP4: return "FP4";
     default: return "<UNKNOWN>";
     }
 }
@@ -903,9 +905,9 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
     return creator;
 }
 
-std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(std::string const& name,
-    std::string const& /* pluginNamespace */, nvinfer1::IPluginCreator* pluginCreator,
-    std::vector<nvinfer1::PluginField> const& pluginFields)
+std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(ImporterContext* ctx,
+    ::ONNX_NAMESPACE::NodeProto const& node, std::string const& name, std::string const& /* pluginNamespace */,
+    nvinfer1::IPluginCreator* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields)
 {
     if (!pluginCreator)
     {
@@ -953,8 +955,9 @@ CreatorVersion getPluginCreatorVersion(nvinfer1::IPluginCreatorInterface const* 
     ONNXTRT_CHECK(false && "Unknown plugin creator version.", ErrorCode::kINTERNAL_ERROR);
 }
 
-std::unique_ptr<nvinfer1::IPluginV3> createPlugin(std::string const& name, std::string const& pluginNamespace,
-    nvinfer1::IPluginCreatorInterface* pluginCreator, std::vector<nvinfer1::PluginField> const& pluginFields)
+std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::string const& name, std::string const& pluginNamespace, nvinfer1::IPluginCreatorInterface* pluginCreator,
+    std::vector<nvinfer1::PluginField> const& pluginFields)
 {
     if (!pluginCreator)
     {
@@ -1178,7 +1181,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     f.emplace_back("dilation", dilationValues.data(), nvinfer1::PluginFieldType::kINT32, listAttrSize);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(pluginName, kTRT_STD_PLUGIN_NAMESPACE,
+    auto const plugin = createPlugin(ctx, node, pluginName, kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ModulatedDeformConv2d plugin was not found in the plugin registry!", node,
@@ -1295,7 +1298,7 @@ NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     f.emplace_back("alpha", &alpha, nvinfer1::PluginFieldType::kFLOAT32, 1);
 
     // Create plugin from registry
-    auto const plugin = createPlugin(getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
+    auto const plugin = createPlugin(ctx, node, getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
         static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "InstanceNormalization plugin was not found in the plugin registry!", node,
@@ -1717,6 +1720,7 @@ nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE:
     case nvinfer1::DataType::kUINT8: return ::ONNX_NAMESPACE::TensorProto::UINT8;
     case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
     case nvinfer1::DataType::kINT4: return ::ONNX_NAMESPACE::TensorProto::INT4;
+    case nvinfer1::DataType::kFP4: return ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1;
     }
     return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
 }

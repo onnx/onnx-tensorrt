@@ -2,13 +2,13 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.7 supports operators in the inclusive range of opset 9 to opset 22. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.8 supports operators in the inclusive range of opset 9 to opset 22. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
-TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, INT32, INT64, FP8, INT8, INT4, UINT8, and BOOL
+TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
 > Note: There is limited support for DOUBLE type. TensorRT will attempt to cast DOUBLE down to FLOAT, clamping values to `+-FLT_MAX` if necessary.
 
-> Note: INT8, INT4, and FP8 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision. See [section 7.4.2](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#qat-models-work) of the developer guide for more information.
+> Note: INT8, INT4, FP8 and FP4 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision. See [section 7.4.2](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#qat-models-work) of the developer guide for more information.
 
 > Note: UINT8 is only supported as network input or output tensor types.
 
@@ -47,22 +47,22 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Compress                  | N          |
 | Concat                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | ConcatFromSequence        | N          |
-| Constant                  | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `sparse_value`, `value_string`, and `value_strings` attributes are unsupported.
-| ConstantOfShape           | Y          | FP32, FP16, BF16, INT32, INF64, BOOL |
+| Constant                  | Y          | FP32, FP16, BF16, FP8, FP4, INT4, INT32, INT64, BOOL | `sparse_value`, `value_string`, and `value_strings` attributes are unsupported.
+| ConstantOfShape           | Y          | FP32, FP16, BF16, FP8, FP4, INT4, INT32, INF64, BOOL |
 | Conv                      | Y          | FP32, FP16, BF16 |
 | ConvInteger               | N          |
 | ConvTranspose             | Y          | FP32, FP16, BF16 |
 | Cos                       | Y          | FP32, FP16, BF16 |
 | Cosh                      | Y          | FP32, FP16, BF16 |
-| CumSum                    | Y          | FP32, FP16, BF16 | `axis` must be an initializer                                                                                                            |
+| CumSum                    | Y          | FP32, FP16, BF16 | `axis` must be a build-time constant                                                                                                     |
 | DFT                       | N          |
 | DeformConv                | Y          | FP32, FP16 | `input` must have 1D or 2D spatial dimensions. `pads` for the beginning and end along each spatial axis must be the same
 | DepthToSpace              | Y          | FP32, FP16, BF16, INT32, INT64 |
-| DequantizeLinear          | Y          | INT8, FP8, INT4 | `x_zero_point` must be zero                                                                                    |
+| DequantizeLinear          | Y          | INT8, FP8, FP4, INT4 | `x_zero_point` must be zero                                                                                    |
 | Det                       | N          |
 | Div                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | Dropout                   | Y          | FP32, FP16, BF16 | `is_traning` must be an initializer and evaluate to False.
-| DynamicQuantizeLinear     | N          |
+| DynamicQuantizeLinear     | N          | Not supported. TensorRT's IDynamicQuantize can be composed from ONNX operators in the form of a model local function.
 | Einsum                    | Y          | FP32, FP16, BF16 |
 | Elu                       | Y          | FP32, FP16, BF16 |
 | Equal                     | Y          | FP32, FP16, BF16, INT32, INT64 |
