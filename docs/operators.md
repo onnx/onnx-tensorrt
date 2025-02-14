@@ -168,7 +168,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Scan                      | Y          | FP32, FP16, BF16|
 | Scatter                   | Y          | FP32, FP16, BF16, INT32, INT64 |
 | ScatterElements           | Y          | FP32, FP16, BF16, INT32, INT64 |
-| ScatterND                 | Y          | FP32, FP16, BF16, INT32, INT64 | `reduction` is not supported
+| ScatterND                 | Y          | FP32, FP16, BF16, INT32, INT64 | `reduction` other than `none` is not supported
 | Selu                      | Y          | FP32, FP16, BF16, |
 | SequenceAt                | N          |
 | SequenceConstruct         | N          |
