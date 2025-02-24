@@ -110,6 +110,30 @@ MESSAGE(STATUS "Found TensorRT headers at ${TENSORRT_INCLUDE_DIR}")
 find_path(TENSORRT_PYTHON_INCLUDE_DIR plugin.h
   HINTS ${TENSORRT_ROOT}
   PATH_SUFFIXES python/include/impl)
+
+# If header is not found, download it from open source release.
+if(NOT TENSORRT_PYTHON_INCLUDE_DIR)
+  set(PLUGIN_URL "https://raw.githubusercontent.com/NVIDIA/TensorRT/refs/heads/release/${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}/python/include/impl/plugin.h")
+  set(FILE_DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/plugin.h")
+
+  message(NOTICE "Required header plugin.h not found. Downloading from ${PLUGIN_URL} to ${FILE_DESTINATION}")
+
+  file(DOWNLOAD ${PLUGIN_URL} ${FILE_DESTINATION}
+    SHOW_PROGRESS
+    STATUS DOWNLOAD_STATUS
+    LOG DOWNLOAD_LOG
+  )
+
+  list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+  list(GET DOWNLOAD_STATUS 1 ERROR_MESSAGE)
+
+  if(NOT STATUS_CODE EQUAL 0)
+    message(FATAL_ERROR "Error downloading file: ${ERROR_MESSAGE}")
+  endif()
+
+  set(TENSORRT_PYTHON_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
 message(NOTICE "Found TensorRT Python headers at ${TENSORRT_PYTHON_INCLUDE_DIR}")
 
 # Output dynamic library names depends on platform:
