@@ -301,7 +301,7 @@ public:
     //!
     //! The flags are listed in the OnnxParserFlag enum.
     //!
-    //! \param OnnxParserFlag The flags used when parsing an ONNX model.
+    //! \param OnnxParserFlags The flags used when parsing an ONNX model.
     //!
     //! \note This function will override the previous set flags, rather than bitwise ORing the new flag.
     //!

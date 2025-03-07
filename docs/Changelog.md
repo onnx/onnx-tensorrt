@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.9 GA Release - 2025-3-7
+For more details, see the 10.9 GA release notes
+
+- Added support for Python AOT plugins
+- Added support for opset 21 GroupNorm
+- Fixed support for opset 18+ ScatterND
+
 # TensorRT 10.8 GA Release - 2025-1-30
 For more details, see the 10.8 GA release notes
 
@@ -46,7 +53,7 @@ For more details, see the 10.3 GA release notes.
 - Added support for tensor `axes` inputs for `Slice` nodes
 - Updated `ScatterElements` importer to use an updated plugin
 
-# TensorRT 10.2 GA Release - 2024-7-10 
+# TensorRT 10.2 GA Release - 2024-7-10
 For more details, see the 10.2 GA release notes.
 
 - Improved error handling with new macros and classes
@@ -94,7 +101,7 @@ For more details, see the 9.2 GA release notes for the fixes since 9.1 GA.
 For more details, see the 9.1 GA release notes for the fixes since 9.0 GA.
 
 - Added new `ErrorCode` enums to improve error logging
-- Added new members to `IParserError` to improve error logging 
+- Added new members to `IParserError` to improve error logging
 - Added static checkers when parsing nodes, resulting better reporting of errors
 
 # TensorRT 9.0 GA Release - 2023-9-5
@@ -108,7 +115,7 @@ For more details, see the 9.0 GA release notes for the fixes since 9.0 EA.
 For more details, see the 9.0 EA release notes for the fixes since 8.6 GA.
 
 - Added support for INT64 data type. The ONNX parser no longer automatically casts INT64 to INT32.
-- Added support for ONNX local functions when parsing ONNX models with the ONNX parser. 
+- Added support for ONNX local functions when parsing ONNX models with the ONNX parser.
 - Breaking API Change: In TensorRT 9.0, due to the introduction of INT64 as a supported data type, ONNX models with INT64 I/O require INT64 bindings. Note that prior to this release, such models required INT32 bindings.
 - Updated ONNX submodule to v1.14.0.
 
@@ -135,7 +142,7 @@ For more details, see the 8.6 EA release notes for new features added in TensorR
 
 ## Changed
 
-- All cast operations will now use the new `CastLayer` over the pervious `IdentityLayer`. 
+- All cast operations will now use the new `CastLayer` over the pervious `IdentityLayer`.
 
 # TensorRT 8.5 GA Release - 2022-11-2
 
@@ -172,7 +179,7 @@ For more details, see the 8.5 GA release notes for new features added in TensorR
 
 ## TensorRT 8.4 GA Release - 2022-6-6
 
-### Added 
+### Added
 
 For more details, see the 8.4 GA release notes for new features added in TensorRT 8.4
 
@@ -197,7 +204,7 @@ See the 8.2 EA release notes for new features added in TensorRT 8.2.
 ### Fixes
 - Removed duplicate constant layer checks that caused some performance regressions
 - Fixed expand dynamic shape calculations
-- Added parser-side checks for Scatter layer support 
+- Added parser-side checks for Scatter layer support
 
 ## TensorRT 8.2 EA Release - 2021-10-04
 ### Added

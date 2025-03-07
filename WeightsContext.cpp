@@ -466,26 +466,21 @@ bool WeightsContext::convertOnnxWeights(
     return true;
 }
 
-float* WeightsContext::convertFP16Data(void* weightValues, nvinfer1::Dims const& shape)
-{
-    int64_t const nbWeights = volume(shape);
-    float* newWeights{static_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape).values)};
-
-    half_float::half* tempValues = static_cast<half_float::half*>(weightValues);
-
-    for (int64_t i = 0; i < nbWeights; i++)
-    {
-        newWeights[i] = tempValues[i];
-    }
-    return newWeights;
-}
-
 float* WeightsContext::getFP32Values(ShapedWeights const& w)
 {
-    assert((w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT || w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
-        && "Conversion only valid from FLOAT or FLOAT16");
-    return (w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT) ? static_cast<float*>(w.values)
-                                                            : convertFP16Data(w.values, w.shape);
+    if (w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
+    {
+        return static_cast<float*>(w.values);
+    }
+    else if (w.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
+    {
+        return convertToFp32<half_float::half>(w);
+    }
+    else if (w.type == ::ONNX_NAMESPACE::TensorProto::BFLOAT16)
+    {
+        return convertToFp32<BFloat16>(w);
+    }
+    ONNXTRT_THROW(MAKE_ERROR("Invalid type found in getFP32Values() call.", ErrorCode::kINTERNAL_ERROR));
 }
 
 ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,

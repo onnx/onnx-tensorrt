@@ -982,9 +982,44 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
     }
     else if (creatorVersion == CreatorVersion::kV3QUICK)
     {
+
+        OnnxAttrs attrs(node, ctx);
+        nvinfer1::QuickPluginCreationRequest request;
+
+        // Node-level specifications override network-level preferences
+        if (attrs.count("aot"))
+        {
+            auto const aotOrJit = static_cast<bool>(attrs.get<int>("aot", 0));
+            if (aotOrJit)
+            {
+                request = nvinfer1::QuickPluginCreationRequest::kSTRICT_AOT;
+            }
+            else
+            {
+                request = nvinfer1::QuickPluginCreationRequest::kSTRICT_JIT;
+            }
+        }
+        else
+        {
+            auto const preferAOT
+                = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kPREFER_AOT_PYTHON_PLUGINS);
+            auto const preferJIT
+                = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kPREFER_JIT_PYTHON_PLUGINS);
+            ONNXTRT_CHECK(!(preferAOT && preferJIT) &&
+            "Both NetworkDefinitionCreationFlag::kPREFER_AOT_PYTHON_PLUGINS and "
+            "NetworkDefinitionCreationFlag::kPREFER_JIT_PYTHON_PLUGINS cannot be specified at the same time.", ErrorCode::kUNSUPPORTED_GRAPH);
+
+            // If neither flag is specified, defer to the plugin creator to pick whichever implementation has actually
+            // been defined.
+            //  - If both are defined, the plugin creator will raise an error.
+            request = preferJIT ? nvinfer1::QuickPluginCreationRequest::kPREFER_JIT
+                                : (preferAOT ? nvinfer1::QuickPluginCreationRequest::kPREFER_AOT
+                                             : nvinfer1::QuickPluginCreationRequest::kUNKNOWN);
+        }
+
         return std::unique_ptr<nvinfer1::IPluginV3>{
             static_cast<nvinfer1::IPluginCreatorV3Quick*>(pluginCreator)
-                ->createPlugin(name.c_str(), pluginNamespace.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD)};
+                ->createPlugin(name.c_str(), pluginNamespace.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD, request)};
     }
     ONNXTRT_CHECK(false && "Found invalid creator version when creating a V3 plugin.", ErrorCode::kINTERNAL_ERROR);
 }

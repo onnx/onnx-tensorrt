@@ -1639,6 +1639,12 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
 
     bool stronglyTyped = ctx->isStronglyTyped();
+    if (!stronglyTyped && chosenDataType != DataType::kINT8)
+    {
+        LOG_WARNING(
+            "A strongly typed network is recommended for networks with QuantizedLinear/DequantizedLinear nodes using "
+            "precisions other than int8.");
+    }
     if (isDQ)
     {
         // Add and configure a DequantizeLayer.
@@ -2251,8 +2257,86 @@ DEFINE_BUILTIN_OP_IMPORTER(GreaterOrEqual)
         /*greater*/ true);
 }
 
+// Support opset21 GroupNorm, where scale and bias is shape [C] instead of [G].
+NodeOutputs groupNorm21Helper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+    std::vector<TensorOrWeights>& inputs)
+{
+    auto* input = &convertToTensor(inputs.at(0), ctx);
+    auto* scale = &convertToTensor(inputs.at(1), ctx);
+    auto* bias = &convertToTensor(inputs.at(2), ctx);
+
+    OnnxAttrs attrs(node, ctx);
+    float epsilon = attrs.get("epsilon", 1e-5f);
+    int32_t nbGroups = attrs.get("num_groups", 1);
+
+    auto nbDims = input->getDimensions().nbDims;
+    uint32_t axesMask{0};
+    std::vector<int32_t> unsqueezeAxes;
+
+    for (int32_t i = 0; i < nbDims; i++)
+    {
+        if (i == 1)
+        {
+            continue;
+        }
+        // Axes should correspond to the spatial dimensions
+        if (i >= 2)
+        {
+            axesMask |= 1 << i;
+        }
+        unsqueezeAxes.push_back(i);
+    }
+
+    // Reshape [N, C, ...] to [N, G, C/G, ...]
+    auto inShape = shapeOf(*input);
+
+    auto gnShape = concat(ctx, gather(ctx, inShape, shapeVector(0)), shapeVector(nbGroups));
+    gnShape = concat(ctx, gnShape, floorDiv(ctx, gather(ctx, inShape, shapeVector(1)), shapeVector(nbGroups)));
+    gnShape = concat(ctx, gnShape, shapeVector(-1));
+    auto gnReshaped = &reshape(ctx, *input, gnShape);
+
+    // Run instanceNorm with scale = 1, bias = 0
+
+    auto tmpScale
+        = constantOfShape(ctx, addConstantScalar(ctx, 1.0F, ::ONNX_NAMESPACE::TensorProto::FLOAT)->getOutput(0),
+            &gather(ctx, shapeOf(*gnReshaped), shapeVector(1)).tensor(ctx));
+    auto tmpBias
+        = constantOfShape(ctx, addConstantScalar(ctx, 0.0F, ::ONNX_NAMESPACE::TensorProto::FLOAT)->getOutput(0),
+            &gather(ctx, shapeOf(*gnReshaped), shapeVector(1)).tensor(ctx));
+
+    tmpScale = castHelper(ctx, tmpScale, scale->getType());
+    tmpBias = castHelper(ctx, tmpBias, bias->getType());
+
+    tmpScale = unsqueezeTensor(ctx, *tmpScale, unsqueezeAxes);
+    tmpBias = unsqueezeTensor(ctx, *tmpBias, unsqueezeAxes);
+
+    auto tmpNorm = N_CHECK(ctx->network()->addNormalization(*gnReshaped, *tmpScale, *tmpBias, axesMask));
+    tmpNorm->setEpsilon(epsilon);
+
+    auto normOut = N_CHECK(tmpNorm->getOutput(0));
+
+    // Reshape back to [N, C, ...]
+    auto reshapeBackOut = &reshape(ctx, *normOut, inShape);
+
+    // Do final scale and bias add.
+    using eOp = nvinfer1::ElementWiseOperation;
+    scale = unsqueezeTensor(ctx, *scale, unsqueezeAxes);
+    bias = unsqueezeTensor(ctx, *bias, unsqueezeAxes);
+    auto scaleLayer = N_CHECK(ctx->network()->addElementWise(*scale, *reshapeBackOut, eOp::kPROD));
+    auto scaledOutput = N_CHECK(scaleLayer->getOutput(0));
+    auto biasLayer = N_CHECK(ctx->network()->addElementWise(*scaledOutput, *bias, eOp::kSUM));
+    auto biasOutput = N_CHECK(biasLayer->getOutput(0));
+
+    return {{biasOutput}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(GroupNormalization)
 {
+    if (ctx->getOpsetVersion() >= 21)
+    {
+        return groupNorm21Helper(ctx, node, nodeIdx, inputs);
+    }
+
     return normalizationHelper(ctx, node, nodeIdx, inputs);
 }
 
@@ -5504,7 +5588,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         starts = ShapeTensor{*input1};
         ends = ShapeTensor{*input2};
         // "If axes are omitted, they are set to [0, ..., ndim-1]."
-        axes = nbInputs > 3 ? ShapeTensor(ctx, inputs.at(3)) : iotaShapeVector(dims.size());
+        axes = nbInputs > 3 && !inputs.at(3).isNullTensor() ? ShapeTensor(ctx, inputs.at(3))
+                                                            : iotaShapeVector(dims.size());
         ONNXTRT_CHECK_NODE((starts.size() == axes.size()),
             "The shape of input starts misaligns with the shape of input axes. Shape of input starts = "
                 << starts.size() << ", shape of input axes = " << axes.size() << ".",

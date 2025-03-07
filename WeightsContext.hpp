@@ -6,6 +6,7 @@
 
 #include "ShapedWeights.hpp"
 #include "Status.hpp"
+#include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 #include <string>
 #include <vector>
@@ -64,10 +65,11 @@ public:
     bool convertOnnxWeights(
         ::ONNX_NAMESPACE::TensorProto const& onnxTensor, ShapedWeights* weights, bool ownAllWeights = false);
 
-    // Helper function to convert weightValues' type from fp16 to fp32.
-    float* convertFP16Data(void* weightValues, nvinfer1::Dims const& shape);
+    // Helper function to convert weightValues' type from fp16/bf16 to fp32.
+    template <typename DataType>
+    [[nodiscard]] float* convertToFp32(ShapedWeights const& w);
 
-    // Helper function to get fp32 representation of fp16 or fp32 weights.
+    // Helper function to get fp32 representation of fp16, bf16, or fp32 weights.
     float* getFP32Values(ShapedWeights const& w);
 
     // Register an unique name for the created weights.
@@ -111,6 +113,15 @@ DataType* WeightsContext::convertInt32Data(int32_t const* weightValues, nvinfer1
         newWeights[i] = static_cast<DataType>(weightValues[i]);
     }
     return newWeights;
+}
+template <typename DataType>
+[[nodiscard]] float* WeightsContext::convertToFp32(ShapedWeights const& w)
+{
+    int64_t const nbWeights = volume(w.shape);
+    auto result = static_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, w.shape).values);
+    std::copy_n(static_cast<DataType const*>(w.values), nbWeights, result);
+
+    return result;
 }
 
 } // namespace onnx2trt
