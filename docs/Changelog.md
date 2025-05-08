@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.10 GA Release - 2025-5-8
+For more details, see the 10.10 GA release notes
+
+- Cleaned up log spam when the ONNX network contained a mixture Plugins and LocalFunctions
+- UINT8 constants are now properly imported for QuantizeLinear & DequantizeLinear nodes
+- Plugin fallback importer now also reads its namespace from a Node's domain field
+
 # TensorRT 10.9 GA Release - 2025-3-7
 For more details, see the 10.9 GA release notes
 

@@ -282,6 +282,16 @@ NodeOutputs batchnormFallback(
 }
 
 template <typename T>
+T const* type_convert(ImporterContext* ctx, ShapedWeights const& weights)
+{
+    if constexpr (std::is_same_v<T, float>)
+    {
+        return ctx->getWeightsContext().getFP32Values(weights);
+    }
+    return static_cast<T const*>(weights.values);
+}
+
+template <typename T>
 NodeOutputs batchnormWeightHelper(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t nodeIdx, std::vector<TensorOrWeights>& inputs)
 {
@@ -290,10 +300,10 @@ NodeOutputs batchnormWeightHelper(
     auto const mean = inputs.at(3).weights();
     auto const variance = inputs.at(4).weights();
 
-    T const* scaleValues = static_cast<T*>(scale.values);
-    T const* biasValues = static_cast<T*>(bias.values);
-    T const* meanValues = static_cast<T*>(mean.values);
-    T const* varianceValues = static_cast<T*>(variance.values);
+    T const* scaleValues = type_convert<T>(ctx, scale);
+    T const* biasValues = type_convert<T>(ctx, bias);
+    T const* meanValues = type_convert<T>(ctx, mean);
+    T const* varianceValues = type_convert<T>(ctx, variance);
 
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
 
@@ -383,42 +393,7 @@ DEFINE_BUILTIN_OP_IMPORTER(BatchNormalization)
     LOG_VERBOSE(
         "Found BatchNormalization node with non-conforming initializer types. Casting parameters to FP32 and combining "
         "into a single scale node.");
-    auto const scale = inputs.at(1).weights();
-    auto const bias = inputs.at(2).weights();
-    auto const mean = inputs.at(3).weights();
-    auto const variance = inputs.at(4).weights();
-
-    // In the case of mixed precision, cast all values to FLOAT.
-    float const* scaleValues = ctx->getWeightsContext().getFP32Values(scale);
-    float const* biasValues = ctx->getWeightsContext().getFP32Values(bias);
-    float const* meanValues = ctx->getWeightsContext().getFP32Values(mean);
-    float const* varianceValues = ctx->getWeightsContext().getFP32Values(variance);
-
-    nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
-
-    float eps = attrs.get<float>("epsilon", 1e-5f);
-
-    // Fold the weights together into a single bias and scale
-    int32_t const nbChannels = scale.shape.d[0];
-    auto combinedScale
-        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, scale.shape, /*batchNormNode=*/true);
-    auto combinedBias
-        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, bias.shape, /*batchNormNode=*/true);
-
-    // Validate that all the weights have the same amount of values
-    bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
-        && combinedScale.count() == scale.count() && combinedBias.count() == scale.count();
-    ONNXTRT_CHECK_NODE(
-        allSame, "Inputs to BatchNormalization must have the same shape!", node, nodeIdx, ErrorCode::kINVALID_NODE);
-
-    for (int32_t i = 0; i < nbChannels; ++i)
-    {
-        combinedScale.at<float>(i) = scaleValues[i] / sqrtf(varianceValues[i] + eps);
-        combinedBias.at<float>(i) = biasValues[i] - meanValues[i] * combinedScale.at<float>(i);
-    }
-
-    return scaleHelper(ctx, node, nodeIdx, *tensorPtr, nvinfer1::ScaleMode::kCHANNEL, combinedBias, combinedScale,
-        ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto::FLOAT), combinedBias.getName(), combinedScale.getName());
+    return batchnormWeightHelper<float>(ctx, node, nodeIdx, inputs);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(BlackmanWindow)
@@ -988,8 +963,10 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     nvinfer1::ITensor* tensorPtr = &convertToTensor(inputs.at(0), ctx);
     auto inputType = tensorPtr->getType();
     nvinfer1::ITensor* kernelTensorPtr = inputs.at(1).is_tensor() ? &convertToTensor(inputs.at(1), ctx) : nullptr;
+
+    bool const validBias = inputs.size() > 2 && !inputs.at(2).isNullTensor();
     nvinfer1::ITensor* biasTensorPtr
-        = inputs.size() > 2 && inputs.at(2).is_tensor() ? &convertToTensor(inputs.at(2), ctx) : nullptr;
+        = validBias && inputs.at(2).is_tensor() ? &convertToTensor(inputs.at(2), ctx) : nullptr;
 
     nvinfer1::Dims dims = tensorPtr->getDimensions();
     // Deconvolution input must be at least 3D and at most 5D.
@@ -1027,7 +1004,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
 
     // Get static bias weights
     nvinfer1::Weights staticBiasWeights;
-    if (inputs.size() > 2 && biasTensorPtr == nullptr)
+    if (validBias && biasTensorPtr == nullptr)
     {
         auto shapedBiasWeights = inputs.at(2).weights();
         // ONNX requires shapedBiasWeights to be 1D
@@ -1197,7 +1174,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
         }
     }
 
-    if (inputs.size() > 2 && biasTensorPtr == nullptr)
+    if (validBias && biasTensorPtr == nullptr)
     {
         ctx->network()->setWeightsName(biasWeights, inputs.at(2).weights().getName());
     }
@@ -1391,11 +1368,6 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
 {
     checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
 
-    // For QuantizeLinear, the output type (and thus quantization type) is dependent on the second input (zero point).
-    if (!isDQ && inputs.size() >= 3)
-    {
-        checkNotInvalidType(inputs.at(2), {"UINT8"}, node, nodeIdx);
-    }
     auto addConstantLayer
         = [ctx, node](nvinfer1::INetworkDefinition& network, ShapedWeights const& weights) -> nvinfer1::ITensor* {
         nvinfer1::IConstantLayer* constLayer = N_CHECK(network.addConstant(weights.shape, weights));
@@ -1408,7 +1380,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         return inputs.at(i).is_weights() && (ctx->getConstantLayer(inputs.at(i).weights().getName()) == nullptr);
     };
 
-    // Read the optional quantization axis attribute. Set it to the rank of the input tensor if not provided
+    // Quantization scales must be provided.
     ONNXTRT_CHECK_NODE((inputs.size() >= 2),
         "This version of TensorRT requires at least 2 inputs for the QuantizeLinear/DequantizeLinear operator.", node,
         nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
@@ -1479,6 +1451,24 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             "Attribute output_dtype specifies an unsupported data type " << outputDtype << ".", node, nodeIdx,
             nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
     }
+    DataType precision;
+    auto const precisionOnnx = attrs.get<int32_t>("precision", ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+    bool isPrecisionSet = (precisionOnnx != ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+    if (isPrecisionSet)
+    {
+        ONNXTRT_CHECK_NODE(!isDQ,
+            "Attribute precision can only be used with QuantizeLienar. For DequantizeLinear output_dtype determines "
+            "precision.",
+            node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+        isPrecisionSet = convertDtype(precisionOnnx, &precision);
+        ONNXTRT_CHECK_NODE(isPrecisionSet,
+            "Attribute precision specifies an unsupported data type " << precision << ".", node, nodeIdx,
+            nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK_NODE(
+            precision == DataType::kFLOAT || precision == DataType::kHALF || precision == DataType::kBF16,
+            "Attribute precision specifies an invalid data type for QuantizeLienar " << precision << ".", node,
+            nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+    }
 
     if (inputs.size() > 2)
     {
@@ -1488,17 +1478,17 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             "Mismatch between attribute output_dtype " << outputDtype << " and zero-point data type "
                                                        << zeroPointDataType << ".",
             node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+
+        // Validate and set quantization type.
         if (zeroPointDataType == DataType::kFP8 || zeroPointDataType == DataType::kINT8
             || zeroPointDataType == DataType::kINT4 || zeroPointDataType == DataType::kFP4)
         {
             chosenDataType = zeroPointDataType;
         }
+        // If zero point is set to UINT8 or other types, default to INT8.
         else
         {
-            // If zero point is set to UINT8, default to INT8.
-            LOG_WARNING(
-                "TensorRT doesn't support QuantizeLinear/DequantizeLinear with UINT8 zero_point. TensorRT will use "
-                "INT8 instead.");
+            LOG_WARNING("For zero_point with type " << zeroPointDataType << " TensorRT will use INT8 instead.");
             chosenDataType = DataType::kINT8;
         }
 
@@ -1553,13 +1543,24 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
     else if (isOutputDtypeSet)
     {
-        ONNXTRT_CHECK_NODE(outputDtype == DataType::kFP8 || outputDtype == DataType::kINT8
-                || outputDtype == DataType::kINT4 || outputDtype == DataType::kFP4,
-            "Attribute output_dtype specifies an invalid data type " << outputDtype << ".", node, nodeIdx,
-            nvonnxparser::ErrorCode::kINVALID_NODE);
-        chosenDataType = outputDtype;
+        if (isDQ)
+        {
+            ONNXTRT_CHECK_NODE(
+                outputDtype == DataType::kFLOAT || outputDtype == DataType::kHALF || outputDtype == DataType::kBF16,
+                "Attribute output_dtype specifies an invalid data type for DequantizeLienar" << outputDtype << ".",
+                node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+        }
+        else
+        {
+            ONNXTRT_CHECK_NODE(outputDtype == DataType::kFP8 || outputDtype == DataType::kINT8
+                    || outputDtype == DataType::kINT4 || outputDtype == DataType::kFP4,
+                "Attribute output_dtype specifies an invalid data type for QuantizeLinear" << outputDtype << ".", node,
+                nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+            chosenDataType = outputDtype;
+        }
     }
 
+    // Read the optional quantization axis attribute. Set it to the rank of the input tensor if not provided.
     int32_t axis = attrs.get<int32_t>("axis", inputDims.nbDims);
     convertAxis(axis, inputDims.nbDims, node, nodeIdx);
 
@@ -1648,10 +1649,12 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     if (isDQ)
     {
         // Add and configure a DequantizeLayer.
+        outputDtype = isOutputDtypeSet ? outputDtype : scaleType;
         if (stronglyTyped)
         {
             // Input type is inferred. Layer output type is specified with scaleType.
-            nvinfer1::IDequantizeLayer* dq = N_CHECK(ctx->network()->addDequantize(*dataInput, *scaleInput, scaleType));
+            nvinfer1::IDequantizeLayer* dq
+                = N_CHECK(ctx->network()->addDequantize(*dataInput, *scaleInput, outputDtype));
             dq->setAxis(axis);
             layer = dq;
         }
@@ -1662,7 +1665,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             dq->setAxis(axis);
             layer = dq;
             // Type constraint for layer output type.
-            layer->setOutputType(0, scaleType);
+            layer->setOutputType(0, outputDtype);
         }
     }
     else
@@ -1688,8 +1691,8 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             q->setAxis(axis);
             layer = q;
             // This implictly sets layer input type.
-            layer->setPrecision(scaleType);
-            // Type constraint for layer output type.
+            layer->setPrecision(isPrecisionSet ? precision : scaleType);
+       // Type constraint for layer output type.
             layer->setOutputType(0, chosenDataType);
         }
     }
@@ -1797,6 +1800,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_INT4DequantizeLinear)
     return QuantDequantLinearHelper(
         ctx, node, nodeIdx, inputs, true /*isDQ*/, true /*isCustomOp*/, DataType::kINT4 /*customOpType*/);
 }
+
 
 DECLARE_BUILTIN_OP_IMPORTER(Mul);
 DEFINE_BUILTIN_OP_IMPORTER(Div)
@@ -1941,9 +1945,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Expand)
     ShapeTensor const starts = similar(ctx, newDims, 0);
     // Do the broadcast rule.
     ShapeTensor const sizes = broadcast(ctx, newDims, newShape);
-    // Compute (x > 1 ? 1 : 0) for x in newDims, assuming positive x, using only TensorRT operations.
+    // Compute (x > 1 ? 1 : 0) for x in newDims, using only TensorRT operations.
+    ShapeTensor const zero = shapeVector(0);
     ShapeTensor const one = shapeVector(1);
-    ShapeTensor const strides = min(ctx, one, sub(ctx, newDims, one));
+    ShapeTensor const strides = min(ctx, one, max(ctx, sub(ctx, newDims, one), zero));
 
     nvinfer1::ISliceLayer* sliceLayer = addSlice(ctx, newInputTensor, starts, sizes, strides);
     ctx->registerLayer(sliceLayer, node);
@@ -4896,9 +4901,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 
     layer->setResizeMode(interpolationMode);
 
-    LOG_VERBOSE("Running resize layer with: \n"
-        << "Transformation mode: " << transformationMode << "\n"
-        << "Resize mode: " << mode << "\n");
+    LOG_VERBOSE("Running resize layer with:");
+    LOG_VERBOSE("    Transformation mode: " << transformationMode);
+    LOG_VERBOSE("    Resize mode: " << mode);
 
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -5234,7 +5239,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Scan)
     OnnxAttrs attrs(node, ctx);
 
     // In opset 8, the scan node is defined differently than in later opsets.
-    //     1. It has an optonal input `sequence_lens`
+    //     1. It has an optional input `sequence_lens`
     //     2. The scan input/output axis are always set to 1
     const int32_t opset8Offset = ctx->getOpsetVersion() == 8 ? 1 : 0;
     if (opset8Offset == 1)
@@ -6845,11 +6850,20 @@ DEFINE_BUILTIN_OP_IMPORTER(FallbackPluginImporter)
     OnnxAttrs attrs(node, ctx);
     std::string const pluginName{node.op_type()};
     std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
-    std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
+    std::string pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
 
     LOG_INFO("Searching for plugin: " << pluginName << ", plugin_version: " << pluginVersion
                                       << ", plugin_namespace: " << pluginNamespace);
     nvinfer1::IPluginCreatorInterface* creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
+
+    // Fallback check to the node's domain
+    if (!creator)
+    {
+        pluginNamespace = node.domain();
+        LOG_INFO("Searching for plugin wth node domain namespace: " << pluginNamespace);
+        creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
+    }
+
     ONNXTRT_CHECK_NODE(creator, "Plugin not found, are the plugin name, version, and namespace correct?", node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
 

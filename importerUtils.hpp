@@ -12,7 +12,7 @@
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 
-#include "plugin.h"
+#include "NvInferPythonPlugin.h"
 #include <NvInfer.h>
 
 #include "bfloat16.hpp"
@@ -40,8 +40,8 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(
     ImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{0})
 {
-    assert(getShapedWeightsDataType<ScalarType>() == type);
-    assert(volume(shape) == 1 && "Cannot add constant scalar with a shape that has volume > 1");
+    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(volume(shape) == 1 && "Cannot add constant scalar with a shape that has volume > 1", ErrorCode::kINTERNAL_ERROR);
     ShapedWeights scalarWeights = ctx->createNamedTempWeights(type, shape);
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(scalarWeights.shape, scalarWeights));
@@ -54,16 +54,19 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstant(
     ImporterContext* ctx, std::vector<ScalarType> const& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
 {
-    assert(getShapedWeightsDataType<ScalarType>() == type);
-    assert(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided");
+    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided", ErrorCode::kINTERNAL_ERROR);
     auto const sizeInBits = getDtypeSizeBits(type);
-    assert(sizeInBits % 8 == 0); // TRT-22989: handle sub-byte size and shape checks
-    assert(sizeof(ScalarType) == sizeInBits / 8 && "ONNX dtype does not have the same size as the value type");
-    (void) sizeInBits;
+    ONNXTRT_CHECK(sizeInBits % 8 == 0, ErrorCode::kINTERNAL_ERROR); // TRT-22989: handle sub-byte size and shape checks
+    ONNXTRT_CHECK(sizeof(ScalarType) == sizeInBits / 8 && "ONNX dtype does not have the same size as the value type", ErrorCode::kINTERNAL_ERROR);
     ShapedWeights weights = ctx->createNamedTempWeights(type, shape);
     std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(weights.shape, weights));
-    ctx->network()->setWeightsName(weights, weights.getName());
+    // Only set names for non-empty weights
+    if (values.size() != 0)
+    {
+        ctx->network()->setWeightsName(weights, weights.getName());
+    }
     return l;
 }
 
@@ -330,31 +333,38 @@ template <typename WeightType>
 void weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightVector)
 {
     ONNXTRT_CHECK(weights.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
-    ONNXTRT_CHECK((weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32)
-            || (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
-            || (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::BOOL)
-            || (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::FLOAT),
+    ShapedWeights const sWeights = weights.weights();
+    ONNXTRT_CHECK((sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
+            || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
+            || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
+            || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
+            || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16),
         ErrorCode::kINVALID_NODE);
-    weightVector->resize(weights.weights().count());
-    if (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT64)
+    weightVector->resize(sWeights.count());
+    if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
     {
-        auto array_start = static_cast<int64_t*>(weights.weights().values);
-        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+        auto array_start = static_cast<int64_t*>(sWeights.values);
+        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
     }
-    else if (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::INT32)
+    else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
     {
-        auto array_start = static_cast<int32_t*>(weights.weights().values);
-        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+        auto array_start = static_cast<int32_t*>(sWeights.values);
+        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
     }
-    else if (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::BOOL)
+    else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
     {
-        auto array_start = static_cast<bool*>(weights.weights().values);
-        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+        auto array_start = static_cast<bool*>(sWeights.values);
+        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
     }
-    else if (weights.weights().type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
+    else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
     {
-        auto array_start = static_cast<float*>(weights.weights().values);
-        std::copy(array_start, array_start + weights.weights().count(), weightVector->begin());
+        auto array_start = static_cast<float*>(sWeights.values);
+        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+    }
+    else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
+    {
+        auto array_start = static_cast<half_float::half*>(sWeights.values);
+        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
     }
 }
 

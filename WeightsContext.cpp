@@ -263,19 +263,7 @@ bool WeightsContext::convertOnnxWeights(
         dataPtr = dataBuf.data();
 
         // Cast non-native TRT types to their corresponding proxy types
-        if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
-        {
-            // Cast UINT8 weights to INT32.
-            dataPtr = convertUINT8(reinterpret_cast<uint8_t const*>(dataPtr), shape);
-            size_t const sizeOffset = sizeof(int32_t) / sizeof(uint8_t);
-            if (multiplicationWillOverflow(nbytes, sizeOffset))
-            {
-                return false;
-            }
-            nbytes = nbytes * sizeOffset;
-            onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
-        }
-        else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
+        if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
         {
             // Cast DOUBLE weights to FLOAT.
             dataPtr = convertDouble(reinterpret_cast<double const*>(dataPtr), shape);
@@ -305,34 +293,7 @@ bool WeightsContext::convertOnnxWeights(
     // Weights information is within the TensorProto itself
 
     // Cast non-native TRT types to their corresponding proxy types
-    if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
-    {
-        onnxDtype = ::ONNX_NAMESPACE::TensorProto::INT32;
-        if (onnxTensor.raw_data().size() > 0)
-        {
-            dataPtr = convertUINT8(reinterpret_cast<uint8_t const*>(onnxTensor.raw_data().data()), shape);
-            size_t const sizeOffset = (sizeof(int32_t) / sizeof(uint8_t));
-            if (multiplicationWillOverflow(nbytes, sizeOffset))
-            {
-                return false;
-            }
-            nbytes = onnxTensor.raw_data().size() * sizeOffset;
-        }
-        else if (onnxTensor.int32_data().size() > 0)
-        {
-            dataPtr = (void*) onnxTensor.int32_data().data();
-            if (multiplicationWillOverflow(nbytes, sizeof(int32_t)))
-            {
-                return false;
-            }
-            nbytes = onnxTensor.int32_data().size() * sizeof(int32_t);
-            if (ownAllWeights)
-            {
-                dataPtr = ownWeights(dataPtr, onnxDtype, shape, nbytes);
-            }
-        }
-    }
-    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
+    if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
     {
         if (onnxTensor.raw_data().size() > 0)
         {
@@ -432,7 +393,8 @@ bool WeightsContext::convertOnnxWeights(
             dataPtr = ownWeights(dataPtr, onnxDtype, shape, nbytes);
         }
     }
-    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN)
+    else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN
+        || onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
     {
         if (onnxTensor.raw_data().size() > 0)
         {

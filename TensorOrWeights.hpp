@@ -125,9 +125,15 @@ public:
         return is_tensor() ? tensor().getType() == nvinfer1::DataType::kINT8
                            : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
     }
+    bool isUint8() const
+    {
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kUINT8
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
+    }
     bool isBool() const
     {
-        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kBOOL : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kBOOL
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
     }
     bool isFp8() const
     {

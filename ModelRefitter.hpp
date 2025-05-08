@@ -93,7 +93,7 @@ public:
     {
         ONNXTRT_TRY
         {
-            return (index >= 0 && index < mErrors.size()) ? &mErrors.at(index) : nullptr;
+            return (index >= 0 && static_cast<size_t>(index) < mErrors.size()) ? &mErrors.at(index) : nullptr;
         }
         ONNXTRT_CATCH_LOG(mLogger)
         return nullptr;

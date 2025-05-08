@@ -897,7 +897,64 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
 
 #if ENABLE_STD_PLUGIN
     auto& pluginRegistry = ctx->network()->getBuilder().getPluginRegistry();
-    creator = pluginRegistry.getCreator(pluginName.c_str(), pluginVersion.c_str(), pluginNamespace.c_str());
+
+    int32_t numCreators = 0;
+    auto creators = pluginRegistry.getAllCreatorsRecursive(&numCreators);
+
+    // Helper function to check if a plugin creator matches the requested plugin parameters
+    auto matchesPlugin = [&](char const* name, char const* version, char const* ns) -> bool {
+        return std::string(name) == pluginName && std::string(version) == pluginVersion
+            && std::string(ns) == pluginNamespace;
+    };
+
+    // Search for a creator that matches the requested plugin
+    // the creators are guaranteed to be unique
+    for (int32_t i = 0; i < numCreators; i++)
+    {
+        auto currentCreator = creators[i];
+        if (!currentCreator)
+        {
+            continue;
+        }
+
+        // Get the creator version to determine the appropriate type
+        auto const creatorVersion = getPluginCreatorVersion(currentCreator);
+        bool matches = false;
+
+        switch (creatorVersion)
+        {
+        case CreatorVersion::kV1:
+        {
+            auto const v1Creator = static_cast<nvinfer1::IPluginCreator const*>(currentCreator);
+            matches = matchesPlugin(
+                v1Creator->getPluginName(), v1Creator->getPluginVersion(), v1Creator->getPluginNamespace());
+            break;
+        }
+        case CreatorVersion::kV3ONE:
+        {
+            auto const v3Creator = static_cast<nvinfer1::IPluginCreatorV3One const*>(currentCreator);
+            matches = matchesPlugin(
+                v3Creator->getPluginName(), v3Creator->getPluginVersion(), v3Creator->getPluginNamespace());
+            break;
+        }
+        case CreatorVersion::kV3QUICK:
+        {
+            auto const v3QuickCreator = static_cast<nvinfer1::IPluginCreatorV3Quick const*>(currentCreator);
+            matches = matchesPlugin(v3QuickCreator->getPluginName(), v3QuickCreator->getPluginVersion(),
+                v3QuickCreator->getPluginNamespace());
+            break;
+        }
+            // No default case as the creatorVersion is guaranteed to be one of the above as per
+            // `getPluginCreatorVersion()`. For any future plugin creator versions added, this switch statement will
+            // need to be updated along with `getPluginCreatorVersion()`.
+        }
+
+        if (matches)
+        {
+            creator = currentCreator;
+            break;
+        }
+    }
 #endif // ENABLE_STD_PLUGIN
 
     // Do not perform a N_CHECK here as a plugin not being found is a valid case. It is up to the callers to handle the
@@ -982,6 +1039,9 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
     }
     else if (creatorVersion == CreatorVersion::kV3QUICK)
     {
+        // QDP framework relies on the name passed to createPlugin() being exactly equal to the registered plugin name
+        // So the name should be set to the op type
+        std::string const pluginOpName{node.op_type()};
 
         OnnxAttrs attrs(node, ctx);
         nvinfer1::QuickPluginCreationRequest request;
@@ -1017,9 +1077,9 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
                                              : nvinfer1::QuickPluginCreationRequest::kUNKNOWN);
         }
 
-        return std::unique_ptr<nvinfer1::IPluginV3>{
-            static_cast<nvinfer1::IPluginCreatorV3Quick*>(pluginCreator)
-                ->createPlugin(name.c_str(), pluginNamespace.c_str(), &fc, nvinfer1::TensorRTPhase::kBUILD, request)};
+        return std::unique_ptr<nvinfer1::IPluginV3>{static_cast<nvinfer1::IPluginCreatorV3Quick*>(pluginCreator)
+                                                        ->createPlugin(pluginOpName.c_str(), pluginNamespace.c_str(),
+                                                            &fc, nvinfer1::TensorRTPhase::kBUILD, request)};
     }
     ONNXTRT_CHECK(false && "Found invalid creator version when creating a V3 plugin.", ErrorCode::kINTERNAL_ERROR);
 }

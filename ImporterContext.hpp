@@ -358,12 +358,18 @@ public:
     }
     void addLayerOutputTensors(std::string name, std::vector<TensorOrWeights> const& outputs)
     {
+        static std::unordered_set<std::string> duplicateNames;
         if (mNodeNameToTensor.find(name) != mNodeNameToTensor.end())
         {
-            auto* ctx = this; // For logging
-            LOG_WARNING(
-                "A node named " << name
-                                << " already exists, the output tensors of this new instance will not be queryable.");
+            // Log once (only if insertion succeeded) for each unique name.
+            auto result = duplicateNames.insert(name);
+            if (result.second)
+            {
+                auto* ctx = this; // For logging
+                LOG_WARNING(
+                    "A node named " << name
+                                    << " already exists, the output tensors of this new instance will not be queryable.");
+            }
             return;
         }
         for (auto const& output : outputs)

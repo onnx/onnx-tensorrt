@@ -113,7 +113,7 @@ bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto co
     OnnxAttrs attrs(node, ctx);
     std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
     std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
-    LOG_INFO("Checking if node can be treated as plugin: " << node.op_type() << ", plugin_version: " << pluginVersion
+    LOG_VERBOSE("Checking if node can be treated as plugin: " << node.op_type() << ", plugin_version: " << pluginVersion
                                                            << ", plugin_namespace: " << pluginNamespace);
     nvinfer1::IPluginCreatorInterface* creator
         = importPluginCreator(ctx, node.op_type(), pluginVersion, pluginNamespace);
@@ -162,6 +162,26 @@ void parseNode(
     }
     LOG_VERBOSE(ssInputs.str());
 
+    // UINT8 weights that are not Q/DQ inputs will be converted to INT32
+    if (node.op_type() != "QuantizeLinear" && node.op_type() != "DequantizeLinear")
+    {
+        for (auto& nodeInput : nodeInputs)
+        {
+            if (nodeInput.is_weights()
+                && nodeInput.weights().type == static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::UINT8))
+            {
+                auto weights = nodeInput.weights();
+                LOG_WARNING("UINT8 data " << weights.name << " is being converted to INT32.");
+                auto uint8_data = static_cast<uint8_t*>(weights.values);
+                int32_t* int32_data = ctx->getWeightsContext().convertUINT8(uint8_data, weights.shape);
+                auto int32ShapedWeights = ShapedWeights(
+                    static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::INT32), int32_data, weights.shape);
+                ctx->tensors()[std::string(weights.name)] = int32ShapedWeights;
+                nodeInput = int32ShapedWeights;
+            }
+        }
+    }
+
     // Dispatch to appropriate converter.
     NodeImporter const* importFunc{nullptr};
     if (opImporters.count(nodeType))
@@ -173,18 +193,18 @@ void parseNode(
         // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
         if (isNodeInPluginRegistry(ctx, node))
         {
-            LOG_INFO("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
+            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
             importFunc = &opImporters.at("FallbackPluginImporter");
         }
         else
         {
-            LOG_INFO("Found registered local function: " << nodeType << ". Importing as a local function.");
+            LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             importFunc = &opImporters.at("LocalFunctionImporter");
         }
     }
     else
     {
-        LOG_INFO("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
+        LOG_VERBOSE("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
         importFunc = &opImporters.at("FallbackPluginImporter");
     }
 
@@ -269,9 +289,9 @@ void parseNode(
         {
             ctx->registerTensor(std::move(output), outputName);
         }
-        // UINT8 is only allowed as network inputs and outputs. Therefore any node that produces an UINT8-typed
-        // output that is not also a graph output is unsupported.
-        if (output.getType() == "UINT8")
+        // UINT8 is only allowed as network inputs, network outputs, and constants for QDQ nodes. Therefore any
+        // non-constant node that produces an UINT8-typed output that is not also a graph output is unsupported.
+        if (output.getType() == "UINT8" && node.op_type() != "Constant")
         {
             bool legalUINT8 = false;
             for (auto const& graphOutput : ctx->getGraphOutputNames())
@@ -319,18 +339,18 @@ void parseNodeStaticCheck(
         // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
         if (isNodeInPluginRegistry(ctx, node))
         {
-            LOG_INFO("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
+            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
             checkerFunc = &opCheckers.at("FallbackPluginImporter");
         }
         else
         {
-            LOG_INFO("Found registered local function: " << nodeType << ". Importing as a local function.");
+            LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             checkerFunc = &opCheckers.at("LocalFunctionImporter");
         }
     }
     else
     {
-        LOG_INFO("No checker registered for op: " << nodeType << ". Attempting to check as plugin.");
+        LOG_VERBOSE("No checker registered for op: " << nodeType << ". Attempting to check as plugin.");
         checkerFunc = &opCheckers.at("FallbackPluginImporter");
     }
     (*checkerFunc)(ctx, node, errors, nodeIndex);
@@ -424,11 +444,30 @@ std::vector<Status> importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInf
     return errorList;
 }
 
+namespace
+{
+//! \return true if \p inputName is a minus sign followed by digits.
+//! I.e., it matches the regex `^\-\d+$`.
+[[nodiscard]] bool isNegativeInteger(std::string_view inputName) noexcept
+{
+    // Check if the string starts with '-' and has more than one character
+    if (inputName.size() > 1 && inputName.front() == '-')
+    {
+        // Use std::all_of to check if all characters after '-' are digits
+        return std::all_of(inputName.begin() + 1, inputName.end(),
+            [](char c) {return std::isdigit(static_cast<unsigned char>(c));});
+    }
+    return false;
+}
+} // namespace
+
 static void setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
 {
     for (auto const& namedDim : namedDims)
     {
-        namedDim.tensor->setDimensionName(namedDim.index, namedDim.dimParam.c_str());
+        std::string const name = isNegativeInteger(namedDim.dimParam) ?
+            "trt_dynamic_dim_" + std::to_string(namedDim.index) : namedDim.dimParam;
+        namedDim.tensor->setDimensionName(namedDim.index, name.c_str());
     }
 }
 

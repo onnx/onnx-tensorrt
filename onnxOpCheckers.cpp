@@ -812,9 +812,18 @@ DEFINE_OP_CHECKER(FallbackPluginImporter)
     OnnxAttrs attrs(node, ctx);
     std::string const pluginName{node.op_type()};
     std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
-    std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
+    std::string pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
 
     nvinfer1::IPluginCreatorInterface* creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
+
+    // Fallback check to the node's domain
+    if (!creator)
+    {
+        LOG_INFO("Searching for plugin wth node domain namespace: " << pluginNamespace);
+        pluginNamespace = node.domain();
+        creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
+    }
+
     STATIC_CHECK(creator && "Plugin not found, are the plugin name, version, and namespace correct?",
         nvonnxparser::ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 }
