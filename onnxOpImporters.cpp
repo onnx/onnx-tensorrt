@@ -31,7 +31,6 @@
 #include <sstream>
 #include <tuple>
 #include <unordered_set>
-
 namespace onnx2trt
 {
 
@@ -1366,7 +1365,14 @@ ShapedWeights getWeightsFromIdentityOrConstant(nvinfer1::INetworkDefinition& net
 NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t nodeIdx,
     std::vector<TensorOrWeights>& inputs, bool isDQ, bool isCustomOp, DataType customOpType = DataType::kFP8)
 {
-    checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
+    auto getFlagBit = [](nvonnxparser::OnnxParserFlag const flag) { return 1U << static_cast<uint32_t>(flag); };
+    bool const enableUInt8AsymmetricQuantization
+        = ctx->getFlags() & getFlagBit(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
+
+    if (isDQ && !enableUInt8AsymmetricQuantization)
+    {
+        checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
+    }
 
     auto addConstantLayer
         = [ctx, node](nvinfer1::INetworkDefinition& network, ShapedWeights const& weights) -> nvinfer1::ITensor* {
@@ -1428,13 +1434,14 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
     auto const& inputDims = dataInput->getDimensions();
     auto const& scaleDims = scaleInput->getDimensions();
+    auto const& inputType = dataInput->getType();
     auto const& scaleType = scaleInput->getType();
 
     auto const& scaleSize = isDynamic(scaleDims) ? 0 : volume(scaleDims);
 
     // Input 2 initializes the layer's zero-point.
     nvinfer1::ITensor* zeroPointInput = nullptr;
-    // ONNX default is UINT8, TRT will default to INT8 as TRT doesn't allow UINT8 quantization
+    // ONNX default is UINT8, TRT will default to INT8 as TRT allows UINT8 quantization only on DLA.
     // When importing CustomOp FP8/INT4 Q/DQ, default to FP8/INT4
     DataType chosenDataType = isCustomOp ? customOpType : DataType::kINT8;
     ONNXTRT_CHECK_NODE(!isCustomOp || customOpType == DataType::kFP8 || customOpType == DataType::kINT4,
@@ -1466,9 +1473,28 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
         ONNXTRT_CHECK_NODE(
             precision == DataType::kFLOAT || precision == DataType::kHALF || precision == DataType::kBF16,
-            "Attribute precision specifies an invalid data type for QuantizeLienar " << precision << ".", node,
-            nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+            "Attribute precision specifies an invalid data type for QuantizeLinear " << precision << ".", node, nodeIdx,
+            nvonnxparser::ErrorCode::kINVALID_NODE);
+
+        DataType trtPrecisionType = scaleType;
+        if (precision != trtPrecisionType)
+        {
+            LOG_WARNING("TensorRT does not support setting quantization precision, the precision will be set to "
+                << trtPrecisionType << ".");
+        }
     }
+
+    auto checkQuantizationDatatype = [&node, &nodeIdx, enableUInt8AsymmetricQuantization](DataType dtype) {
+        ONNXTRT_CHECK_NODE(dtype == DataType::kFP8 || dtype == DataType::kINT8 || dtype == DataType::kINT4
+                || dtype == DataType::kFP4 || (dtype == DataType::kUINT8 && enableUInt8AsymmetricQuantization),
+            "TensorRT only allows FP8, INT8, INT4, "
+                << (enableUInt8AsymmetricQuantization ? "UINT8, " : "")
+                << "and FP4 quantization. The specified quantization type is " + getTrtDtypeName(dtype)
+                    + ((dtype == DataType::kUINT8 && !enableUInt8AsymmetricQuantization)
+                            ? ". Set the kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA flag to allow importing UINT8."
+                            : "."),
+            node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+    };
 
     if (inputs.size() > 2)
     {
@@ -1481,11 +1507,22 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
 
         // Validate and set quantization type.
         if (zeroPointDataType == DataType::kFP8 || zeroPointDataType == DataType::kINT8
-            || zeroPointDataType == DataType::kINT4 || zeroPointDataType == DataType::kFP4)
+            || zeroPointDataType == DataType::kINT4
+            || zeroPointDataType == DataType::kFP4
+            // Use UINT8 faithfully only if the flag is set
+            || (zeroPointDataType == DataType::kUINT8 && enableUInt8AsymmetricQuantization))
         {
             chosenDataType = zeroPointDataType;
         }
-        // If zero point is set to UINT8 or other types, default to INT8.
+        // If zero point is set to UINT8 and the flag has not been set, default to INT8.
+        else if (zeroPointDataType == DataType::kUINT8 && !enableUInt8AsymmetricQuantization)
+        {
+            LOG_WARNING(
+                "TensorRT supports QuantizeLinear/DequantizeLinear with UINT8 zero_point only on DLA (version >= "
+                "3.16). "
+                "Defaulting to INT8 instead. To import as UINT8, set the kIMPORT_UINT8_QUANTIZATION flag.");
+            chosenDataType = DataType::kINT8;
+        }
         else
         {
             LOG_WARNING("For zero_point with type " << zeroPointDataType << " TensorRT will use INT8 instead.");
@@ -1499,6 +1536,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             // TRT expect FP32 zero point. To handle both case, we always create new constant for zero point.
             auto& zeroPtInput = inputs.at(2);
             ShapedWeights zeroPoint{};
+
             if (zeroPtInput.is_tensor())
             {
                 // Look backward to find out the original weights in "Constant" node.
@@ -1508,7 +1546,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             {
                 zeroPoint = zeroPtInput.weights();
                 ONNXTRT_CHECK_NODE(zeroPoint.values,
-                    "QuantizeLinear/DequantizeLinear operator must contains all zeros values.", node, nodeIdx,
+                    "QuantizeLinear/DequantizeLinear zero-point must have non-null values.", node, nodeIdx,
                     nvonnxparser::ErrorCode::kINVALID_NODE);
             }
             if (!zeroPoint.values)
@@ -1516,16 +1554,18 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
                 // Cannot static analysis the zero point values from Q/DQ, fallback to use the activation input.
                 zeroPointInput = &convertToTensor(inputs.at(2), ctx);
             }
+            else if (enableUInt8AsymmetricQuantization)
+            {
+                zeroPointInput = addConstantLayer(*ctx->network(), zeroPoint);
+            }
             else
             {
-                // Create new constant for zero input.
                 ONNXTRT_CHECK_NODE(shiftIsAllZeros(zeroPoint),
-                    "TensorRT only supports symmetric quantization. The zero point for the "
-                    "QuantizeLinear/DequantizeLinear operator must be all zeros.",
+                    "Non-zero zero point is not supported. Please set kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA"
+                    "to enable asymmetric quantization if it is on DLA.",
                     node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
-
-                // Convert the zero-point to float because TRT uses float for zero-point. Note this zero-point is not
-                // refittable because refit need the same data type as builder time.
+                // Convert the zero-point to float because TRT uses float for zero-point. Note this zero-point is
+                // not refittable because refit need the same data type as builder time.
                 auto fpZeroPoint = createZeroShifts(zeroPoint, ::ONNX_NAMESPACE::TensorProto::FLOAT, ctx);
                 zeroPointInput = addConstantLayer(*ctx->network(), fpZeroPoint);
             }
@@ -1552,10 +1592,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         }
         else
         {
-            ONNXTRT_CHECK_NODE(outputDtype == DataType::kFP8 || outputDtype == DataType::kINT8
-                    || outputDtype == DataType::kINT4 || outputDtype == DataType::kFP4,
-                "Attribute output_dtype specifies an invalid data type for QuantizeLinear" << outputDtype << ".", node,
-                nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+            checkQuantizationDatatype(outputDtype);
             chosenDataType = outputDtype;
         }
     }
@@ -1633,11 +1670,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     }
 
     nvinfer1::ILayer* layer = nullptr;
-    ONNXTRT_CHECK_NODE((chosenDataType == DataType::kINT8 || chosenDataType == DataType::kFP8
-                           || chosenDataType == DataType::kINT4 || chosenDataType == DataType::kFP4),
-        "TensorRT only allows FP8, INT8, INT4, and FP4 quantization. The requested quantization type is"
-            + getTrtDtypeName(chosenDataType) + ".",
-        node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
+    checkQuantizationDatatype(chosenDataType);
 
     bool stronglyTyped = ctx->isStronglyTyped();
     if (!stronglyTyped && chosenDataType != DataType::kINT8)
@@ -1673,10 +1706,10 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         // Add and configure a QuantizeLayer.
         if (stronglyTyped)
         {
-            if (ctx->getOpsetVersion() < 19 && scaleInput->getType() != dataInput->getType())
+            if (ctx->getOpsetVersion() < 19 && scaleInput->getType() != inputType)
             {
                 // Ensure that Q scale type matches input type.
-                auto* scaleCastLayer = N_CHECK(ctx->network()->addCast(*scaleInput, dataInput->getType()));
+                auto* scaleCastLayer = N_CHECK(ctx->network()->addCast(*scaleInput, inputType));
                 scaleInput = N_CHECK(scaleCastLayer->getOutput(0));
             }
             // Input type is inferred. Layer output type is specified with chosenDataType.
@@ -2037,7 +2070,18 @@ DEFINE_BUILTIN_OP_IMPORTER(Floor)
 
 DEFINE_BUILTIN_OP_IMPORTER(Gather)
 {
-    checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
+    // If UINT8 quantization is supported, Gather nodes can have UINT8 input if they feed into a Dequantize node.
+    auto getFlagBit = [](nvonnxparser::OnnxParserFlag const flag) { return 1U << static_cast<uint32_t>(flag); };
+    bool const enableUInt8AsymmetricQuantization
+        = ctx->getFlags() & getFlagBit(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
+
+    // note that all nodes except Dequantize will also reject Uint8, so that is what ensures this can only feed into a
+    // Dequantize node
+    if (!enableUInt8AsymmetricQuantization)
+    {
+        checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
+    }
+
     nvinfer1::ITensor& data = convertToTensor(inputs.at(0), ctx);
     nvinfer1::ITensor* indices = &convertToTensor(inputs.at(1), ctx);
     OnnxAttrs attrs(node, ctx);
@@ -3072,12 +3116,12 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
     }
     else if (dt == DataType::kBF16)
     {
-        scaleLayer = addConstantScalar(ctx, static_cast<BFloat16>(0), ::ONNX_NAMESPACE::TensorProto::BFLOAT16);
+        scaleLayer = addConstantScalar(ctx, static_cast<BFloat16>(1), ::ONNX_NAMESPACE::TensorProto::BFLOAT16);
         biasLayer = addConstantScalar(ctx, static_cast<BFloat16>(0), ::ONNX_NAMESPACE::TensorProto::BFLOAT16);
     }
     else
     {
-        scaleLayer = addConstantScalar(ctx, static_cast<float>(0), ::ONNX_NAMESPACE::TensorProto::FLOAT);
+        scaleLayer = addConstantScalar(ctx, static_cast<float>(1), ::ONNX_NAMESPACE::TensorProto::FLOAT);
         biasLayer = addConstantScalar(ctx, static_cast<float>(0), ::ONNX_NAMESPACE::TensorProto::FLOAT);
     }
     auto* scale = inputs.at(1).isNullTensor() ? N_CHECK(scaleLayer->getOutput(0)) : &convertToTensor(inputs.at(1), ctx);
@@ -3157,7 +3201,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
     constexpr int32_t NB_NON_STATE_INPUTS = 2; // First 2 inputs are trip count and condition respectively.
     constexpr int32_t NB_DISCARDED_OUTPUTS
         = 1; // First output is the updated value of the condition, and is ignored by the outer loop node.
-    constexpr int32_t DUMMY_SCAN_OUTPUT_LENGTH = 1024;
     ONNXTRT_CHECK_NODE((inputs.size() >= 2),
         "The Loop operator requires at least 2 inputs. The current number of inputs = " << inputs.size() << ".", node,
         nodeIdx, ErrorCode::kINVALID_NODE);
@@ -3263,13 +3306,26 @@ DEFINE_BUILTIN_OP_IMPORTER(Loop)
         // In the latter case, the scan outputs must not be used in the rest of the model.
         if (tripLimit)
         {
+            if (cond)
+            {
+                LOG_WARNING("For loop node "
+                    << node.name()
+                    << " both a trip limit and a loop termination condition was set! If the number of iterations of "
+                       "the loop is less than the trip limit during runtime, scan output "
+                    << scanOutput.getName()
+                    << " may have the wrong shape. For consistent results it's recommended to export loops with only a "
+                       "trip limit.");
+            }
             trtScanOut->setInput(1, *tripLimit);
         }
         else
         {
-            trtScanOut->setInput(1,
-                *N_CHECK(addConstantScalar(ctx, DUMMY_SCAN_OUTPUT_LENGTH, ::ONNX_NAMESPACE::TensorProto_DataType_INT32)
-                             ->getOutput(0)));
+            ONNXTRT_CHECK_NODE(false,
+                "TensorRT cannot infer the shape of scan output "
+                    << scanOutput.getName()
+                    << " since no trip limit was set. For better compatibility, it's recommended to export loops with "
+                       "only a trip limit.",
+                node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         }
         nodeOutputs.emplace_back(N_CHECK(trtScanOut->getOutput(0)));
     }
@@ -4410,12 +4466,12 @@ DEFINE_BUILTIN_OP_IMPORTER(RandomUniformLike)
     ONNXTRT_CHECK_NODE((inputs.size() == 1),
         "The RandomUniformLike operator requires exactly 1 input. Current input size = " << inputs.size() << ".", node,
         nodeIdx, ErrorCode::kINVALID_NODE);
-    ONNXTRT_CHECK_NODE((inputs.at(0).is_tensor()), "The input tensor cannot be an initializer.", node, nodeIdx,
-        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
-    auto& input = inputs.at(0).tensor();
-    auto const inputShape = shapeOf(input);
+
+    // Copies shape and type information from the input.
+    auto inputLike = inputs.at(0);
+    auto const inputShape = shapeOf(inputLike);
     OnnxAttrs const attrs(node, ctx);
-    auto const dType = input.getType();
+    auto const dType = inputLike.getDataType();
 
     return randomHelper(ctx, node, nodeIdx, inputShape, attrs, dType, nvinfer1::FillOperation::kRANDOM_UNIFORM);
 }
@@ -4435,12 +4491,12 @@ DEFINE_BUILTIN_OP_IMPORTER(RandomNormalLike)
     ONNXTRT_CHECK_NODE((inputs.size() == 1),
         "The RandomNormalLike operator requires exactly 1 input. Current input size = " << inputs.size() << ".", node,
         nodeIdx, ErrorCode::kINVALID_NODE);
-    ONNXTRT_CHECK_NODE((inputs.at(0).is_tensor()), "The input tensor cannot be an initializer.", node, nodeIdx,
-        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
-    auto& input = inputs.at(0).tensor();
-    auto const inputShape = shapeOf(input);
+
+    // Copies shape and type information from the input.
+    auto inputLike = inputs.at(0);
+    auto const inputShape = shapeOf(inputLike);
     OnnxAttrs const attrs(node, ctx);
-    auto const dType = input.getType();
+    auto const dType = inputLike.getDataType();
 
     return randomHelper(ctx, node, nodeIdx, inputShape, attrs, dType, nvinfer1::FillOperation::kRANDOM_NORMAL);
 }
@@ -4907,6 +4963,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Resize)
 
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
+
 
 DEFINE_BUILTIN_OP_IMPORTER(Reshape)
 {
@@ -6886,7 +6943,7 @@ DEFINE_BUILTIN_OP_IMPORTER(FallbackPluginImporter)
         return addPluginWithCreator<nvinfer1::IPluginCreatorV3Quick>(
             ctx, node, nodeIdx, pluginNamespace, inputs, attrs, creator);
     }
-    default: ONNXTRT_CHECK(false && "Unsupported plugin creator version.", ErrorCode::kUNSUPPORTED_NODE);
+    default: ONNXTRT_CHECK(false, "Unsupported plugin creator version.", ErrorCode::kUNSUPPORTED_NODE);
     }
 }
 
