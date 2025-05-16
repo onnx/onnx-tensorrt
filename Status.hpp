@@ -7,10 +7,11 @@
 #include "NvOnnxParser.h"
 
 #include <algorithm>
-#include <iterator>
 #include <cassert>
+#include <iterator>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifndef ENABLE_STD_PLUGIN
 #define ENABLE_STD_PLUGIN 1

@@ -39,11 +39,11 @@
 
 #define ONNXTRT_THROW(status) throw OnnxTrtException(status)
 
-#define ONNXTRT_CHECK(cond, code)                                                                                      \
+#define ONNXTRT_CHECK(cond, desc, code)                                                                                \
     if (!(cond))                                                                                                       \
     {                                                                                                                  \
         std::ostringstream ss;                                                                                         \
-        ss << "Assertion failed: " << #cond;                                                                           \
+        ss << "Assertion failed: " << #cond << ": " << desc;                                                           \
         ONNXTRT_THROW(MAKE_ERROR(ss.str(), (code)));                                                                   \
     }
 

@@ -99,7 +99,11 @@ enum class OnnxParserFlag : int32_t
     //! implementation over the plugin implementation for InstanceNormalization nodes.
     //! This flag is required when building version-compatible or hardware-compatible engines.
     //! This flag is set to be ON by default.
-    kNATIVE_INSTANCENORM = 0
+    kNATIVE_INSTANCENORM = 0,
+    //! Enable UINT8 as a quantization data type and asymmetric quantization with non-zero zero-point values
+    //! in Quantize and Dequantize nodes. This flag is set to be OFF by default.
+    //! The resulting engine must be built targeting DLA version >= 3.16.
+    kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA = 1,
 };
 
 //!
@@ -110,7 +114,7 @@ enum class OnnxParserFlag : int32_t
 template <>
 constexpr inline int32_t EnumMax<OnnxParserFlag>() noexcept
 {
-    return 1;
+    return 2;
 }
 
 //!
@@ -213,6 +217,7 @@ public:
     //!
     virtual bool parseFromFile(const char* onnxModelFile, int verbosity) noexcept = 0;
 
+    //!
     //! [DEPRECATED] Deprecated in TensorRT 10.1. See supportsModelV2.
     //!
     //! \brief Check whether TensorRT supports a particular ONNX model.
@@ -229,7 +234,6 @@ public:
     TRT_DEPRECATED virtual bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) noexcept = 0;
 
-    //!
     //!\brief Parse a serialized ONNX model into the TensorRT network
     //! with consideration of user provided weights
     //!
@@ -498,16 +502,7 @@ namespace
 //!
 inline IParser* createParser(nvinfer1::INetworkDefinition& network, nvinfer1::ILogger& logger) noexcept
 {
-    try
-    {
-        return static_cast<IParser*>(createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
-    }
-    catch (std::exception& e)
-    {
-        logger.log(nvinfer1::ILogger::Severity::kINTERNAL_ERROR, e.what());
-    }
-
-    return nullptr;
+    return static_cast<IParser*>(createNvOnnxParser_INTERNAL(&network, &logger, NV_ONNX_PARSER_VERSION));
 }
 
 //!
@@ -521,17 +516,8 @@ inline IParser* createParser(nvinfer1::INetworkDefinition& network, nvinfer1::IL
 //!
 inline IParserRefitter* createParserRefitter(nvinfer1::IRefitter& refitter, nvinfer1::ILogger& logger) noexcept
 {
-    try
-    {
-        return static_cast<IParserRefitter*>(
-            createNvOnnxParserRefitter_INTERNAL(&refitter, &logger, NV_ONNX_PARSER_VERSION));
-    }
-    catch (std::exception& e)
-    {
-        logger.log(nvinfer1::ILogger::Severity::kINTERNAL_ERROR, e.what());
-    }
-
-    return nullptr;
+    return static_cast<IParserRefitter*>(
+        createNvOnnxParserRefitter_INTERNAL(&refitter, &logger, NV_ONNX_PARSER_VERSION));
 }
 
 } // namespace

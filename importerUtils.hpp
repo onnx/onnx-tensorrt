@@ -40,8 +40,11 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(
     ImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{0})
 {
-    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, ErrorCode::kINTERNAL_ERROR);
-    ONNXTRT_CHECK(volume(shape) == 1 && "Cannot add constant scalar with a shape that has volume > 1", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, "Found type mismatch when creating scalar value",
+        ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(volume(shape) == 1,
+        "Cannot add constant scalar with a shape that has volume > 1. Provided volume: " << volume(shape),
+        ErrorCode::kINTERNAL_ERROR);
     ShapedWeights scalarWeights = ctx->createNamedTempWeights(type, shape);
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(scalarWeights.shape, scalarWeights));
@@ -54,11 +57,11 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstant(
     ImporterContext* ctx, std::vector<ScalarType> const& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
 {
-    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, ErrorCode::kINTERNAL_ERROR);
-    ONNXTRT_CHECK(volume(shape) == static_cast<int64_t>(values.size()) && "Shape does not match number of values provided", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, "Found type mismatch when creating scalar value", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(volume(shape) == static_cast<int64_t>(values.size()), "Shape does not match number of values provided", ErrorCode::kINTERNAL_ERROR);
     auto const sizeInBits = getDtypeSizeBits(type);
-    ONNXTRT_CHECK(sizeInBits % 8 == 0, ErrorCode::kINTERNAL_ERROR); // TRT-22989: handle sub-byte size and shape checks
-    ONNXTRT_CHECK(sizeof(ScalarType) == sizeInBits / 8 && "ONNX dtype does not have the same size as the value type", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(sizeInBits % 8 == 0, "Size of type must be a multiple of 8 bits", ErrorCode::kINTERNAL_ERROR); // TRT-22989: handle sub-byte size and shape checks
+    ONNXTRT_CHECK(sizeof(ScalarType) == sizeInBits / 8, "ONNX dtype does not have the same size as the value type", ErrorCode::kINTERNAL_ERROR);
     ShapedWeights weights = ctx->createNamedTempWeights(type, shape);
     std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(weights.shape, weights));
@@ -332,13 +335,14 @@ nvinfer1::ITensor* resizeShapeTensor(ImporterContext* ctx, nvinfer1::ITensor& in
 template <typename WeightType>
 void weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightVector)
 {
-    ONNXTRT_CHECK(weights.is_weights(), ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK(weights.is_weights(), "Cannot convert a Tensor to a vector!", ErrorCode::kUNSUPPORTED_NODE);
     ShapedWeights const sWeights = weights.weights();
     ONNXTRT_CHECK((sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16),
+        "Found invalid weights type of: " << sWeights.type,
         ErrorCode::kINVALID_NODE);
     weightVector->resize(sWeights.count());
     if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
@@ -521,7 +525,7 @@ enum class CreatorVersion : int32_t
 {
     kV1,
     kV3ONE,
-    kV3QUICK
+    kV3QUICK,
 };
 
 //! Evaluate CreatorVersion given a pointer to a TensorRT plugin creator

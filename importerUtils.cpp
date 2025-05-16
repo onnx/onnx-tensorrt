@@ -11,7 +11,6 @@
 #include <ostream>
 #include <regex>
 #include <set>
-
 namespace onnx2trt
 {
 
@@ -168,12 +167,11 @@ NodeOutputs argMinMaxHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePr
 
 void broadcastTensor(ImporterContext* ctx, nvinfer1::ITensor*& t, int const nbDims)
 {
-    ONNXTRT_CHECK(
-        ctx->getOpsetVersion() >= 7 && "Pre-opset 7 broadcasting is unsupported in this version of the ONNX parser",
-        ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK(ctx->getOpsetVersion() >= 7,
+        "Pre-opset 7 broadcasting is unsupported in this version of the ONNX parser", ErrorCode::kUNSUPPORTED_NODE);
     auto const inputDims = shapeOf(*t);
     int const nbInputDims = inputDims.size();
-    ONNXTRT_CHECK((nbInputDims <= nbDims) && "Cannot broadcast a higher rank tensor to a lower rank tensor.",
+    ONNXTRT_CHECK((nbInputDims <= nbDims), "Cannot broadcast a higher rank tensor to a lower rank tensor.",
         ErrorCode::kUNSUPPORTED_NODE);
     if (nbInputDims < nbDims)
     {
@@ -393,10 +391,6 @@ bool shiftIsAllZeros(ShapedWeights const& shift)
 
 onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt, int32_t type, ImporterContext* ctx)
 {
-    if (!shiftIsAllZeros(shiftInt))
-    {
-        LOG_WARNING("TensorRT currenly supports only zero shifts values for QuatizeLinear/DequantizeLinear ops");
-    }
     auto shift = ctx->createNamedTempWeights(type, shiftInt.shape);
     float* sh = static_cast<float*>(shift.values);
     for (int i = 0, n = shift.count(); i < n; i++)
@@ -833,8 +827,8 @@ void getKernelParams(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     {
         // If auto_pad is SAME_LOWER or SAME_UPPER, input padding should be calculated
         // "pads" attribute should not be specified
-        ONNXTRT_CHECK(!attrs.count("pads")
-                && "Pads attribute should not be specified with SAME_LOWER or SAME_UPPER auto padding!",
+        ONNXTRT_CHECK(!attrs.count("pads"),
+            "Pads attribute should not be specified with SAME_LOWER or SAME_UPPER auto padding!",
             ErrorCode::kINVALID_NODE);
         // Note: ONNX is always NCHW ordering
         if (onnxAutoPad == "SAME_LOWER")
@@ -957,6 +951,7 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
     }
 #endif // ENABLE_STD_PLUGIN
 
+
     // Do not perform a N_CHECK here as a plugin not being found is a valid case. It is up to the callers to handle the
     // nullptr correctly.
     return creator;
@@ -983,19 +978,18 @@ namespace
 constexpr char const* kV1_CREATOR_IFACE_KIND = "PLUGIN CREATOR_V1";
 constexpr char const* kV3_CREATOR_ONE_IFACE_KIND = "PLUGIN CREATOR_V3ONE";
 constexpr char const* kV3_CREATOR_QUICK_IFACE_KIND = "PLUGIN CREATOR_V3QUICK";
-
-bool isKind(nvinfer1::InterfaceInfo const& info, char const* kind)
+bool isKind(nvinfer1::InterfaceInfo const& info, std::string_view kind)
 {
     ONNXTRT_CHECK(
-        info.kind != nullptr && "Invalid plugin creator interface with NULL kind.", ErrorCode::kUNSUPPORTED_NODE);
-    return std::strcmp(info.kind, kind) == 0;
+        info.kind != nullptr, "Invalid plugin creator interface with NULL kind.", ErrorCode::kUNSUPPORTED_NODE);
+    return info.kind == kind;
 }
 
 } // namespace
 
 CreatorVersion getPluginCreatorVersion(nvinfer1::IPluginCreatorInterface const* pluginCreator)
 {
-    ONNXTRT_CHECK(pluginCreator != nullptr && "Null plugin creator.", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(pluginCreator != nullptr, "Null plugin creator.", ErrorCode::kINTERNAL_ERROR);
     auto const ifaceInfo = pluginCreator->getInterfaceInfo();
     if (isKind(ifaceInfo, kV1_CREATOR_IFACE_KIND))
     {
@@ -1009,7 +1003,7 @@ CreatorVersion getPluginCreatorVersion(nvinfer1::IPluginCreatorInterface const* 
     {
         return CreatorVersion::kV3QUICK;
     }
-    ONNXTRT_CHECK(false && "Unknown plugin creator version.", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(false, "Unknown plugin creator version.", ErrorCode::kINTERNAL_ERROR);
 }
 
 std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
@@ -1023,8 +1017,8 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
 
     auto const creatorVersion = getPluginCreatorVersion(pluginCreator);
 
-    ONNXTRT_CHECK((creatorVersion == CreatorVersion::kV3ONE || creatorVersion == CreatorVersion::kV3QUICK)
-            && "Only IPluginCreatorV3One and IPluginCreatorV3Quick are supported for V3 plugin imports.",
+    ONNXTRT_CHECK((creatorVersion == CreatorVersion::kV3ONE || creatorVersion == CreatorVersion::kV3QUICK),
+        "Only IPluginCreatorV3One and IPluginCreatorV3Quick are supported for V3 plugin imports.",
         ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::PluginFieldCollection fc;
@@ -1065,9 +1059,10 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
                 = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kPREFER_AOT_PYTHON_PLUGINS);
             auto const preferJIT
                 = ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kPREFER_JIT_PYTHON_PLUGINS);
-            ONNXTRT_CHECK(!(preferAOT && preferJIT) &&
-            "Both NetworkDefinitionCreationFlag::kPREFER_AOT_PYTHON_PLUGINS and "
-            "NetworkDefinitionCreationFlag::kPREFER_JIT_PYTHON_PLUGINS cannot be specified at the same time.", ErrorCode::kUNSUPPORTED_GRAPH);
+            ONNXTRT_CHECK(!(preferAOT && preferJIT),
+                "Both NetworkDefinitionCreationFlag::kPREFER_AOT_PYTHON_PLUGINS and "
+                "NetworkDefinitionCreationFlag::kPREFER_JIT_PYTHON_PLUGINS cannot be specified at the same time.",
+                ErrorCode::kUNSUPPORTED_GRAPH);
 
             // If neither flag is specified, defer to the plugin creator to pick whichever implementation has actually
             // been defined.
@@ -1081,7 +1076,7 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
                                                         ->createPlugin(pluginOpName.c_str(), pluginNamespace.c_str(),
                                                             &fc, nvinfer1::TensorRTPhase::kBUILD, request)};
     }
-    ONNXTRT_CHECK(false && "Found invalid creator version when creating a V3 plugin.", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(false, "Found invalid creator version when creating a V3 plugin.", ErrorCode::kINTERNAL_ERROR);
 }
 
 NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
@@ -1181,9 +1176,9 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
         inputXPtr = unsqueezeTensor(ctx, *inputXPtr, axes);
         weightPtr = unsqueezeTensor(ctx, *weightPtr, axes);
         offsetPtr = unsqueezeTensor(ctx, *offsetPtr, axes);
-        ONNXTRT_CHECK(inputXPtr && "Failed to unsqueeze the input tensor.", ErrorCode::kUNSUPPORTED_NODE);
-        ONNXTRT_CHECK(weightPtr && "Failed to unsqueeze the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
-        ONNXTRT_CHECK(offsetPtr && "Failed to unsqueeze the offset tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(inputXPtr, "Failed to unsqueeze the input tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(weightPtr, "Failed to unsqueeze the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(offsetPtr, "Failed to unsqueeze the offset tensor.", ErrorCode::kUNSUPPORTED_NODE);
     }
 
     // Parse attributes
@@ -1191,9 +1186,8 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     int32_t nbSpatialDims = nbDims - 2;
     if (attrs.count("kernel_shape"))
     {
-        ONNXTRT_CHECK(nbSpatialDims == attrs.at("kernel_shape")->ints().size()
-                && "The attribute kernel_shape misaligns with the shape of the weight tensor.",
-            ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(nbSpatialDims == attrs.at("kernel_shape")->ints().size(),
+            "The attribute kernel_shape misaligns with the shape of the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
         ONNXTRT_CHECK_NODE(((nbSpatialDims == 1 && needToExpandDims) || nbSpatialDims == 2),
             "The attribute kernel_shape misaligns with the shape of the input tensor.", node, nodeIdx,
             ErrorCode::kUNSUPPORTED_NODE);
@@ -1228,8 +1222,8 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     {
         auto onnxPadding = attrs.get<std::vector<int32_t>>("pads");
         int32_t ndim = onnxPadding.size() / 2;
-        ONNXTRT_CHECK(ndim == nbSpatialDims
-                && "The given pads attribute mismatch with the spatial dimensions of the weight tensor.",
+        ONNXTRT_CHECK(ndim == nbSpatialDims,
+            "The given pads attribute mismatch with the spatial dimensions of the weight tensor.",
             ErrorCode::kUNSUPPORTED_NODE);
         for (int32_t i = 0; i < nbSpatialDims; ++i)
         {
@@ -1238,8 +1232,10 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
         }
     }
 
-    ONNXTRT_CHECK(begPadding == endPadding
-        && "TensorRT only support the pads attribute of the DeformConv operator where the same number of pixels are added to the beginning and the end of the corresponding axis.", ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK(begPadding == endPadding,
+        "TensorRT only support the pads attribute of the DeformConv operator where the same number of pixels are added "
+        "to the beginning and the end of the corresponding axis.",
+        ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::Dims strides = makeDims(nbSpatialDims, /*Default value of strides*/ 1);
     if (attrs.count("strides"))
@@ -1253,7 +1249,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
 
     // Populate instanceNormalization plugin properties.
     std::string const pluginName = "ModulatedDeformConv2d";
-    std::string const pluginVersion = "1";
+    std::string const pluginVersion = "2";
     std::vector<nvinfer1::PluginField> f;
 
     // Unsqueeze the list attributes if necessary
@@ -1277,7 +1273,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
 
     // Create plugin from registry
     auto const plugin = createPlugin(ctx, node, pluginName, kTRT_STD_PLUGIN_NAMESPACE,
-        static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
+        static_cast<nvinfer1::IPluginCreatorInterface*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ONNXTRT_CHECK_NODE(plugin != nullptr, "ModulatedDeformConv2d plugin was not found in the plugin registry!", node,
         nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
@@ -1296,7 +1292,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
             // Expand spatial dims from 1D to 2D
             std::vector<int32_t> const axes{3};
             maskPtr = unsqueezeTensor(ctx, *maskPtr, axes);
-            ONNXTRT_CHECK(maskPtr && "Failed to unsqueeze the mask tensor.", ErrorCode::kUNSUPPORTED_NODE);
+            ONNXTRT_CHECK(maskPtr, "Failed to unsqueeze the mask tensor.", ErrorCode::kUNSUPPORTED_NODE);
         }
     }
     else
@@ -1333,7 +1329,8 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
         inputTensorsPtrs.push_back(biasPtr);
     }
 
-    auto* layer = N_CHECK(ctx->network()->addPluginV2(inputTensorsPtrs.data(), inputTensorsPtrs.size(), *plugin));
+    auto* layer
+        = N_CHECK(ctx->network()->addPluginV3(inputTensorsPtrs.data(), inputTensorsPtrs.size(), nullptr, 0, *plugin));
     ctx->registerLayer(layer, node);
     nvinfer1::ITensor* outputPtr = N_CHECK(layer->getOutput(0));
 
@@ -1368,7 +1365,7 @@ NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> const axes{3};
         tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
-        ONNXTRT_CHECK(tensorPtr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(tensorPtr, "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
     }
     auto scaleWeights = inputs.at(1).weights();
     auto biasWeights = inputs.at(2).weights();
@@ -1502,13 +1499,13 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
 
 void normalizeAxes(ShapeTensor& axes, int32_t const rank)
 {
-    ONNXTRT_CHECK(axes.allValuesKnown() && "Axes should not contain unknown values.", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(axes.allValuesKnown(), "Axes should not contain unknown values.", ErrorCode::kINTERNAL_ERROR);
     std::vector<int64_t> newAxes;
     newAxes.reserve(axes.size());
     for (int64_t axis : axes)
     {
-        ONNXTRT_CHECK((-rank <= axis && axis < rank) && "Axis must be in the range of [-rank, rank-1].",
-            ErrorCode::kINVALID_VALUE);
+        ONNXTRT_CHECK(
+            (-rank <= axis && axis < rank), "Axis must be in the range of [-rank, rank-1].", ErrorCode::kINVALID_VALUE);
         // "Negative value means counting dimensions from the back."
         if (axis < 0)
         {
@@ -1566,7 +1563,7 @@ NodeOutputs poolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
         // Expand spatial dims from 1D to 2D
         std::vector<int32_t> axes{3};
         tensorPtr = unsqueezeTensor(ctx, *tensorPtr, axes);
-        ONNXTRT_CHECK(tensorPtr && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(tensorPtr, "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
         dims = tensorPtr->getDimensions();
     }
 
@@ -1913,7 +1910,7 @@ NodeOutputs unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
 NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs)
 {
-    ONNXTRT_CHECK(inputs.size() >= 2 && "Convolution require at least 2 inputs.", ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK(inputs.size() >= 2, "Convolution require at least 2 inputs.", ErrorCode::kUNSUPPORTED_NODE);
     nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
     nvinfer1::Dims dims = input->getDimensions();
     bool needToExpandDims = (dims.nbDims == 3);
@@ -1970,11 +1967,10 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
             // Expand spatial dims from 1D to 2D
             std::vector<int32_t> const axes{3};
             kernelTensor = unsqueezeTensor(ctx, *kernelTensor, axes);
-            ONNXTRT_CHECK(kernelTensor && "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
+            ONNXTRT_CHECK(kernelTensor, "Failed to unsqueeze tensor.", ErrorCode::kUNSUPPORTED_NODE);
         }
-        ONNXTRT_CHECK(checkSpatialDims(kernelTensor->getDimensions())
-                && "The input tensor shape misaligns with the input kernel shape.",
-            ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK(checkSpatialDims(kernelTensor->getDimensions()),
+            "The input tensor shape misaligns with the input kernel shape.", ErrorCode::kUNSUPPORTED_NODE);
     }
     else
     {

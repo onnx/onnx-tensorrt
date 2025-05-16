@@ -2,6 +2,14 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.11 GA Release - 2025-5-16
+For more details, see the 10.11 GA release notes
+
+- Added `kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA` parser flag to enable UINT8 asymmetric quantization on engines targeting DLA
+- Removed restriction that inputs to `RandomNormalLike` and `RandomUniformLike` must be tensors
+- Clarified limitations of scan outputs for `Loop` nodes
+- Updated ONNX version to `1.18`
+
 # TensorRT 10.10 GA Release - 2025-5-8
 For more details, see the 10.10 GA release notes
 
