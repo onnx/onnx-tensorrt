@@ -8,8 +8,8 @@
 #include "ShapedWeights.hpp"
 #include "Status.hpp"
 #include "TensorOrWeights.hpp"
-#include "onnxErrorRecorder.hpp"
 #include "WeightsContext.hpp"
+#include "onnxErrorRecorder.hpp"
 #include <fstream>
 #include <functional>
 #include <list>
@@ -403,3 +403,4 @@ typedef std::function<void(
     OpStaticErrorChecker;
 
 } // namespace onnx2trt
+

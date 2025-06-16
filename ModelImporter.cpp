@@ -172,6 +172,8 @@ void parseNode(
 
     bool skipUInt8Conversion = (node.op_type() == "QuantizeLinear" || node.op_type() == "DequantizeLinear"
         || (allowUint8Quantization && node.op_type() == "Constant"));
+    skipUInt8Conversion
+        |= (node.op_type() == "TRT_MXFP8QuantizeLinear" || node.op_type() == "TRT_MXFP8DequantizeLinear");
     if (!skipUInt8Conversion)
     {
         for (auto& nodeInput : nodeInputs)
@@ -435,7 +437,9 @@ std::vector<Status> importInput(ImporterContext* ctx, ::ONNX_NAMESPACE::ValueInf
     CHECK_INPUT(
         convertDtype(onnxDtype.elem_type(), &trtDtype) && "Failed to convert ONNX date type to TensorRT data type.",
         ErrorCode::kUNSUPPORTED_NODE, input.name(), errorList);
-    nvinfer1::Dims trt_dims;
+    // If convertOnnxDims fails, trt_dims may not be modified. Also CHECK_INPUT won't return immediately.
+    // So we need to initialize trt_dims to avoid illegal access in the following log verbose.
+    nvinfer1::Dims trt_dims{};
     size_t const oldNbNamedDimensions = namedDims.size();
     CHECK_INPUT(convertOnnxDims(onnxDtype.shape().dim(), trt_dims, namedDims)
             && "Failed to convert ONNX dimensions to TensorRT dimensions.",

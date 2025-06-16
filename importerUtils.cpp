@@ -502,6 +502,7 @@ std::string getTrtDtypeName(nvinfer1::DataType TrtDtype)
     case nvinfer1::DataType::kINT64: return "INT64";
     case nvinfer1::DataType::kINT4: return "INT4";
     case nvinfer1::DataType::kFP4: return "FP4";
+    case nvinfer1::DataType::kE8M0: return "E8M0";
     default: return "<UNKNOWN>";
     }
 }
@@ -550,6 +551,7 @@ void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1
     case nvinfer1::ElementWiseOperation::kLESS:
     case nvinfer1::ElementWiseOperation::kMAX:
     case nvinfer1::ElementWiseOperation::kMIN:
+    case nvinfer1::ElementWiseOperation::kPOW:
     case nvinfer1::ElementWiseOperation::kPROD:
     case nvinfer1::ElementWiseOperation::kSUB:
     case nvinfer1::ElementWiseOperation::kSUM:
@@ -558,14 +560,6 @@ void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1
             "Elementwise layer does not support operator " + getElementWiseOpName(op)
                 + " and the given inputs with type BOOL.",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-        break;
-    // Pow does not support bool or integer types
-    case nvinfer1::ElementWiseOperation::kPOW:
-        ONNXTRT_CHECK_NODE(
-            !std::any_of(inputs.begin(), inputs.end(),
-                [](TensorOrWeights const& input) { return input.isBool() || input.isInt32() || input.isInt64(); }),
-            "Elementwise layer does not support operator POW with boolean or integer types.", node, nodeIdx,
-            ErrorCode::kUNSUPPORTED_NODE);
         break;
     // Equal supports all types.
     case nvinfer1::ElementWiseOperation::kEQUAL: break;
@@ -978,6 +972,7 @@ namespace
 constexpr char const* kV1_CREATOR_IFACE_KIND = "PLUGIN CREATOR_V1";
 constexpr char const* kV3_CREATOR_ONE_IFACE_KIND = "PLUGIN CREATOR_V3ONE";
 constexpr char const* kV3_CREATOR_QUICK_IFACE_KIND = "PLUGIN CREATOR_V3QUICK";
+
 bool isKind(nvinfer1::InterfaceInfo const& info, std::string_view kind)
 {
     ONNXTRT_CHECK(
@@ -1813,6 +1808,7 @@ nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE:
     case nvinfer1::DataType::kFP8: return ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN;
     case nvinfer1::DataType::kINT4: return ::ONNX_NAMESPACE::TensorProto::INT4;
     case nvinfer1::DataType::kFP4: return ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1;
+    case nvinfer1::DataType::kE8M0: break;
     }
     return ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
 }
@@ -1927,9 +1923,17 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
     kernelDims.nbDims = nbSpatialDims;
 
     // Populate spatial dims from the shape of the convolution weights.
-    for (int32_t i = 1; i <= nbSpatialDims; ++i)
+    if (needToExpandDims)
     {
-        kernelDims.d[nbSpatialDims - i] = inputs.at(1).shape().d[inputs.at(1).shape().nbDims - i];
+        kernelDims.d[0] = inputs.at(1).shape().d[2];
+        kernelDims.d[1] = 1;
+    }
+    else
+    {
+        for (int32_t i = 1; i <= nbSpatialDims; ++i)
+        {
+            kernelDims.d[nbSpatialDims - i] = inputs.at(1).shape().d[inputs.at(1).shape().nbDims - i];
+        }
     }
 
     nvinfer1::Dims strides = makeDims(nbSpatialDims, 1);
@@ -2290,199 +2294,6 @@ void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     // Truncate very long metadata since TRT API has a limit.
     constexpr int64_t kMETADATA_LIMIT{4000};
     layer->setMetadata(truncateString(metadata, kMETADATA_LIMIT).c_str());
-}
-
-//! Parse einsum equation into a vector of input strings and an output string.
-void parseEinsumEquation(
-    std::string& equation, std::vector<std::string>& inputSubscriptsVec, std::string& outputSubscripts)
-{
-    //! remove spaces
-    equation.erase(std::remove(equation.begin(), equation.end(), ' '), equation.end());
-
-    auto const& arrowIndex = equation.find("->");
-    std::string left{};
-    if (arrowIndex != std::string::npos)
-    {
-        constexpr uint32_t kARROW_SIZE = 2;
-        left = equation.substr(0, arrowIndex);
-        outputSubscripts = equation.substr(arrowIndex + kARROW_SIZE);
-    }
-    else
-    {
-        left = equation;
-        outputSubscripts.clear();
-    }
-    left.push_back(','); // Correctly handle trailing scalars in equations like ","
-    std::regex const regex(",");
-    std::sregex_token_iterator begin(left.begin(), left.end(), regex, -1);
-    std::copy(begin, std::sregex_token_iterator(), std::back_inserter(inputSubscriptsVec));
-}
-
-//! replace ellipsis with the same subscripts for each input/output subscript string.
-void replaceEllipsis(nvinfer1::ITensor* const inputTensor, bool const isInput,
-    std::map<char, int64_t> const& subscriptCount, std::string& substitution, std::string& subscripts)
-{
-    auto const& ellipsisIndex = subscripts.find("...");
-    if (ellipsisIndex != std::string::npos)
-    {
-        constexpr uint32_t kELLIPSIS_SIZE = 3;
-        std::string const& left = subscripts.substr(0, ellipsisIndex);
-        std::string const& right = subscripts.substr(ellipsisIndex + kELLIPSIS_SIZE);
-        if (substitution.empty() && isInput && inputTensor != nullptr) // First-time update substitution
-        {
-            nvinfer1::Dims inputDim = inputTensor->getDimensions();
-            int64_t const ellipsisDim = inputDim.nbDims - left.size() - right.size();
-            char c = 'a';
-            while (static_cast<int64_t>(substitution.size()) < ellipsisDim && c <= 'z')
-            {
-                if (!subscriptCount.count(c))
-                {
-                    substitution += c;
-                }
-                c++;
-            }
-        }
-        subscripts = left + substitution + right;
-    }
-}
-
-//! Rebuild einsum equation from input and output subscripts
-std::string rebuildEinsumEquation(
-    std::vector<std::string> const& inputSubscriptsVec, std::string const& outputSubscripts)
-{
-    std::string equation{};
-    for (auto& s : inputSubscriptsVec)
-    {
-        equation += s;
-        equation += ',';
-    }
-    if (!equation.empty())
-    {
-        equation.pop_back();
-    }
-    equation += "->";
-    equation += outputSubscripts;
-    return equation;
-}
-
-void processEllipsisAndImplicitOutput(
-    std::vector<nvinfer1::ITensor*> const& inputTensors, std::string& equation, bool const withEllipsis)
-{
-    std::vector<std::string> inputSubscriptsVec{};
-    std::string outputSubscripts{};
-
-    parseEinsumEquation(equation, inputSubscriptsVec, outputSubscripts);
-
-    //! count subscripts
-    std::map<char, int64_t> subscriptCount;
-    for (auto& s : inputSubscriptsVec)
-    {
-        for (auto& c : s)
-        {
-            if (isalpha(c))
-            {
-                subscriptCount[c]++;
-            }
-        }
-    }
-
-    //! For implicit einsum, infer and write its outputSubscripts in equation
-    if (equation.find("->") == std::string::npos)
-    {
-        if (withEllipsis)
-        {
-            outputSubscripts
-                = "..."; // In implicit mode, the ellipsis dimensions are set to the beginning of the output.
-        }
-        for (auto& subscript : subscriptCount)
-        {
-            if (subscript.second == 1)
-            {
-                //! Implicitly, output subscripts are set to the alphabetically sorted sequence.
-                //! Here we use a sorted map of subscript to achieve it.
-                outputSubscripts += subscript.first;
-            }
-        }
-    }
-
-    //! Replace ellipsis with new subscripts.
-    if (withEllipsis)
-    {
-        std::string substitution{};
-        int64_t const inputSize = inputTensors.size();
-        for (int64_t i = 0; i < inputSize; ++i)
-        {
-            replaceEllipsis(inputTensors[i], true, subscriptCount, substitution, inputSubscriptsVec[i]);
-        }
-        replaceEllipsis(nullptr, false, subscriptCount, substitution, outputSubscripts);
-    }
-
-    //! Rebuild einsum equation.
-    equation = rebuildEinsumEquation(inputSubscriptsVec, outputSubscripts);
-}
-
-//! Infer hiddent output subscripts when transforming einsum layer with more than 2 inputs into multiple 2-input einsum
-//! layers.
-std::string inferHiddenOutputSubscripts(std::vector<std::string> const& inputSubscriptsVec)
-{
-    std::map<char, int64_t> subscriptCount;
-    std::string outputSubscripts{};
-    for (auto const& s : inputSubscriptsVec)
-    {
-        for (auto const& c : s)
-        {
-            if (isalpha(c))
-            {
-                subscriptCount[c]++;
-            }
-        }
-    }
-    for (auto const& subscript : subscriptCount)
-    {
-        outputSubscripts += subscript.first;
-    }
-    return outputSubscripts;
-}
-
-nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation)
-{
-    assert(nbInputs > 0);
-    assert(inputs.size() == static_cast<size_t>(nbInputs));
-    assert(ctx != nullptr);
-    std::vector<std::string> inputSubscriptsVec{};
-    std::string outputSubscripts{};
-
-    parseEinsumEquation(equation, inputSubscriptsVec, outputSubscripts);
-
-    std::string leftSubscripts = inputSubscriptsVec[0];
-    nvinfer1::ITensor* leftInput = inputs[0];
-    assert(leftInput != nullptr);
-
-    for (int64_t i = 1; i < nbInputs - 1; ++i)
-    {
-        std::vector<nvinfer1::ITensor*> inputTensors{leftInput, inputs[i]};
-        std::vector<std::string> inputSubscripts{leftSubscripts, inputSubscriptsVec[i]};
-        std::string hiddenOutputSubscripts = inferHiddenOutputSubscripts(inputSubscripts);
-        std::string hiddenEquation = rebuildEinsumEquation(inputSubscripts, hiddenOutputSubscripts);
-
-        nvinfer1::IEinsumLayer* einsumLayer
-            = N_CHECK(ctx->network()->addEinsum(inputTensors.data(), 2, hiddenEquation.c_str()));
-        ctx->registerLayer(einsumLayer, node);
-
-        leftSubscripts = hiddenOutputSubscripts;
-        leftInput = N_CHECK(einsumLayer->getOutput(0));
-    }
-
-    assert(inputs[nbInputs - 1] != nullptr);
-    std::vector<nvinfer1::ITensor*> finalInputTensors{leftInput, inputs[nbInputs - 1]};
-    std::string finalEquation
-        = rebuildEinsumEquation({leftSubscripts, inputSubscriptsVec[nbInputs - 1]}, outputSubscripts);
-    nvinfer1::IEinsumLayer* einsumLayer
-        = N_CHECK(ctx->network()->addEinsum(finalInputTensors.data(), 2, finalEquation.c_str()));
-    ctx->registerLayer(einsumLayer, node);
-
-    return einsumLayer;
 }
 
 nvinfer1::ITensor* generateWindow(ImporterContext* ctx, nvinfer1::ITensor* N)

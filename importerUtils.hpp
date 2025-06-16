@@ -240,6 +240,13 @@ NodeOutputs greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
 // Helper function to determine if a shape contains dynamic dimensions
 bool isDynamic(nvinfer1::Dims const& shape);
 
+// Helper function to create an iota fill given a set of dimensions and an axis
+nvinfer1::ITensor* iota(ImporterContext* ctx, ShapeTensor iotaDims, int32_t axis);
+
+// Helper function to load a creator from the registry
+nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
+    std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
+
 // Helper function to use modulatedDeformableConv2D plugin
 NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
@@ -247,13 +254,6 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
 // Helper function to use optimized 3D instanceNorm plugin
 NodeOutputs instanceNormPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
-
-// Helper fucntion to create an iota fill given a set of dimensions and an axis
-nvinfer1::ITensor* iota(ImporterContext* ctx, ShapeTensor iotaDims, int32_t axis);
-
-// Helper function to load a creator from the registry
-nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
-    std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
 
 // Helper function to get a plugin from the PluginRegistry
 std::unique_ptr<nvinfer1::IPluginV2, PluginDeleter> createPlugin(ImporterContext* ctx,
@@ -434,34 +434,10 @@ void checkNotInvalidType(TensorOrWeights const& input, std::vector<std::string> 
 
 void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer);
 
-//! Helper function to process ellipsis and implicit output in Einsum
-//!
-//! \param inputTensors Vector of input tensors
-//! \param equation String of equation in Einsum. It will be modified in this function.
-//! \param withEllipsis Bool indicating whether the equation contains ellipsis.
-//!
-//! \brief For an Einsum equation with ellipsises or implicit output, this function does the following steps:
-//!        1. parse the equation into a vector of input strings and an output string;
-//!        2. infer and write output string if the equation has implicit output;
-//!        3. replace ellipsis with new subscripts for each input/output string when the equation contains ellipsis;
-//!        4. rebuild the einsum equation string with explicit output.
-//!
-void processEllipsisAndImplicitOutput(
-    std::vector<nvinfer1::ITensor*> const& inputTensors, std::string& equation, bool const withEllipsis);
-
-//! Helper function to parse the Einsum layer with more than 2 inputs as a graph with multiple 2-input Einsum layers.
-//!
-//! \param equation It is intended to be a copy instead of a const reference.
-//!        It cannot be a const as it will be further edited in parseEinsumEquation() which requires string& equation.
-//!        It cannot be a reference as like an output of this function which it is not.
-//!
-nvinfer1::IEinsumLayer* parseGraphWithMoreInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
-    std::vector<nvinfer1::ITensor*> const& inputs, int64_t const nbInputs, std::string equation);
-
 // Helper function to convert TensorRT datatype enum into a human-readable string.
 std::string getTrtDtypeName(nvinfer1::DataType TrtDtype);
 
-// Helper fucntion to generate a Window tensor for Window operations (HannWindow, HammingWindow, BlackmanWindow).
+// Helper function to generate a Window tensor for Window operations (HannWindow, HammingWindow, BlackmanWindow).
 nvinfer1::ITensor* generateWindow(ImporterContext* ctx, nvinfer1::ITensor* N);
 
 // Helper function to handle Window generation ops. Calculates TrigOp(numerator*n / N) and returns the output tensor.

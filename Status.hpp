@@ -201,6 +201,7 @@ static std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& 
     case nvinfer1::DataType::kINT64: return stream << "int64";
     case nvinfer1::DataType::kBOOL: return stream << "bool";
     case nvinfer1::DataType::kFP8: return stream << "float8";
+    case nvinfer1::DataType::kE8M0: return stream << "floatE8M0";
     case nvinfer1::DataType::kINT4: return stream << "int4";
     case nvinfer1::DataType::kFP4: return stream << "fp4";
 
