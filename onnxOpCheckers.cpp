@@ -903,6 +903,12 @@ DEFINE_OP_CHECKER(TRT_AveragePool)
     checkAveragePool(ctx, node, errors, nodeIndex);
 }
 
+DEFINE_OP_EMPTY_CHECKER(TRT_MXFP8QuantizeLinear)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_MXFP8DequantizeLinear)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_MXFP8DynamicQuantize)
+
 // Define unsupported node checkers
 DEFINE_OP_CHECKER(BitShift)
 {

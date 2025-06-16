@@ -26,6 +26,126 @@
         }                                                                                                              \
     } while (0)
 
+namespace
+{
+
+//! Translates a "logical" library name into an OS-dependent DSO or DLL name
+std::string getOSLibraryName(char const* logicalName)
+{
+    std::stringstream libName;
+#if defined(_WIN32)
+    libName << logicalName << ".dll";
+#else
+    libName << "lib" << logicalName << ".so." << NV_TENSORRT_MAJOR;
+#endif
+    return libName.str();
+}
+
+//! Platform-agnostic wrapper around dynamic libraries.
+class DynamicLibrary
+{
+public:
+    explicit DynamicLibrary(std::string const& name)
+        : mLibName{name}
+    {
+#if defined(_WIN32)
+        mHandle = LoadLibraryA(name.c_str());
+#else  // defined(_WIN32)
+        int32_t flags{RTLD_LAZY};
+        mHandle = dlopen(name.c_str(), flags);
+#endif // defined(_WIN32)
+
+        if (mHandle == nullptr)
+        {
+            std::string errorStr{};
+#if !defined(_WIN32)
+            errorStr = std::string{" due to "} + std::string{dlerror()};
+#endif
+            throw std::runtime_error("Unable to open library: " + name + errorStr);
+        }
+    }
+
+    DynamicLibrary(DynamicLibrary const&) = delete;
+    DynamicLibrary(DynamicLibrary const&&) = delete;
+
+    ~DynamicLibrary()
+    {
+        try
+        {
+#if defined(_WIN32)
+            RT_ASSERT(static_cast<bool>(FreeLibrary(static_cast<HMODULE>(mHandle))));
+#else
+            RT_ASSERT(dlclose(mHandle) == 0);
+#endif
+        }
+        catch (...)
+        {
+            std::cerr << "Unable to close library: " << mLibName << std::endl;
+        }
+    }
+
+    //!
+    //! Retrieve a function symbol from the loaded library.
+    //!
+    //! \return the loaded symbol on success
+    //! \throw std::invalid_argument if loading the symbol failed.
+    //!
+    template <typename Signature>
+    std::function<Signature> symbolAddress(char const* name)
+    {
+        if (mHandle == nullptr)
+        {
+            throw std::runtime_error("Handle to library is nullptr.");
+        }
+        void* ret;
+#if defined(_MSC_VER)
+        ret = static_cast<void*>(GetProcAddress(static_cast<HMODULE>(mHandle), name));
+#else
+        ret = dlsym(mHandle, name);
+#endif
+        if (ret == nullptr)
+        {
+            std::string const kERROR_MSG(mLibName + ": error loading symbol: " + std::string(name));
+            throw std::invalid_argument(kERROR_MSG);
+        }
+        return reinterpret_cast<Signature*>(ret);
+    }
+
+    std::string getFullPath() const
+    {
+        RT_ASSERT(mHandle != nullptr);
+#if defined(__linux__)
+        link_map* linkMap = nullptr;
+        auto const err = dlinfo(mHandle, RTLD_DI_LINKMAP, &linkMap);
+        RT_ASSERT(err == 0 && linkMap != nullptr && linkMap->l_name != nullptr);
+        return std::string{linkMap->l_name};
+#elif defined(_WIN32)
+        constexpr int32_t kMAX_PATH_LEN{4096};
+        std::string path(kMAX_PATH_LEN, '\0'); // since C++11, std::string storage is guaranteed to be contiguous
+        auto const pathLen = GetModuleFileNameA(static_cast<HMODULE>(mHandle), &path[0], kMAX_PATH_LEN);
+        RT_ASSERT(GetLastError() == ERROR_SUCCESS);
+        path.resize(pathLen);
+        path.shrink_to_fit();
+        return path;
+#else
+        RT_ASSERT(!"Unsupported operation: getFullPath()");
+#endif
+    }
+
+private:
+    std::string mLibName{}; //!< Name of the DynamicLibrary
+    void* mHandle{};        //!< Handle to the DynamicLibrary
+};
+
+//! Translates an OS-dependent DSO/DLL name into a path on the filesystem
+std::string getOSLibraryPath(std::string const& osLibName)
+{
+    DynamicLibrary lib{osLibName};
+    return lib.getFullPath();
+}
+
+} // namespace
+
 namespace onnx2trt
 {
 
@@ -105,7 +225,8 @@ void ImporterContext::registerTensor(TensorOrWeights tensor, std::string const& 
     p.first->second = std::move(tensor);
 }
 
-void ImporterContext::registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node)
+void ImporterContext::registerLayer(
+    nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     // No layer will be added for Constant nodes in ONNX.
     if (layer)
@@ -149,99 +270,6 @@ void ImporterContext::registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::N
     registerLayer(layer, basename, &node);
 }
 
-namespace
-{
-
-//! Translates a "logical" library name into an OS-dependent DSO or DLL name
-std::string getOSLibraryName(char const* logicalName)
-{
-    std::stringstream libName;
-#if defined(_WIN32)
-    libName << logicalName << ".dll";
-#else
-    libName << "lib" << logicalName << ".so." << NV_TENSORRT_MAJOR;
-#endif
-    return libName.str();
-}
-
-//! Platform-agnostic wrapper around dynamic libraries.
-class DynamicLibrary
-{
-public:
-    explicit DynamicLibrary(std::string const& name)
-        : mLibName{name}
-    {
-#if defined(_WIN32)
-        mHandle = LoadLibraryA(name.c_str());
-#else  // defined(_WIN32)
-        int32_t flags{RTLD_LAZY};
-        mHandle = dlopen(name.c_str(), flags);
-#endif // defined(_WIN32)
-
-        if (mHandle == nullptr)
-        {
-            std::string errorStr{};
-#if !defined(_WIN32)
-            errorStr = std::string{" due to "} + std::string{dlerror()};
-#endif
-            throw std::runtime_error("Unable to open library: " + name + errorStr);
-        }
-    }
-
-    DynamicLibrary(DynamicLibrary const&) = delete;
-    DynamicLibrary(DynamicLibrary const&&) = delete;
-
-    ~DynamicLibrary()
-    {
-        try
-        {
-#if defined(_WIN32)
-            RT_ASSERT(static_cast<bool>(FreeLibrary(static_cast<HMODULE>(mHandle))));
-#else
-            RT_ASSERT(dlclose(mHandle) == 0);
-#endif
-        }
-        catch (...)
-        {
-            std::cerr << "Unable to close library: " << mLibName << std::endl;
-        }
-    }
-
-    std::string getFullPath() const
-    {
-        RT_ASSERT(mHandle != nullptr);
-#if defined(__linux__)
-        link_map* linkMap = nullptr;
-        auto const err = dlinfo(mHandle, RTLD_DI_LINKMAP, &linkMap);
-        RT_ASSERT(err == 0 && linkMap != nullptr && linkMap->l_name != nullptr);
-        return std::string{linkMap->l_name};
-#elif defined(_WIN32)
-        constexpr int32_t kMAX_PATH_LEN{4096};
-        std::string path(kMAX_PATH_LEN, '\0'); // since C++11, std::string storage is guaranteed to be contiguous
-        auto const pathLen = GetModuleFileNameA(static_cast<HMODULE>(mHandle), &path[0], kMAX_PATH_LEN);
-        RT_ASSERT(GetLastError() == ERROR_SUCCESS);
-        path.resize(pathLen);
-        path.shrink_to_fit();
-        return path;
-#else
-        RT_ASSERT(!"Unsupported operation: getFullPath()");
-#endif
-    }
-
-private:
-    std::string mLibName{}; //!< Name of the DynamicLibrary
-    void* mHandle{};        //!< Handle to the DynamicLibrary
-};
-
-//! Translates an OS-dependent DSO/DLL name into a path on the filesystem
-std::string getOSLibraryPath(std::string const& osLibName)
-{
-    DynamicLibrary lib{osLibName};
-    return lib.getFullPath();
-}
-
-} // namespace
-
 void ImporterContext::addUsedVCPluginLibrary(
     ::ONNX_NAMESPACE::NodeProto const& node, char const* pluginName, char const* pluginLib)
 {
@@ -272,3 +300,4 @@ std::vector<std::string> ImporterContext::getUsedVCPluginLibraries()
 }
 
 } // namespace onnx2trt
+

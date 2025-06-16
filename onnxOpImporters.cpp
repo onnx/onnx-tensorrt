@@ -31,6 +31,7 @@
 #include <sstream>
 #include <tuple>
 #include <unordered_set>
+
 namespace onnx2trt
 {
 
@@ -1363,7 +1364,8 @@ ShapedWeights getWeightsFromIdentityOrConstant(nvinfer1::INetworkDefinition& net
 
 // This is a helper function for QuantizeLinear/DequantizeLinear
 NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t nodeIdx,
-    std::vector<TensorOrWeights>& inputs, bool isDQ, bool isCustomOp, DataType customOpType = DataType::kFP8)
+    std::vector<TensorOrWeights>& inputs, bool isDQ, bool isCustomOp, DataType customOpType = DataType::kFP8,
+    bool isMX = false)
 {
     auto getFlagBit = [](nvonnxparser::OnnxParserFlag const flag) { return 1U << static_cast<uint32_t>(flag); };
     bool const enableUInt8AsymmetricQuantization
@@ -1374,11 +1376,16 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
     }
 
-    auto addConstantLayer
-        = [ctx, node](nvinfer1::INetworkDefinition& network, ShapedWeights const& weights) -> nvinfer1::ITensor* {
-        nvinfer1::IConstantLayer* constLayer = N_CHECK(network.addConstant(weights.shape, weights));
+    auto addConstantLayer = [ctx, node](nvinfer1::INetworkDefinition& network, ShapedWeights const& weights,
+                                bool const isE8M0 = false) -> nvinfer1::ITensor* {
+        nvinfer1::Weights convertedWeights = weights;
+        if (isE8M0)
+        {
+            convertedWeights.type = nvinfer1::DataType::kE8M0;
+        }
+        nvinfer1::IConstantLayer* constLayer = N_CHECK(network.addConstant(weights.shape, convertedWeights));
         ctx->registerLayer(constLayer, weights.getName(), &node);
-        network.setWeightsName(weights, weights.getName());
+        network.setWeightsName(convertedWeights, weights.getName());
         return N_CHECK(constLayer->getOutput(0));
     };
 
@@ -1405,6 +1412,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             scale.count() > 0, "Cannot have scale with no coefficients.", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
         bool scaleAllPositive = false;
+        bool isE8M0 = false;
         if (inputs.at(1).isFp32())
         {
             auto const* scaleVal = static_cast<float const*>(scale.values);
@@ -1421,12 +1429,17 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             auto const* scaleVal = static_cast<BFloat16 const*>(scale.values);
             scaleAllPositive = std::all_of(scaleVal, scaleVal + scale.count(), [](BFloat16 x) { return x > 0; });
         }
+        else if (inputs.at(1).isUint8() && isCustomOp && isMX)
+        {
+            scaleAllPositive = true;
+            isE8M0 = true;
+        }
         ONNXTRT_CHECK_NODE(
             scaleAllPositive, "Scale coefficients must all be positive", node, nodeIdx, ErrorCode::kINVALID_NODE);
 
         // If the scale is concrete weights, then add a ConstantLayer that will be an input which
         // will initialize the scale weights.
-        scaleInput = addConstantLayer(*ctx->network(), scale);
+        scaleInput = addConstantLayer(*ctx->network(), scale, isE8M0);
     }
     else
     {
@@ -1476,7 +1489,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             "Attribute precision specifies an invalid data type for QuantizeLinear " << precision << ".", node, nodeIdx,
             nvonnxparser::ErrorCode::kINVALID_NODE);
 
-        DataType trtPrecisionType = scaleType;
+        DataType trtPrecisionType = isMX ? inputType : scaleType;
         if (precision != trtPrecisionType)
         {
             LOG_WARNING("TensorRT does not support setting quantization precision, the precision will be set to "
@@ -1597,19 +1610,19 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         }
     }
 
-    // Read the optional quantization axis attribute. Set it to the rank of the input tensor if not provided.
-    int32_t axis = attrs.get<int32_t>("axis", inputDims.nbDims);
+    // Read the optional quantization axis attribute.
+    int32_t axis = attrs.get<int32_t>("axis", 1);
+
+    // Axis attribute was first introduced in opset 13. Use a default of 0 for older models.
+    if (ctx->getOpsetVersion() < 13 && !attrs.count("axis"))
+    {
+        axis = 0;
+    }
+
     convertAxis(axis, inputDims.nbDims, node, nodeIdx);
 
     if (scaleSize != 1)
     {
-        // Per-Channel Quantization.
-        // We assume this is weight-quantization with dimensions KCRS (K is # output channels).
-        // Activations-quantization does not support per-axis quantization.
-        if (axis == inputDims.nbDims)
-        {
-            axis = 0;
-        }
         if (scaleDims.nbDims == 1 && !isDynamic(scaleDims))
         {
             // Ensure that number of scale-coefficients is equal to the number of output channels.
@@ -1682,7 +1695,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     if (isDQ)
     {
         // Add and configure a DequantizeLayer.
-        outputDtype = isOutputDtypeSet ? outputDtype : scaleType;
+        outputDtype = isOutputDtypeSet ? outputDtype : (isMX ? DataType::kFLOAT : scaleType);
         if (stronglyTyped)
         {
             // Input type is inferred. Layer output type is specified with scaleType.
@@ -1723,9 +1736,9 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             nvinfer1::IQuantizeLayer* q = N_CHECK(ctx->network()->addQuantize(*dataInput, *scaleInput));
             q->setAxis(axis);
             layer = q;
-            // This implictly sets layer input type.
-            layer->setPrecision(isPrecisionSet ? precision : scaleType);
-       // Type constraint for layer output type.
+            // This implicitly sets layer input type.
+            layer->setPrecision(isPrecisionSet ? precision : (isMX ? DataType::kFLOAT : scaleType));
+            // Type constraint for layer output type.
             layer->setOutputType(0, chosenDataType);
         }
     }
@@ -1834,6 +1847,44 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_INT4DequantizeLinear)
         ctx, node, nodeIdx, inputs, true /*isDQ*/, true /*isCustomOp*/, DataType::kINT4 /*customOpType*/);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(TRT_MXFP8QuantizeLinear)
+{
+    return QuantDequantLinearHelper(ctx, node, nodeIdx, inputs, false /*isDQ*/, true /*isCustomOp*/,
+        DataType::kFP8 /*customOpType*/, true /*isMX*/);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(TRT_MXFP8DequantizeLinear)
+{
+    return QuantDequantLinearHelper(
+        ctx, node, nodeIdx, inputs, true /*isDQ*/, true /*isCustomOp*/, DataType::kFP8 /*customOpType*/, true /*isMX*/);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(TRT_MXFP8DynamicQuantize)
+{
+    ONNXTRT_CHECK_NODE((inputs.size() == 1),
+        "Single dynamic quantization requires 1 input. " << inputs.size() << " are given.", node, nodeIdx,
+        ErrorCode::kINVALID_NODE);
+    nvinfer1::ITensor* dataInput = &convertToTensor(inputs.at(0), ctx);
+    auto dtype = inputs.at(0).getDataType();
+    ONNXTRT_CHECK_NODE((dtype == DataType::kFLOAT || dtype == DataType::kHALF || dtype == DataType::kBF16),
+        "Input type must be FLOAT, FLOAT16, or BFLOAT16. Input type is " + getTrtDtypeName(dtype) + ".", node, nodeIdx,
+        ErrorCode::kINVALID_NODE);
+    int32_t const rank = dataInput->getDimensions().nbDims;
+
+    OnnxAttrs attrs(node, ctx);
+    int32_t axis = attrs.get<int32_t>("axis", -1);
+    convertAxis(axis, rank, node, nodeIdx);
+
+    int32_t const blockSize = attrs.get<int32_t>("block_size", 32);
+    ONNXTRT_CHECK_NODE(
+        blockSize == 32, "Only block_size 32 is supported.", node, nodeIdx, nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::IDynamicQuantizeLayer* dq
+        = N_CHECK(ctx->network()->addDynamicQuantize(*dataInput, axis, blockSize, DataType::kFP8, DataType::kE8M0));
+    ctx->registerLayer(dq, node);
+
+    RETURN_ALL_OUTPUTS(dq, node, nodeIdx);
+}
 
 DECLARE_BUILTIN_OP_IMPORTER(Mul);
 DEFINE_BUILTIN_OP_IMPORTER(Div)
@@ -1904,29 +1955,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Einsum)
     }
     auto nbInputs = static_cast<int64_t>(inputTensors.size());
 
-    bool withEllipsis{false};
-    if (equation.find("...") != std::string::npos)
-    {
-        withEllipsis = true;
-    }
-
-    if (withEllipsis || nbInputs > 2)
-    {
-        LOG_VERBOSE("Equation before preprocessing ellipsis and output: " << equation);
-        processEllipsisAndImplicitOutput(inputTensors, equation, withEllipsis);
-        LOG_VERBOSE("Equation after preprocessing ellipsis and output: " << equation);
-    }
-
     nvinfer1::IEinsumLayer* einsumLayer{nullptr};
-    if (nbInputs > 2)
-    {
-        einsumLayer = parseGraphWithMoreInputs(ctx, node, inputTensors, nbInputs, equation);
-    }
-    else
-    {
-        einsumLayer = N_CHECK(ctx->network()->addEinsum(inputTensors.data(), nbInputs, equation.c_str()));
-        ctx->registerLayer(einsumLayer, node);
-    }
+    einsumLayer = N_CHECK(ctx->network()->addEinsum(inputTensors.data(), nbInputs, equation.c_str()));
+    ctx->registerLayer(einsumLayer, node);
 
     RETURN_FIRST_OUTPUT(einsumLayer, node, nodeIdx);
 }
@@ -4375,19 +4406,27 @@ DEFINE_BUILTIN_OP_IMPORTER(ParametricSoftplus)
 
 DEFINE_BUILTIN_OP_IMPORTER(Pow)
 {
-    // TensorRT doesn't support integer values for the exponent in POW operations. Cast any integer-exponents to
-    // the type of the exponent base as a work-around.
-    if (inputs.at(1).isInt32() || inputs.at(1).isInt64())
+    // TensorRT doesn't support mixed input types for POW operations. Cast operands to float and cast output to base
+    // operand type.
+    auto baseType = inputs.at(0).getDataType();
+    auto expType = inputs.at(1).getDataType();
+    bool mixedInputTypes = baseType != expType;
+
+    if (mixedInputTypes)
     {
-        auto baseType = inputs.at(0).getDataType();
-        LOG_VERBOSE(
-            "Found integer-typed value for exponent in POW operation. Casting exponent to the same type as the base ("
-            << baseType << ")");
-        auto* expTensor = &convertToTensor(inputs.at(1), ctx);
-        inputs[1] = TensorOrWeights(castHelper(ctx, expTensor, baseType));
+        LOG_VERBOSE("Found mixed input types in POW operation (base is "
+            << baseType << " and exponent is " << expType
+            << "). Performing operation in float32 and converting back to " << baseType);
+        inputs[0] = TensorOrWeights(castHelper(ctx, &convertToTensor(inputs.at(0), ctx), DataType::kFLOAT));
+        inputs[1] = TensorOrWeights(castHelper(ctx, &convertToTensor(inputs.at(1), ctx), DataType::kFLOAT));
     }
 
-    return elementwiseHelper(ctx, node, nodeIdx, inputs, nvinfer1::ElementWiseOperation::kPOW);
+    auto powOutput = elementwiseHelper(ctx, node, nodeIdx, inputs, nvinfer1::ElementWiseOperation::kPOW);
+    if (mixedInputTypes && baseType != DataType::kFLOAT)
+    {
+        powOutput[0] = castHelper(ctx, &convertToTensor(powOutput.at(0), ctx), baseType);
+    }
+    return powOutput;
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(PRelu)

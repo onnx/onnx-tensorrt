@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.12 GA Release - 2025-6-16
+For more details, see the 10.12 GA release notes
+
+- Added support for integer-typed base tensors for `Pow` operations
+- Added support for custom `MXFP8` quantization operations
+- Added support for ellipses, diagonal, and broadcasting in `Einsum` operations
+
 # TensorRT 10.11 GA Release - 2025-5-16
 For more details, see the 10.11 GA release notes
 

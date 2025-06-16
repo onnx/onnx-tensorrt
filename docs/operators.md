@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.11 supports operators in the inclusive range of opset 9 to opset 23. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.12 supports operators in the inclusive range of opset 9 to opset 23. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
@@ -134,7 +134,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Or                        | Y          | BOOL |
 | Pad                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | ParametricSoftplus        | Y          | FP32, FP16, BF16 |
-| Pow                       | Y          | FP32, FP16, BF16 |
+| Pow                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | PRelu                     | Y          | FP32, FP16, BF16 |
 | QLinearConv               | N          |
 | QLinearMatMul             | N          |

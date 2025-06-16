@@ -78,7 +78,7 @@ inline char const* errorCodeStr(ErrorCode code)
     case ErrorCode::kREFIT_FAILED: return "REFIT_FAILED";
     }
     return "UNKNOWN";
-};
+}
 
 inline std::string const parserErrorStr(nvonnxparser::IParserError const* error)
 {
