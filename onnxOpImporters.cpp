@@ -940,7 +940,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Conv)
 DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
 {
     // Expand spatial dims from 1D to 2D, return true if reshaped activation
-    auto const NCWtoNCHW = [&ctx, &node](nvinfer1::ITensor*& tensor, nvinfer1::Dims& tensorShape) {
+    auto const NCWtoNCHW = [&ctx](nvinfer1::ITensor*& tensor, nvinfer1::Dims& tensorShape) {
         if (tensor && tensor->getDimensions().nbDims == 3)
         {
             std::vector<int32_t> const axes{3};
@@ -1940,7 +1940,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Dropout)
 
 DEFINE_BUILTIN_OP_IMPORTER(Einsum)
 {
-    checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
+    checkNotInvalidType(inputs.at(0), {"UINT8", "INT32", "INT64"}, node, nodeIdx);
     OnnxAttrs attrs(node, ctx);
     std::string equation = attrs.get<std::string>("equation");
 
@@ -2638,7 +2638,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     nvinfer1::ITensor* iterationInput = addRNNInput(ctx, node, loop, inputs, direction);
 
     // H(t-1)
-    auto const getInitialInputValue = [&ctx, &gateOutputShape, &inputs, &node](size_t inputIdx) -> nvinfer1::ITensor* {
+    auto const getInitialInputValue = [&ctx, &gateOutputShape, &inputs](size_t inputIdx) -> nvinfer1::ITensor* {
         if (inputs.size() > inputIdx && inputs.at(inputIdx))
         {
             return &convertToTensor(inputs.at(inputIdx), ctx);
@@ -3448,7 +3448,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     nvinfer1::ITensor* gateOutputShape = initialStateShape();
     LOG_VERBOSE("Gate output rank (equal to initial hidden/cell state rank): " << gateOutputShape->getDimensions());
 
-    auto const getInitialInputValue = [&ctx, &gateOutputShape, &inputs, &node](size_t inputIdx) -> nvinfer1::ITensor* {
+    auto const getInitialInputValue = [&ctx, &gateOutputShape, &inputs](size_t inputIdx) -> nvinfer1::ITensor* {
         if (inputs.size() > inputIdx && inputs.at(inputIdx))
         {
             return &convertToTensor(inputs.at(inputIdx), ctx);
@@ -3528,7 +3528,7 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
         peephole = &convertToTensor(inputs.at(7), ctx);
     }
 
-    auto const addPeephole = [&ctx, &node, &hiddenSize, &numDirections, &peephole](nvinfer1::ITensor* gate,
+    auto const addPeephole = [&ctx, &hiddenSize, &numDirections, &peephole](nvinfer1::ITensor* gate,
                                  nvinfer1::ITensor* cellState, int32_t gateIndex) -> nvinfer1::ITensor* {
         nvinfer1::ISliceLayer* isolatePeephole
             = N_CHECK(ctx->network()->addSlice(*peephole, nvinfer1::Dims2{0, gateIndex * hiddenSize},
@@ -4153,7 +4153,7 @@ DEFINE_BUILTIN_OP_IMPORTER(NonMaxSuppression)
     indices = castHelper(ctx, indices, DataType::kINT64);
 
     return {{indices}};
-};
+}
 
 DEFINE_BUILTIN_OP_IMPORTER(Not)
 {
@@ -5158,8 +5158,7 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
         return N_CHECK(concatenatedShape->getOutput(0));
     };
 
-    auto const getInitialInputValue
-        = [&ctx, &initialStateShape, &inputs, &node](size_t inputIdx) -> nvinfer1::ITensor* {
+    auto const getInitialInputValue = [&ctx, &initialStateShape, &inputs](size_t inputIdx) -> nvinfer1::ITensor* {
         if (inputs.size() > inputIdx && inputs.at(inputIdx))
         {
             return &convertToTensor(inputs.at(inputIdx), ctx);

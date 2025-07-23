@@ -67,6 +67,9 @@ void deserializeOnnxModel(void const* serializedModel, size_t serializedModelSiz
     // Note: This WARs the very low default size limit (64MB)
     codedInput.SetTotalBytesLimit(std::numeric_limits<int>::max(), std::numeric_limits<int>::max() / 4);
 #endif
+
+    ONNXTRT_CHECK(model->ByteSizeLong() == 0, "A model was previously parsed!", ErrorCode::kMODEL_DESERIALIZE_FAILED);
+
     ONNXTRT_CHECK(model->ParseFromCodedStream(&codedInput), "Failed to parse the ONNX model.",
         ErrorCode::kMODEL_DESERIALIZE_FAILED);
 }

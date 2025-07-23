@@ -95,16 +95,16 @@ size_t ModelRefitter::batchnormWeightRefitter(
         combinedBias.at<T>(i) = biasValues[i] - meanValues[i] * combinedScale.at<T>(i);
     }
     size_t successfullyRefittedWeights = 0;
-    if (refittableWeights.count(combinedScale.name))
+    if (mRefittableWeights.count(combinedScale.name))
     {
-        refittableWeights.erase(combinedScale.name);
+        mRefittableWeights.erase(combinedScale.name);
         ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedScale.name, std::move(combinedScale)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
     }
-    if (refittableWeights.count(combinedBias.name))
+    if (mRefittableWeights.count(combinedBias.name))
     {
-        refittableWeights.erase(combinedBias.name);
+        mRefittableWeights.erase(combinedBias.name);
         ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedBias.name, std::move(combinedBias)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
@@ -123,12 +123,12 @@ public:
     };
 };
 
-void ModelRefitter::refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model)
+void ModelRefitter::refitOnnxWeights()
 {
     nestedDepth = 0;
     successfullyRefittedWeights = 0;
-    size_t const numberOfWeightsToRefit = refittableWeights.size();
-    refitOnnxGraph(onnx_model.graph());
+    size_t const numberOfWeightsToRefit = mRefittableWeights.size();
+    refitOnnxGraph(mOnnxModel.graph());
     ONNXTRT_CHECK(successfullyRefittedWeights == numberOfWeightsToRefit,
         "Only successfully refitted " << successfullyRefittedWeights << " weights out of " << numberOfWeightsToRefit,
         ErrorCode::kREFIT_FAILED);
@@ -138,15 +138,15 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
 {
     for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
     {
-        if (!refittableWeights.count(initializer.name()))
+        if (!mRefittableWeights.count(initializer.name()))
         {
             continue;
         }
         // Remove the weight name from the set as some initializers
         // might have the same name across different nested constructs (e.g. IF nodes);
         // the assumption is that those weights would have the same value
-        refittableWeights.erase(initializer.name());
-        if (refittedWeights.count(initializer.name()))
+        mRefittableWeights.erase(initializer.name());
+        if (mRefittedWeights.count(initializer.name()))
         {
             LOG_REFITTER_WARNING("Duplicate initializer name ("
                 << initializer.name() << ") was found when processing the graph (" << graph.name()
@@ -154,7 +154,7 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
         }
         else
         {
-            refittedWeights.insert(initializer.name());
+            mRefittedWeights.insert(initializer.name());
         }
         ShapedWeights weights;
         ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(initializer, &weights, /*ownAllWeights=*/true),
@@ -210,12 +210,12 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
 
 void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
 {
-    if (!refittableWeights.count(node.output(0)))
+    if (!mRefittableWeights.count(node.output(0)))
     {
         return;
     }
-    refittableWeights.erase(node.output(0));
-    if (refittedWeights.count(node.output(0)))
+    mRefittableWeights.erase(node.output(0));
+    if (mRefittedWeights.count(node.output(0)))
     {
         LOG_REFITTER_WARNING("Duplicate weight name name ("
             << node.output(0) << ") was found when processing the graph (" << graphName
@@ -223,7 +223,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
     }
     else
     {
-        refittedWeights.insert(node.output(0));
+        mRefittedWeights.insert(node.output(0));
     }
     ShapedWeights weights;
     ::ONNX_NAMESPACE::AttributeProto const& nodeAttribute = node.attribute(0);
@@ -381,10 +381,10 @@ bool ModelRefitter::refitFromBytes(
             mWeightsContext.setOnnxFileLocation(modelPath);
         }
 
-        deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &onnx_model);
+        deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &mOnnxModel);
 
-        refittableWeights = getRefittableWeights();
-        refitOnnxWeights(onnx_model);
+        mRefittableWeights = getRefittableWeights();
+        refitOnnxWeights();
         return true;
     }
     ONNXTRT_CATCH_LOG(mLogger)
@@ -398,11 +398,11 @@ bool ModelRefitter::refitFromFile(char const* onnxModelFile) noexcept
         // Keep track of the absolute path to the ONNX file.
         mWeightsContext.setOnnxFileLocation(onnxModelFile);
 
-        deserializeOnnxModelFile(onnxModelFile, onnx_model);
-        refittableWeights = getRefittableWeights();
-        if (!refittableWeights.empty())
+        deserializeOnnxModelFile(onnxModelFile, mOnnxModel);
+        mRefittableWeights = getRefittableWeights();
+        if (!mRefittableWeights.empty())
         {
-            refitOnnxWeights(onnx_model);
+            refitOnnxWeights();
         }
         return true;
     }
@@ -410,4 +410,62 @@ bool ModelRefitter::refitFromFile(char const* onnxModelFile) noexcept
 
     return false;
 }
+
+bool ModelRefitter::loadModelProto(
+    void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath) noexcept
+{
+    ONNXTRT_TRY
+    {
+        if (modelPath)
+        {
+            // Keep track of the absolute path to the ONNX file.
+            mWeightsContext.setOnnxFileLocation(modelPath);
+        }
+
+        deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &mOnnxModel);
+
+        // Populate map of initializers for loadInitializers()
+        for (::ONNX_NAMESPACE::TensorProto const& initializer : mOnnxModel.graph().initializer())
+        {
+            mWeightsContext.initializerMap().insert({initializer.name(), &initializer});
+        }
+        return true;
+    }
+    ONNXTRT_CATCH_LOG(mLogger)
+    return false;
+}
+
+bool ModelRefitter::loadInitializer(char const* name, void const* data, size_t size) noexcept
+{
+    ONNXTRT_TRY
+    {
+        if (mOnnxModel.ByteSizeLong() == 0)
+        {
+            LOG_REFITTER_ERROR("An ONNX model has not been loaded yet - cannot load initializer.");
+            return false;
+        }
+
+        return mWeightsContext.loadExternalInit(name, data, size);
+    }
+    ONNXTRT_CATCH_LOG(mLogger)
+    return false;
+}
+
+bool ModelRefitter::refitModelProto() noexcept
+{
+    ONNXTRT_TRY
+    {
+        if (mOnnxModel.ByteSizeLong() == 0)
+        {
+            LOG_REFITTER_ERROR("An ONNX model has not been loaded yet - cannot refit an empty model.");
+            return false;
+        }
+        mRefittableWeights = getRefittableWeights();
+        refitOnnxWeights();
+        return true;
+    }
+    ONNXTRT_CATCH_LOG(mLogger)
+    return false;
+}
+
 } // namespace onnx2trt

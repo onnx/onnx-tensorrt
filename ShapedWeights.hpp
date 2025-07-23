@@ -10,6 +10,15 @@
 namespace onnx2trt
 {
 
+//!
+//! \class ShapedWeights
+//!
+//! \brief Represents ONNX weights, with built-in conversion to TensorRT's nvinfer1::Weights.
+//!
+//! One of the types in the union class TensorOrWeights.
+//! Does not own the underlying data, but is allowed to modify it. Underlying memory is allocated and freed by
+//! WeightsContext which has the same lifetime as the IParser / IParserRefitter class.
+//!
 class ShapedWeights
 {
 public:
@@ -40,14 +49,14 @@ public:
     template <typename T>
     T& at(size_t index)
     {
-        assert(values && index >= 0 && index < count());
+        assert(values && index < count());
         return static_cast<T*>(values)[index];
     }
 
     template <typename T>
     const T& at(size_t index) const
     {
-        assert(values && index >= 0 && index < count());
+        assert(values && index < count());
         return static_cast<const T*>(values)[index];
     }
 

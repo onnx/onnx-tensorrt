@@ -194,7 +194,7 @@ public:
     //!         it the user responsibility to intercept and report the error.
     //!         To obtain a better diagnostic, use the parseFromFile method below.
     //!
-    //! \param serialized_onnx_model Pointer to the serialized ONNX model
+    //! \param serialized_onnx_model Pointer to the serialized ONNX model. Can be freed after this function returns.
     //! \param serialized_onnx_model_size Size of the serialized ONNX model
     //!        in bytes
     //! \param model_path Absolute path to the model file for loading external weights if required
@@ -224,7 +224,7 @@ public:
     //!        If the function returns True, one can proceed to engine building
     //!        without having to call \p parse or \p parseFromFile.
     //!
-    //! \param serialized_onnx_model Pointer to the serialized ONNX model
+    //! \param serialized_onnx_model Pointer to the serialized ONNX model. Can be freed after this function returns.
     //! \param serialized_onnx_model_size Size of the serialized ONNX model
     //!        in bytes
     //! \param sub_graph_collection Container to hold supported subgraphs
@@ -234,18 +234,20 @@ public:
     TRT_DEPRECATED virtual bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) noexcept = 0;
 
+    //!
+    //! [DEPRECATED] Deprecated in TensorRT 10.13. See loadInitializer().
+    //!
     //!\brief Parse a serialized ONNX model into the TensorRT network
     //! with consideration of user provided weights
     //!
-    //! \param serialized_onnx_model Pointer to the serialized ONNX model
+    //! \param serialized_onnx_model Pointer to the serialized ONNX model. Can be freed after this function returns.
     //! \param serialized_onnx_model_size Size of the serialized ONNX model
     //!        in bytes
     //! \return true if the model was parsed successfully
     //! \see getNbErrors() getError()
     //!
-    virtual bool parseWithWeightDescriptors(
-        void const* serialized_onnx_model, size_t serialized_onnx_model_size) noexcept
-        = 0;
+    TRT_DEPRECATED virtual bool parseWithWeightDescriptors(
+        void const* serialized_onnx_model, size_t serialized_onnx_model_size) noexcept = 0;
 
     //!
     //!\brief Returns whether the specified operator may be supported by the
@@ -370,7 +372,7 @@ public:
     //!            Results can be queried through \p getNbSubgraphs, \p isSubgraphSupported,
     //!            \p getSubgraphNodes.
     //!
-    //! \param serializedOnnxModel Pointer to the serialized ONNX model
+    //! \param serializedOnnxModel Pointer to the serialized ONNX model. Can be freed after this function returns.
     //! \param serializedOnnxModelSize Size of the serialized ONNX model in bytes
     //! \param modelPath Absolute path to the model file for loading external weights if required
     //! \return true if the model is supported
@@ -408,6 +410,56 @@ public:
     //! \return Pointer to the subgraph nodes array. This pointer is owned by the Parser.
     //!
     virtual int64_t* getSubgraphNodes(int64_t const index, int64_t& subgraphLength) noexcept = 0;
+
+    //!
+    //! \brief Load a serialized ONNX model into the parser. Unlike the parse(), parseFromFile(), or
+    //! parseWithWeightDescriptors() functions, this function does not immediately convert the model into a TensorRT
+    //! INetworkDefinition. Using this function allows users to provide their own initializers for the ONNX model
+    //! through the loadInitializer() function.
+    //!
+    //! Only one model can be loaded at a time. Subsequent calls to loadModelProto() will result in an error.
+    //!
+    //! To begin the conversion of the model into a TensorRT INetworkDefinition, use parseModelProto().
+    //!
+    //! \param serializedOnnxModel Pointer to the serialized ONNX model. Can be freed after this function returns.
+    //! \param serializedOnnxModelSize Size of the serialized ONNX model in bytes.
+    //! \param modelPath Absolute path to the model file for loading external weights if required.
+    //! \return true if the model was loaded successfully
+    //! \see getNbErrors() getError()
+    //!
+    virtual bool loadModelProto(
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept = 0;
+
+    //!
+    //! \brief Prompt the ONNX parser to load an initializer with user-provided binary data.
+    //! The lifetime of the data must exceed the lifetime of the parser.
+    //!
+    //! All user-provided initializers must be provided prior to calling refitModelProto().
+    //!
+    //! This function can be called multiple times to specify the names of multiple initializers.
+    //!
+    //! Calling this function with an initializer previously specified will overwrite the previous instance.
+    //!
+    //!
+    //! This function will return false if initializer validation fails. Possible validation errors are:
+    //! * This function was called prior to loadModelProto().
+    //! * The requested initializer was not found in the model.
+    //! * The size of the data provided is different from the corresponding initializer in the model.
+    //!
+    //! \param name Name of the initializer.
+    //! \param data Binary data containing the values of the initializer.
+    //! \param size Size of the initializer in bytes.
+    //! \return true if the initializer was loaded successfully
+    //! \see loadModelProto()
+    //!
+    virtual bool loadInitializer(char const* name, void const* data, size_t size) noexcept = 0;
+
+    //! \brief Begin the parsing and conversion process of the loaded ONNX model into a TensorRT INetworkDefinition.
+    //!
+    //! \return true if conversion was successful
+    //! \see getNbErrors() getError() loadModelProto() loadModelProtoFromFile()
+    //!
+    virtual bool parseModelProto() noexcept = 0;
 };
 
 //!
@@ -470,6 +522,54 @@ public:
     virtual void clearErrors() = 0;
 
     virtual ~IParserRefitter() noexcept = default;
+
+    //!
+    //! \brief Load a serialized ONNX model into the parser. Unlike the refit(), or refitFromFile()
+    //! functions, this function does not immediately begin the refit process. Using this function
+    //! allows users to provide their own initializers for the ONNX model through the loadInitializer() function.
+    //!
+    //! Only one model can be loaded at a time. Subsequent calls to loadModelProto() will result in an error.
+    //!
+    //! To begin the refit process, use refitModelProto().
+    //!
+    //! \param serializedOnnxModel Pointer to the serialized ONNX model. Can be freed after this function returns.
+    //! \param serializedOnnxModelSize Size of the serialized ONNX model in bytes.
+    //! \param modelPath Absolute path to the model file for loading external weights if required.
+    //! \return true if the model was loaded successfully
+    //! \see getNbErrors() getError()
+    //!
+    virtual bool loadModelProto(
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept = 0;
+
+    //!
+    //! \brief Prompt the ONNX refitter to load an initializer with user-provided binary data.
+    //! The lifetime of the data must exceed the lifetime of the refitter.
+    //!
+    //! All user-provided initializers must be provided prior to calling refitModelProto().
+    //!
+    //! This function can be called multiple times to specify the names of multiple initializers.
+    //!
+    //! Calling this function with an initializer previously specified will overwrite the previous instance.
+    //!
+    //! This function will return false if initializer validation fails. Possible validation errors are:
+    //! * This function was called prior to loadModelProto()
+    //! * The requested initializer was not found in the model.
+    //! * The size of the data provided is different from the corresponding initializer in the model.
+    //!
+    //! \param name Name of the initializer.
+    //! \param data Binary data containing the values of the initializer.
+    //! \param size Size of the initializer in bytes.
+    //! \return true if the initializer was loaded successfully
+    //! \see loadModelProto()
+    //!
+    virtual bool loadInitializer(char const* name, void const* data, size_t size) noexcept = 0;
+
+    //! \brief Begin the refit process from the loaded ONNX model.
+    //!
+    //! \return true if refit was successful
+    //! \see getNbErrors() getError() loadModelProto()
+    //!
+    virtual bool refitModelProto() noexcept = 0;
 };
 
 } // namespace nvonnxparser

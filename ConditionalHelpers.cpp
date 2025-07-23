@@ -55,7 +55,7 @@ void addConditionalInputLayer(ImporterContext* ctx, nvinfer1::IIfConditional* co
     }
     auto ifOutput = N_CHECK(inputLayer->getOutput(0));
     layer.setInput(inIdx, *ifOutput);
-};
+}
 
 // Take a snapshot of the network before and after parsing the subgraph and return a list
 // of newly added network layers.
