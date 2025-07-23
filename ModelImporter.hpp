@@ -31,22 +31,31 @@ class ModelImporter : public nvonnxparser::IParser
 
 protected:
     StringMap<NodeImporter> _op_importers;
-    virtual void importModel(::ONNX_NAMESPACE::ModelProto const& model);
+    virtual void importModel();
 
 private:
     ImporterContext mImporterCtx;
     std::vector<std::string> mPluginLibraryList; // Array of strings containing plugin libs
     std::vector<char const*>
         mPluginLibraryListCStr; // Array of C-strings corresponding to the strings in mPluginLibraryList
-    std::list<::ONNX_NAMESPACE::ModelProto> mONNXModels; // Needed for ownership of weights
+    // Protobuf message representing an ONNX model. Required to keep ownership of weights.
+    ::ONNX_NAMESPACE::ModelProto mOnnxModel;
     SubGraphSupportVector_t mSubGraphSupportVector;
     int mCurrentNode;
     mutable std::vector<Status> mErrors; // Marked as mutable so that errors could be reported from const functions
     nvonnxparser::OnnxParserFlags mOnnxParserFlags{
         1U << static_cast<uint32_t>(
             nvonnxparser::OnnxParserFlag::kNATIVE_INSTANCENORM)}; // kNATIVE_INSTANCENORM is ON by default.
-    std::pair<bool, SubGraphSupportVector_t> doSupportsModel(
-        void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path = nullptr);
+
+    // Log information about the model
+    void logModelInfo();
+
+    // After parse, determine the number and nodes in supported subgraphs based on the number of errors reported.
+    // Populates values for getNbSubgraphs(), isSubgraphSupported, and getSubgraphNodes.
+    void reportSubgraphs();
+
+    // After parse, log errors to the logger on the details of the node(s) that caused the error.
+    void logErrors();
 
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger) noexcept
@@ -143,6 +152,13 @@ public:
     bool parseFromFile(char const* onnxModelFile, int32_t verbosity) noexcept override;
 
     virtual char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept override;
+
+    bool loadModelProto(void const* serializedOnnxModel, size_t serializedOnnxModelSize,
+        char const* modelPath = nullptr) noexcept override;
+
+    bool loadInitializer(char const* name, void const* data, size_t size) noexcept override;
+
+    bool parseModelProto() noexcept override;
 };
 
 } // namespace onnx2trt

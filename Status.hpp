@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -22,11 +23,20 @@
 #define USE_LITE_PROTOBUF 0
 #endif // USE_LITE_PROTOBUF
 
-// Used to strip out build path information from debug prints
-#if defined(SOURCE_LENGTH)
-#define __FILENAME__ (__FILE__ + SOURCE_LENGTH)
+// Helper macro that wraps __FILE__ and returns a std::string of the filename at runtime.
+#if defined(__GLIBCXX__) && defined(__aarch64__)
+[[maybe_unused]] static std::string filename(std::string_view path)
+{
+    auto pos = path.rfind('/');
+    if (pos == std::string_view::npos)
+    {
+        return std::string(path);
+    }
+    return std::string(path.substr(pos + 1));
+}
+#define ONNX2TRT_FILENAME (filename(__FILE__))
 #else
-#define __FILENAME__ (__FILE__)
+#define ONNX2TRT_FILENAME (std::filesystem::path(__FILE__).filename().string())
 #endif
 
 // Logging macros
@@ -35,7 +45,7 @@
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
         if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
-            ss << __FILENAME__ << ":" << __LINE__ << ": ";                                                             \
+            ss << ONNX2TRT_FILENAME << ":" << __LINE__ << ": ";                                                        \
         ss << msg;                                                                                                     \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
@@ -45,7 +55,7 @@
 #define LOG_WARNING(msg) LOG(msg, nvinfer1::ILogger::Severity::kWARNING)
 #define LOG_ERROR(msg) LOG(msg, nvinfer1::ILogger::Severity::kERROR)
 
-#define MAKE_ERROR(desc, code) onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__)
+#define MAKE_ERROR(desc, code) onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__)
 
 #define ASSERT(condition, error_code)                                                                                  \
     do                                                                                                                 \
@@ -57,7 +67,7 @@
     } while (0)
 
 #define MAKE_NODE_ERROR(desc, code, node, index)                                                                       \
-    onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
+    onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), (node.name()), (node.op_type()))
 
 #define ASSERT_NODE(condition, msg, node, index, error_code)                                                           \
     do                                                                                                                 \
@@ -71,7 +81,7 @@
     } while (0)
 
 #define MAKE_STATIC_ERROR(desc, code, node, index)                                                                     \
-    onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index), (node.name()), (node.op_type()))
+    onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), (node.name()), (node.op_type()))
 
 #define ADD_STATIC_ERROR(desc, code, node, index, error_list)                                                          \
     do                                                                                                                 \
@@ -89,7 +99,7 @@
         {                                                                                                              \
             localFunctionStackChar.push_back(ctx->localFunctionErrors().back()[i].c_str());                            \
         }                                                                                                              \
-        error_list.push_back(onnx2trt::Status((code), (desc), __FILENAME__, __LINE__, __func__, (index),               \
+        error_list.push_back(onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index),          \
             (node.name()), (node.op_type()), localFunctionStackChar));                                                 \
     } while (0)
 
@@ -159,60 +169,17 @@ T* N_CHECK(T* inputPtr)
     return inputPtr;
 }
 
-// Overloads of operator<< on TensorRT types must be defined inside nvinfer1
-// so that argument-dependent lookup works as expected. Declared static to
-// avoid symbol clashing when statically linking with other TensorRT libraries
-namespace nvinfer1
+namespace onnx2trt
 {
 
 template <typename T>
-static std::ostream& printSequence(std::ostream& stream, const T* begin, int count)
-{
-    stream << "(";
-    if (count > 0)
-    {
-        std::copy_n(begin, count - 1, std::ostream_iterator<T>(stream, ", "));
-        stream << begin[count - 1];
-    }
-    stream << ")";
-    return stream;
-}
+std::ostream& printSequence(std::ostream& stream, const T* begin, int count);
 
-static std::ostream& operator<<(std::ostream& stream, nvinfer1::Dims const& shape)
-{
-    return printSequence(stream, shape.d, shape.nbDims);
-}
+std::ostream& operator<<(std::ostream& stream, nvinfer1::Dims const& shape);
 
-static std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm)
-{
-    return printSequence(stream, perm.order, nvinfer1::Dims::MAX_DIMS);
-}
+std::ostream& operator<<(std::ostream& stream, nvinfer1::Permutation const& perm);
 
-static std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& dtype)
-{
-    switch (dtype)
-    {
-    case nvinfer1::DataType::kFLOAT: return stream << "float32";
-    case nvinfer1::DataType::kHALF: return stream << "float16";
-    case nvinfer1::DataType::kBF16: return stream << "bfloat16";
-    case nvinfer1::DataType::kINT8: return stream << "int8";
-    case nvinfer1::DataType::kUINT8: return stream << "uint8";
-    case nvinfer1::DataType::kINT32: return stream << "int32";
-    case nvinfer1::DataType::kINT64: return stream << "int64";
-    case nvinfer1::DataType::kBOOL: return stream << "bool";
-    case nvinfer1::DataType::kFP8: return stream << "float8";
-    case nvinfer1::DataType::kE8M0: return stream << "floatE8M0";
-    case nvinfer1::DataType::kINT4: return stream << "int4";
-    case nvinfer1::DataType::kFP4: return stream << "fp4";
-
-    default: throw std::runtime_error("Unknown dtype");
-    }
-}
-
-} // namespace nvinfer1
-
-namespace onnx2trt
-{
+std::ostream& operator<<(std::ostream& stream, nvinfer1::DataType const& dtype);
 
 using nvonnxparser::ErrorCode;
 

@@ -71,7 +71,7 @@ nvinfer1::ITensor* addClip(ImporterContext* ctx, nvinfer1::ITensor* input, float
         return N_CHECK(layer->getOutput(0));
     }
     return input;
-};
+}
 
 NodeOutputs argMinMaxHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op)
@@ -883,12 +883,18 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
 {
     nvinfer1::IPluginCreatorInterface* creator = nullptr;
 
-#if ENABLE_STD_PLUGIN
-    auto& pluginRegistry = ctx->network()->getBuilder().getPluginRegistry();
-
     int32_t numCreators = 0;
-    auto creators = pluginRegistry.getAllCreatorsRecursive(&numCreators);
+    std::vector<nvinfer1::IPluginCreatorInterface*> creators;
 
+    int32_t numStdCreators = 0;
+    auto& stdPluginRegistry = ctx->network()->getBuilder().getPluginRegistry();
+    auto stdCreators = stdPluginRegistry.getAllCreatorsRecursive(&numStdCreators);
+    if (numStdCreators > 0)
+    {
+        creators.insert(creators.end(), stdCreators, stdCreators + numStdCreators);
+    }
+
+    numCreators = creators.size();
     // Helper function to check if a plugin creator matches the requested plugin parameters
     auto matchesPlugin = [&](char const* name, char const* version, char const* ns) -> bool {
         return std::string(name) == pluginName && std::string(version) == pluginVersion
@@ -932,9 +938,9 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
                 v3QuickCreator->getPluginNamespace());
             break;
         }
-            // No default case as the creatorVersion is guaranteed to be one of the above as per
-            // `getPluginCreatorVersion()`. For any future plugin creator versions added, this switch statement will
-            // need to be updated along with `getPluginCreatorVersion()`.
+       // No default case as the creatorVersion is guaranteed to be one of the above as per
+       // `getPluginCreatorVersion()`. For any future plugin creator versions added, this switch statement will
+       // need to be updated along with `getPluginCreatorVersion()`.
         }
 
         if (matches)
@@ -943,11 +949,8 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
             break;
         }
     }
-#endif // ENABLE_STD_PLUGIN
 
 
-    // Do not perform a N_CHECK here as a plugin not being found is a valid case. It is up to the callers to handle the
-    // nullptr correctly.
     return creator;
 }
 

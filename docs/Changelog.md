@@ -2,6 +2,15 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.13 GA Release - 2025-7-24
+For more details, see the 10.13 GA release notes
+
+- Decreased memory usage when importing models with external weights
+- Added `loadModelProto`, `loadInitializer` and `parseModelProto` APIs for IParser. These APIs are meant to be used to load user initializers when parsing ONNX models.
+- Added `loadModelProto`, `loadInitializer` and `refitModelProto` APIs for IParserRefitter. These APIs are meant to be used to load user initializers when refitting ONNX models.
+- Deprecated `IParser::parseWithWeightDescriptors`.
+- Unmarked `Protobuf` as a required dependency for building. If not found the ONNX submodule will install.
+
 # TensorRT 10.12 GA Release - 2025-6-16
 For more details, see the 10.12 GA release notes
 

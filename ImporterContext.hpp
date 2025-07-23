@@ -29,7 +29,6 @@ class ErrorRecorderWrapper
 public:
     ErrorRecorderWrapper(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
-        , mLogger(logger)
     {
         if (mNetwork)
         {
@@ -69,9 +68,9 @@ public:
     {
         return mOnnxErrorRecorder ? mOnnxErrorRecorder : nullptr;
     }
+
 private:
     nvinfer1::INetworkDefinition* mNetwork{nullptr};
-    nvinfer1::ILogger* mLogger{nullptr};
     ONNXParserErrorRecorder* mOnnxErrorRecorder{nullptr};
     nvinfer1::IErrorRecorder* mUserErrorRecorder{nullptr};
 };
@@ -386,7 +385,7 @@ public:
     }
 
     // Returns if the underlying network was created with the KSTRONGLY_TYPED flag.
-    bool const isStronglyTyped()
+    bool isStronglyTyped()
     {
         assert(mNetwork != nullptr);
         return mNetwork->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);

@@ -19,12 +19,13 @@
     {                                                                                                                  \
         std::ostringstream ss{};                                                                                       \
         if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
-            ss << __FILENAME__ << ":" << __LINE__ << ": ";                                                             \
+            ss << ONNX2TRT_FILENAME << ":" << __LINE__ << ": ";                                                        \
         ss << msg;                                                                                                     \
         mLogger->log(severity, ss.str().c_str());                                                                      \
     } while (0)
 
 #define LOG_REFITTER_WARNING(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kWARNING)
+#define LOG_REFITTER_ERROR(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kERROR)
 
 namespace onnx2trt
 {
@@ -38,7 +39,7 @@ private:
     WeightsContext mWeightsContext;
 
     //! ONNX ModelProto object to hold ownership of ONNX weights whenever a data type conversion is not needed.
-    ::ONNX_NAMESPACE::ModelProto onnx_model;
+    ::ONNX_NAMESPACE::ModelProto mOnnxModel;
 
     //! Counter to limit the recursion depth to a set amount for nodes containing subgraphs.
     size_t nestedDepth{0};
@@ -49,8 +50,8 @@ private:
     int64_t mBatchNormWeightSuffixCounter{0};
 
     size_t successfullyRefittedWeights{};
-    std::unordered_set<std::string> refittableWeights;
-    std::unordered_set<std::string> refittedWeights;
+    std::unordered_set<std::string> mRefittableWeights;
+    std::unordered_set<std::string> mRefittedWeights;
 
     mutable std::vector<Status> mErrors;
 
@@ -63,7 +64,7 @@ private:
     size_t batchnormWeightRefitter(
         ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f);
 
-    void refitOnnxWeights(::ONNX_NAMESPACE::ModelProto const& onnx_model);
+    void refitOnnxWeights();
     void refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph);
     void refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph);
     void refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName);
@@ -93,7 +94,7 @@ public:
     {
         ONNXTRT_TRY
         {
-            return (index >= 0 && index < mErrors.size()) ? &mErrors.at(index) : nullptr;
+            return (index >= 0 && static_cast<size_t>(index) < mErrors.size()) ? &mErrors.at(index) : nullptr;
         }
         ONNXTRT_CATCH_LOG(mLogger)
         return nullptr;
@@ -103,6 +104,13 @@ public:
     {
         mErrors.clear();
     }
+
+    bool loadModelProto(void const* serializedOnnxModel, size_t serializedOnnxModelSize,
+        char const* modelPath = nullptr) noexcept override;
+
+    bool loadInitializer(char const* name, void const* data, size_t size) noexcept override;
+
+    bool refitModelProto() noexcept override;
 };
 
 } // namespace onnx2trt

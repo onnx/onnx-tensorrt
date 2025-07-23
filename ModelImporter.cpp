@@ -102,12 +102,131 @@ static std::string makeErrorExplanation(ImporterContext* ctx, std::string const&
     return result.str();
 }
 
-//! Make error explanation from an exception.
-static std::string makeErrorExplanation(std::exception const& e, std::string const& nodeName)
+void ModelImporter::logModelInfo()
 {
-    std::ostringstream result;
-    result << "Exception occurred in - " << nodeName << "\n" << e.what();
-    return result.str();
+    auto* ctx = &mImporterCtx;
+    int64_t const opset_version = (mOnnxModel.opset_import().size() ? mOnnxModel.opset_import(0).version() : 0);
+    auto fileName = ctx->getWeightsContext().getOnnxFileLocation();
+    LOG_INFO("----------------------------------------------------------------");
+    if (!fileName.empty())
+    {
+        LOG_INFO("Input filename:   " << fileName);
+    }
+    LOG_INFO("ONNX IR version:  " << onnxIRVersionAsString(mOnnxModel.ir_version()));
+    LOG_INFO("Opset version:    " << opset_version);
+    LOG_INFO("Producer name:    " << mOnnxModel.producer_name());
+    LOG_INFO("Producer version: " << mOnnxModel.producer_version());
+    LOG_INFO("Domain:           " << mOnnxModel.domain());
+    LOG_INFO("Model version:    " << mOnnxModel.model_version());
+    LOG_INFO("Doc string:       " << mOnnxModel.doc_string());
+    LOG_INFO("----------------------------------------------------------------");
+}
+
+void ModelImporter::logErrors()
+{
+    auto* ctx = &mImporterCtx;
+    int32_t const numErrors = getNbErrors();
+    for (int32_t i = 0; i < numErrors; ++i)
+    {
+        nvonnxparser::IParserError const* error = getError(i);
+        if (error->node() != -1)
+        {
+            ::ONNX_NAMESPACE::NodeProto const& node = mOnnxModel.graph().node(error->node());
+            LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \""
+                                                   << node.output(0) << "\""
+                                                   << "]:");
+            LOG_ERROR("--- Begin node ---" << "\n" << node);
+            LOG_ERROR("--- End node ---");
+        }
+        LOG_ERROR("ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"
+                            << "[" << static_cast<int>(error->code()) << "] " << error->desc());
+    }
+}
+
+void ModelImporter::reportSubgraphs()
+{
+    int32_t error_node = -1;
+    std::string input_node{};
+
+    bool allSupported = getNbErrors() == 0;
+
+    if (!allSupported)
+    {
+        int32_t nerror = getNbErrors();
+        for (int32_t i = 0; i < nerror; ++i)
+        {
+            nvonnxparser::IParserError const* error = getError(i);
+            if (error->node() != -1)
+            {
+                error_node = error->node();
+                allSupported = false;
+            }
+            // The node that we failed on is one of the input nodes (-1). Get the name of the input node
+            // that we failed on and remove all nodes that spawn out of it.
+            else
+            {
+                // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
+                // around MAKE_INPUT_ERROR.
+                input_node = error->file();
+            }
+        }
+    }
+    auto* ctx = &mImporterCtx;
+    auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
+        for (auto input : node.input())
+        {
+            if (input_node == input || ctx->loopTensors()[input_node] == input)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    bool newSubGraph(true);
+
+    // Sort and partition supported subgraphs
+    std::vector<size_t> topological_order;
+    if (!toposort(mOnnxModel.graph().node(), &topological_order))
+    {
+        LOG_ERROR("Failed to sort model topologically");
+        return;
+    }
+
+    mSubGraphSupportVector.clear();
+    for (int32_t node_idx : topological_order)
+    {
+        ::ONNX_NAMESPACE::NodeProto const& node = mOnnxModel.graph().node(node_idx);
+        // Add the node to the subgraph if:
+        //     1. It is not directly connected to an unsupported input
+        //     2. The importer function did not throw an assertion
+        bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
+        bool unsuccessfulParse = node_idx == error_node;
+        if (!unsupportedInput && !unsuccessfulParse)
+        {
+            if (newSubGraph)
+            {
+                // If it is the beginning of a new subGraph, we start a new vector
+                mSubGraphSupportVector.emplace_back();
+                // Mark all new graphs as "unknown"
+                mSubGraphSupportVector.back().second = false;
+                newSubGraph = false;
+            }
+            // We add the new node to the last graph
+            mSubGraphSupportVector.back().first.emplace_back(node_idx);
+        }
+        else
+        {
+            // This is not a supported node, reset newSubGraph
+            newSubGraph = true;
+            allSupported = false;
+        }
+    }
+    // Only one subgraph, mark it as true.
+    if (allSupported)
+    {
+        mSubGraphSupportVector.back().second = true;
+    }
 }
 
 bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node)
@@ -534,119 +653,17 @@ void importLocalFunctions(ImporterContext* ctx, ::ONNX_NAMESPACE::ModelProto con
     }
 }
 
-std::pair<bool, ModelImporter::SubGraphSupportVector_t> ModelImporter::doSupportsModel(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path)
-{
-    ::ONNX_NAMESPACE::ModelProto model;
-    deserializeOnnxModel(serialized_onnx_model, serialized_onnx_model_size, &model);
-
-    if (model_path)
-    {
-        mImporterCtx.setOnnxFileLocation(model_path);
-    }
-
-    bool allSupported{true};
-
-    // Parse the graph and see if we hit any parsing errors
-    allSupported = parse(serialized_onnx_model, serialized_onnx_model_size);
-
-    int32_t error_node = -1;
-    std::string input_node{};
-
-    if (!allSupported)
-    {
-        int32_t nerror = getNbErrors();
-        for (int32_t i = 0; i < nerror; ++i)
-        {
-            nvonnxparser::IParserError const* error = getError(i);
-            if (error->node() != -1)
-            {
-                error_node = error->node();
-                allSupported = false;
-            }
-            // The node that we failed on is one of the input nodes (-1). Get the name of the input node
-            // that we failed on and remove all nodes that spawn out of it.
-            else
-            {
-                // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-                // around MAKE_INPUT_ERROR.
-                input_node = error->file();
-            }
-        }
-    }
-    auto* ctx = &mImporterCtx;
-    auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
-        for (auto input : node.input())
-        {
-            if (input_node == input || ctx->loopTensors()[input_node] == input)
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    bool newSubGraph(true);
-    // Sort and partition supported subgraphs
-    std::vector<size_t> topological_order;
-    if (!toposort(model.graph().node(), &topological_order))
-    {
-        LOG_VERBOSE("Failed to sort model topologically, exiting ...");
-        return std::make_pair<bool, SubGraphSupportVector_t>(false, {});
-    }
-
-    SubGraphSupportVector_t supportVector;
-    for (int32_t node_idx : topological_order)
-    {
-        ::ONNX_NAMESPACE::NodeProto const& node = model.graph().node(node_idx);
-        // Add the node to the subgraph if:
-        //     1. It is not directly connected to an unsupported input
-        //     2. The importer function did not throw an assertion
-        bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
-        bool unsuccessfulParse = node_idx == error_node;
-        if (!unsupportedInput && !unsuccessfulParse)
-        {
-            if (newSubGraph)
-            {
-                // If it is the beginning of a new subGraph, we start a new vector
-                supportVector.emplace_back();
-                // Mark all new graphs as "unknown"
-                supportVector.back().second = false;
-                newSubGraph = false;
-            }
-            // We add the new node to the last graph
-            supportVector.back().first.emplace_back(node_idx);
-        }
-        else
-        {
-            // This is not a supported node, reset newSubGraph
-            newSubGraph = true;
-            allSupported = false;
-        }
-    }
-
-    // Only mark the subgraph as supported if there is one supported subgraph.
-    if (allSupported)
-    {
-        supportVector.back().second = true;
-    }
-    return std::make_pair(allSupported, std::move(supportVector));
-}
-
 bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
     SubGraphCollection_t& sub_graph_collection, char const* model_path) noexcept
 {
     ONNXTRT_TRY
     {
-        std::pair<bool, SubGraphSupportVector_t> result
-            = doSupportsModel(serialized_onnx_model, serialized_onnx_model_size, model_path);
-        bool supports = result.first;
-        SubGraphSupportVector_t supportVector = result.second;
-
+        bool supports = parse(serialized_onnx_model, serialized_onnx_model_size, model_path);
+        reportSubgraphs();
         sub_graph_collection.clear();
 
         // SubGraphCollection uses size_t, while SubGraphSupportVector_t uses int64_t
-        for (const auto& pair : supportVector)
+        for (const auto& pair : mSubGraphSupportVector)
         {
             bool subgraphSupports = pair.second;
 
@@ -656,7 +673,6 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
             // Create a new pair and add it to vector b
             sub_graph_collection.push_back(std::make_pair(subgraphNodesRet, subgraphSupports));
         }
-
         return supports;
     }
     ONNXTRT_CATCH_RECORD
@@ -668,14 +684,8 @@ bool ModelImporter::supportsModelV2(
 {
     ONNXTRT_TRY
     {
-        std::pair<bool, SubGraphSupportVector_t> result
-            = doSupportsModel(serialized_onnx_model, serialized_onnx_model_size, model_path);
-        bool supports = result.first;
-        SubGraphSupportVector_t supportVector = result.second;
-
-        mSubGraphSupportVector.resize(supportVector.size());
-        std::copy(supportVector.begin(), supportVector.end(), mSubGraphSupportVector.begin());
-
+        bool supports = parse(serialized_onnx_model, serialized_onnx_model_size, model_path);
+        reportSubgraphs();
         return supports;
     }
     ONNXTRT_CATCH_RECORD
@@ -699,7 +709,7 @@ bool ModelImporter::isSubgraphSupported(int64_t const index) noexcept
         std::ostringstream errorMessage;
         errorMessage << "Query index " << index
                      << " exceeds subgraph support vector (size = " << mSubGraphSupportVector.size()
-                     << "). Have you called supports_model_v2?";
+                     << "). Have you called supports_model_v2 or parse?";
         ONNXTRT_CHECK(mSubGraphSupportVector.size() > static_cast<uint64_t>(index), errorMessage.str(),
             ErrorCode::kINVALID_VALUE);
         return mSubGraphSupportVector[index].second;
@@ -715,7 +725,7 @@ int64_t* ModelImporter::getSubgraphNodes(int64_t const index, int64_t& subgraphL
         std::ostringstream errorMessage;
         errorMessage << "Query index " << index
                      << " exceeds subgraph support vector (size = " << mSubGraphSupportVector.size()
-                     << "). Have you called supports_model_v2?";
+                     << "). Have you called supports_model_v2 or parse?";
         ONNXTRT_CHECK(mSubGraphSupportVector.size() > static_cast<uint64_t>(index), errorMessage.str(),
             ErrorCode::kINVALID_VALUE);
         subgraphLength = mSubGraphSupportVector[index].first.size();
@@ -743,15 +753,7 @@ bool ModelImporter::parseWithWeightDescriptors(
 {
     ONNXTRT_TRY
     {
-        mCurrentNode = -1;
-        // TODO: This function (and its overload below) could do with some cleaning,
-        //       particularly wrt error handling.
-        // Note: We store a copy of the model so that weight arrays will persist
-        mONNXModels.emplace_back();
-        ::ONNX_NAMESPACE::ModelProto& model = mONNXModels.back();
-        deserializeOnnxModel(serialized_onnx_model, serialized_onnx_model_size, &model);
-        importModel(model);
-        return true;
+        return parse(serialized_onnx_model, serialized_onnx_model_size, nullptr);
     }
     ONNXTRT_CATCH_RECORD
 
@@ -774,26 +776,44 @@ bool ModelImporter::parse(
         {
             mImporterCtx.setOnnxFileLocation(model_path);
         }
-        return this->parseWithWeightDescriptors(serialized_onnx_model, serialized_onnx_model_size);
+
+        deserializeOnnxModel(serialized_onnx_model, serialized_onnx_model_size, &mOnnxModel);
+        try
+        {
+            this->importModel();
+        }
+        catch (OnnxTrtException& e)
+        {
+            mErrors.push_back(e.getStatus());
+        }
+        catch (std::exception& e)
+        {
+            mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
+        }
+
+        logErrors();
+        reportSubgraphs();
+
+        return mErrors.size() == 0;
     }
     ONNXTRT_CATCH_RECORD
 
     return false;
 }
 
-void ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
+void ModelImporter::importModel()
 {
     auto* ctx = &mImporterCtx;
     mImporterCtx.clearOpsets();
     // Add domain import limit for security reasons
     int32_t const MAX_DOMAINS = 1024;
-    ONNXTRT_CHECK(model.opset_import().size() <= MAX_DOMAINS,
+    ONNXTRT_CHECK(mOnnxModel.opset_import().size() <= MAX_DOMAINS,
         "Model contains more than 1024 domains! Parsing will halt for security reasons.",
         ErrorCode::kUNSUPPORTED_GRAPH);
-    for (int32_t i = 0; i < model.opset_import().size(); ++i)
+    for (int32_t i = 0; i < mOnnxModel.opset_import().size(); ++i)
     {
-        std::string domain = model.opset_import(i).domain();
-        int64_t version = model.opset_import(i).version();
+        std::string domain = mOnnxModel.opset_import(i).domain();
+        int64_t version = mOnnxModel.opset_import(i).version();
         // TensorRT requires an ONNX graph to be generated with at least ai.onnx version 7.
         // ONNX spec says that the default domain is either an empty string or is "ai.onnx".
         if ((domain.empty() || domain == "ai.onnx") && version < 7)
@@ -804,7 +824,10 @@ void ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
         }
         mImporterCtx.addOpset(domain, version);
     }
-    ::ONNX_NAMESPACE::GraphProto const& graph = model.graph();
+
+    logModelInfo();
+
+    ::ONNX_NAMESPACE::GraphProto const& graph = mOnnxModel.graph();
     // Create a dummy tensors so that we can reserve output names. If the output names are encountered elsewhere
     // in the graph, the ctx will know to make the names unique.
     for (::ONNX_NAMESPACE::ValueInfoProto const& output : graph.output())
@@ -813,14 +836,14 @@ void ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
     }
 
     // Import LocalFunctions
-    importLocalFunctions(&mImporterCtx, model);
+    importLocalFunctions(&mImporterCtx, mOnnxModel);
 
     // Propagate OnnxParserFlags down to the importer context.
     mImporterCtx.setFlags(getFlags());
 
     mCurrentNode = -1;
     importInputs(&mImporterCtx, graph, &mImporterCtx.tensors(), mErrors);
-    parseGraph(&mImporterCtx, graph, mErrors, model.producer_name() == "TensorRT", &mCurrentNode);
+    parseGraph(&mImporterCtx, graph, mErrors, mOnnxModel.producer_name() == "TensorRT", &mCurrentNode);
 
     mCurrentNode = -1;
     // Mark outputs defined in the ONNX model (unless tensors are user-requested)
@@ -860,7 +883,7 @@ void ModelImporter::importModel(::ONNX_NAMESPACE::ModelProto const& model)
         }
     }
 
-    if (model.producer_name() == "TensorRT")
+    if (mOnnxModel.producer_name() == "TensorRT")
     {
         // iterate over all tensors in the network and add them to "tensors" map
         StringMap<nvinfer1::ITensor*> tensors;
@@ -949,7 +972,6 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity) 
     ONNXTRT_TRY
     {
         ONNXTRT_CHECK(onnxModelFile, "Input file cannot be empty.", ErrorCode::kINVALID_VALUE);
-        auto* ctx = &mImporterCtx;
 
         // Define S_ISREG macro for Windows
 #if !defined(S_ISREG)
@@ -963,33 +985,16 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity) 
         GOOGLE_PROTOBUF_VERIFY_VERSION;
 
         // Own the ONNX model for weights to persist.
-        mONNXModels.emplace_back();
-        ::ONNX_NAMESPACE::ModelProto& onnxModel = mONNXModels.back();
-        ONNXTRT_CHECK(ParseFromFileAsBinary(&onnxModel, onnxModelFile),
+        ONNXTRT_CHECK(ParseFromFileAsBinary(&mOnnxModel, onnxModelFile),
             "Cannot read from input file: " << onnxModelFile, ErrorCode::kINVALID_VALUE);
 
         // Keep track of the absolute path to the ONNX file.
         mImporterCtx.setOnnxFileLocation(onnxModelFile);
 
-        int64_t const opset_version = (onnxModel.opset_import().size() ? onnxModel.opset_import(0).version() : 0);
-        LOG_INFO("----------------------------------------------------------------");
-        LOG_INFO("Input filename:   " << onnxModelFile);
-        LOG_INFO("ONNX IR version:  " << onnxIRVersionAsString(onnxModel.ir_version()));
-        LOG_INFO("Opset version:    " << opset_version);
-        LOG_INFO("Producer name:    " << onnxModel.producer_name());
-        LOG_INFO("Producer version: " << onnxModel.producer_version());
-        LOG_INFO("Domain:           " << onnxModel.domain());
-        LOG_INFO("Model version:    " << onnxModel.model_version());
-        LOG_INFO("Doc string:       " << onnxModel.doc_string());
-        LOG_INFO("----------------------------------------------------------------");
-
-        // Set currentNode count to -1
-        mCurrentNode = -1;
-
         // Prevent failure of importModel from early-exiting
         try
         {
-            this->importModel(onnxModel);
+            this->importModel();
         }
         catch (OnnxTrtException& e)
         {
@@ -1000,23 +1005,10 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity) 
             mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
         }
 
-        int32_t const numErrors = getNbErrors();
-        for (int32_t i = 0; i < numErrors; ++i)
-        {
-            nvonnxparser::IParserError const* error = getError(i);
-            if (error->node() != -1)
-            {
-                ::ONNX_NAMESPACE::NodeProto const& node = onnxModel.graph().node(error->node());
-                LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \""
-                                                       << node.output(0) << "\""
-                                                       << "]:");
-                LOG_ERROR("--- Begin node ---" << "\n" << node);
-                LOG_ERROR("--- End node ---");
-            }
-            LOG_ERROR("ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"
-                                << "[" << static_cast<int>(error->code()) << "] " << error->desc());
-        }
-        return numErrors == 0;
+        logErrors();
+        reportSubgraphs();
+
+        return mErrors.size() == 0;
     }
     ONNXTRT_CATCH_RECORD
     return false;
@@ -1026,6 +1018,80 @@ char const* const* ModelImporter::getUsedVCPluginLibraries(int64_t& nbPluginLibs
 {
     nbPluginLibs = mPluginLibraryListCStr.size();
     return (nbPluginLibs > 0) ? mPluginLibraryListCStr.data() : nullptr;
+}
+
+bool ModelImporter::loadModelProto(
+    void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath) noexcept
+{
+    ONNXTRT_TRY
+    {
+        auto* ctx = &mImporterCtx;
+        if (modelPath)
+        {
+            ctx->setOnnxFileLocation(modelPath);
+        }
+
+        deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &mOnnxModel);
+
+        // Populate map of initializers for loadInitializers()
+        for (::ONNX_NAMESPACE::TensorProto const& initializer : mOnnxModel.graph().initializer())
+        {
+            ctx->getWeightsContext().initializerMap().insert({initializer.name(), &initializer});
+        }
+        return true;
+    }
+    ONNXTRT_CATCH_RECORD
+    return false;
+}
+
+bool ModelImporter::loadInitializer(char const* name, void const* data, size_t size) noexcept
+{
+    ONNXTRT_TRY
+    {
+        auto* ctx = &mImporterCtx;
+        if (mOnnxModel.ByteSizeLong() == 0)
+        {
+            LOG_ERROR("An ONNX model has not been loaded yet - cannot load initializer.");
+            return false;
+        }
+
+        return ctx->getWeightsContext().loadExternalInit(name, data, size);
+    }
+    ONNXTRT_CATCH_RECORD
+    return false;
+}
+
+bool ModelImporter::parseModelProto() noexcept
+{
+    ONNXTRT_TRY
+    {
+        auto* const ctx = &mImporterCtx;
+
+        if (mOnnxModel.ByteSizeLong() == 0)
+        {
+            LOG_ERROR("An ONNX model has not been loaded yet - cannot parse empty model.");
+            return false;
+        }
+        // Prevent failure of importModel from early-exiting
+        try
+        {
+            this->importModel();
+        }
+        catch (OnnxTrtException& e)
+        {
+            mErrors.push_back(e.getStatus());
+        }
+        catch (std::exception& e)
+        {
+            mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
+        }
+        logErrors();
+        reportSubgraphs();
+
+        return mErrors.size() == 0;
+    }
+    ONNXTRT_CATCH_RECORD
+    return false;
 }
 
 } // namespace onnx2trt

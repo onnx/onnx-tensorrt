@@ -20,6 +20,11 @@ void* WeightsContext::ownWeights(
     return reservedWeights;
 }
 
+WeightsContext::~WeightsContext()
+{
+    clearMemoryMappings();
+}
+
 int32_t* WeightsContext::convertUINT8(uint8_t const* weightValues, nvinfer1::Dims const& shape)
 {
     int64_t const nbWeights = volume(shape);
@@ -91,6 +96,28 @@ bool multiplicationWillOverflow(size_t const a, size_t const b)
     return false;
 }
 
+
+size_t getInitializerVol(google::protobuf::RepeatedField<int64_t> const& dims)
+{
+    size_t vol = 1;
+    auto nbDims = dims.size();
+    for (int32_t i = 0; i < nbDims; i++)
+    {
+        auto dimVal = dims.Get(i);
+        if (dimVal == 0)
+        {
+            vol = 0;
+            break;
+        }
+        if (vol > std::numeric_limits<size_t>::max() / dimVal)
+        {
+            return false;
+        }
+        vol = vol * dimVal;
+    }
+    return vol;
+}
+
 // Helper function to ensure that a ONNX initializer is supportable by TensorRT.
 bool validateOnnxInitializer(::ONNX_NAMESPACE::TensorProto const& onnxTensor)
 {
@@ -108,33 +135,18 @@ bool validateOnnxInitializer(::ONNX_NAMESPACE::TensorProto const& onnxTensor)
         return false;
     }
     // Validate volume is within bounds.
-    size_t vol = 1;
-    for (int32_t i = 0; i < nbDims; i++)
-    {
-        auto dimVal = onnxTensor.dims().Get(i);
-        if (dimVal == 0)
-        {
-            vol = 0;
-            break;
-        }
-        if (vol > std::numeric_limits<size_t>::max() / dimVal)
-        {
-            return false;
-        }
-        vol = vol * dimVal;
-    }
+    size_t vol = getInitializerVol(onnxTensor.dims());
     // Validate size in bytes is within bounds.
     if (vol > std::numeric_limits<size_t>::max() / typeSize)
     {
         return false;
     }
-
     return true;
 }
 
 // Function to read bytes from an external file and return the data in a buffer.
 bool WeightsContext::parseExternalWeights(
-    std::string const& file, int64_t offset, int64_t length, std::vector<char>& weightsBuf, size_t& size)
+    std::string const& file, int64_t offset, int64_t length, MemoryMapping_t& weightsRef)
 {
     auto* ctx = this; // For logging macros.
     // Accessing parent directories (i.e. ../) is not allowed. Normalize path first.
@@ -178,29 +190,37 @@ bool WeightsContext::parseExternalWeights(
         LOG_ERROR("Failed to open file: " << path);
         return false;
     }
-    std::streamsize fileSize = relPathFile.tellg();
-    relPathFile.seekg(offset, std::ios::beg);
-    int64_t weightsBufSize = length == 0 ? fileSize : length;
-    weightsBuf.resize(weightsBufSize);
-    if (!relPathFile.read(weightsBuf.data(), weightsBuf.size()))
+
+    LOG_VERBOSE("Mapping external weights file to memory: " << path);
+    auto memoryMap = mmap(path);
+
+    if (memoryMap.second <= 0)
     {
         LOG_ERROR("Failed to read weights from external file: " << path);
         return false;
     }
-    size = weightsBuf.size();
+
+    int64_t weightsSize = (length == 0) ? memoryMap.second : length;
+
+    auto* weightsPtr = static_cast<char*>(memoryMap.first) + offset;
+
+    weightsRef = std::make_pair(static_cast<void*>(weightsPtr), weightsSize);
+
     return true;
 }
 
-// Function to read data from an ONNX Tensor and move it into a ShapedWeights object. Handles external weights as well.
+// Function to read data from an ONNX Tensor and move it into a ShapedWeights object. Handles model, user-provided, and external weights.
 bool WeightsContext::convertOnnxWeights(
     ::ONNX_NAMESPACE::TensorProto const& onnxTensor, ShapedWeights* weights, bool ownAllWeights)
 {
     auto* ctx = this; // For logging macros.
 
+    std::string const initName = onnxTensor.name();
+
     // Sanity check for onnxTensors
     if (!validateOnnxInitializer(onnxTensor))
     {
-        LOG_ERROR("ONNX initializer " << onnxTensor.name() << " cannot be imported into TensorRT!");
+        LOG_ERROR("ONNX initializer " << initName << " cannot be imported into TensorRT!");
         return false;
     }
 
@@ -211,11 +231,23 @@ bool WeightsContext::convertOnnxWeights(
     nvinfer1::Dims shape{};
     shape.nbDims = onnxTensor.dims().size();
     std::copy_n(onnxTensor.dims().begin(), shape.nbDims, shape.d);
+
+    // Priority of importing weights:
+    //  1. User provided
+    //  2. External weights
+    //  3. Model weights
+    bool const userWeights = mExternalInits.count(initName);
+
+    if (userWeights)
+    {
+        LOG_VERBOSE(initName << " is a user-specified initializer");
+    }
+
     // ONNX weight values can be stored in either the TensorProto itself, or in an external file in the case
     // of large models. Check for this here.
     auto dataLocation = onnxTensor.data_location();
     // External Data
-    if (dataLocation == 1)
+    if (dataLocation == 1 && !userWeights)
     {
         std::string location{""};
         int64_t offset{0};
@@ -251,16 +283,16 @@ bool WeightsContext::convertOnnxWeights(
         }
 
         // Buffer to hold the data read from the file
-        std::vector<char> dataBuf;
+        MemoryMapping_t weightsRef;
         // Will update dataBuf and nbytes by reference.
-        if (!parseExternalWeights(location, offset, length, dataBuf, nbytes))
+        if (!parseExternalWeights(location, offset, length, weightsRef))
         {
             return false;
         }
 
         // For weights parsed from external files, createTempWeights is necessary to keep them in scope
         ShapedWeights externalWeights;
-        dataPtr = dataBuf.data();
+        dataPtr = weightsRef.first;
 
         // Cast non-native TRT types to their corresponding proxy types
         if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
@@ -271,11 +303,10 @@ bool WeightsContext::convertOnnxWeights(
             onnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
         }
 
-        // Create the holder for external weights.
-        externalWeights = createTempWeights(onnxDtype, shape);
+        externalWeights = ShapedWeights(onnxDtype, dataPtr, shape);
 
         // Check if the size of external weights is as expected.
-        if (externalWeights.size_bytes() != nbytes)
+        if (static_cast<int64_t>(externalWeights.size_bytes()) != weightsRef.second)
         {
             LOG_ERROR("Unexpected size for the external weights! Expected size: "
                 << externalWeights.size_bytes() << " bytes (shape = " << shape << "). Actual size: " << nbytes
@@ -283,19 +314,22 @@ bool WeightsContext::convertOnnxWeights(
             return false;
         }
 
-        // Copy the weight values into externalWeights.
-        std::memcpy(externalWeights.values, dataPtr, nbytes);
-
         *weights = externalWeights;
         return true;
     }
 
-    // Weights information is within the TensorProto itself
+    // Weights information is user provided or within the model
 
     // Cast non-native TRT types to their corresponding proxy types
     if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
     {
-        if (onnxTensor.raw_data().size() > 0)
+        if (userWeights)
+        {
+            std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
+            dataPtr = convertDouble(reinterpret_cast<double const*>(initDesc.first), shape);
+            nbytes = initDesc.second / (sizeof(double) / sizeof(float));
+        }
+        else if (onnxTensor.raw_data().size() > 0)
         {
             dataPtr = convertDouble(reinterpret_cast<double const*>(onnxTensor.raw_data().data()), shape);
             nbytes = onnxTensor.raw_data().size() / (sizeof(double) / sizeof(float));
@@ -319,7 +353,13 @@ bool WeightsContext::convertOnnxWeights(
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT8 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::BOOL
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::INT4 || onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT4E2M1)
     {
-        if (onnxTensor.raw_data().size() > 0)
+        if (userWeights)
+        {
+            std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
+            dataPtr = (void*) initDesc.first;
+            nbytes = initDesc.second;
+        }
+        else if (onnxTensor.raw_data().size() > 0)
         {
             dataPtr = (void*) (onnxTensor.raw_data().data());
             nbytes = onnxTensor.raw_data().size();
@@ -374,7 +414,13 @@ bool WeightsContext::convertOnnxWeights(
     }
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT)
     {
-        if (onnxTensor.raw_data().size() > 0)
+        if (userWeights)
+        {
+            std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
+            dataPtr = (void*) initDesc.first;
+            nbytes = initDesc.second;
+        }
+        else if (onnxTensor.raw_data().size() > 0)
         {
             dataPtr = (void*) (onnxTensor.raw_data().data());
             nbytes = onnxTensor.raw_data().size();
@@ -396,7 +442,13 @@ bool WeightsContext::convertOnnxWeights(
     else if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::FLOAT8E4M3FN
         || onnxDtype == ::ONNX_NAMESPACE::TensorProto::UINT8)
     {
-        if (onnxTensor.raw_data().size() > 0)
+        if (userWeights)
+        {
+            std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
+            dataPtr = (void*) initDesc.first;
+            nbytes = initDesc.second;
+        }
+        else if (onnxTensor.raw_data().size() > 0)
         {
             dataPtr = (void*) (onnxTensor.raw_data().data());
             nbytes = onnxTensor.raw_data().size();
@@ -416,6 +468,14 @@ bool WeightsContext::convertOnnxWeights(
         LOG_ERROR("Found unsupported datatype (" << onnxDtype << ") when importing initializer: " << onnxTensor.name());
         return false;
     }
+    // TRT expects empty weights to be nullptr.
+    if (nbytes == 0 && dataPtr != nullptr)
+    {
+        LOG_WARNING(
+            "Empty initializer " << initName << " was provided with non-empty data. Overriding data to nullptr");
+        dataPtr = nullptr;
+    }
+
     onnx2trt::ShapedWeights trt_weights(onnxDtype, dataPtr, shape);
     // Sanity check that weights were converted properly
     if (trt_weights.size_bytes() != nbytes)
@@ -448,9 +508,8 @@ float* WeightsContext::getFP32Values(ShapedWeights const& w)
 ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
     std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode)
 {
-    std::string const& name
-        = generateUniqueName(namesSet, suffixCounter, batchNormNode ? "tmp_batch_norm_weight" : "tmp_weight");
-    return createNamedWeights(type, shape, name);
+    return createNamedWeights(type, shape,
+        generateUniqueName(namesSet, suffixCounter, batchNormNode ? "tmp_batch_norm_weight" : "tmp_weight"));
 }
 
 ShapedWeights WeightsContext::createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape)
@@ -483,6 +542,46 @@ ShapedWeights WeightsContext::createNamedWeights(ShapedWeights::DataType type, n
         weights.setName(name.c_str());
     }
     return weights;
+}
+
+bool WeightsContext::loadExternalInit(char const* name, void const* data, size_t size)
+{
+    auto* ctx = this; // For logging macros.
+
+    if (!name)
+    {
+        LOG_ERROR("Cannot import an external initializer with a null name");
+        return false;
+    }
+
+    if (!data && size != 0)
+    {
+        LOG_ERROR("Cannot import a non-empty external initializer with null data");
+        return false;
+    }
+    // Validate name
+    auto it = mInitializers.find(name);
+    if (it == mInitializers.end())
+    {
+        LOG_ERROR("Cannot find initializer name: " << name << " in model!");
+        return false;
+    }
+    auto* init = it->second;
+
+    // Validate size
+    size_t byteSize = getTensorOrWeightsSizeBytes(getInitializerVol(init->dims()), init->data_type());
+    if (byteSize != size)
+    {
+        LOG_ERROR("Provided initializer size " << size << " mismatches with that expected by the model: " << byteSize);
+        return false;
+    }
+
+    if (mExternalInits.count(name))
+    {
+        LOG_WARNING("Initializer " << name << " was previously provided. Overwriting previous data.");
+    }
+    mExternalInits.insert_or_assign(name, std::make_pair(data, size));
+    return true;
 }
 
 } // namespace onnx2trt

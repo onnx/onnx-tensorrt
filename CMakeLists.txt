@@ -28,7 +28,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 10)
-set(ONNX2TRT_MINOR 12)
+set(ONNX2TRT_MINOR 13)
 set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
@@ -37,26 +37,28 @@ set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CAC
 #--------------------------------------------------
 
 set(IMPORTER_SOURCES
-  NvOnnxParser.cpp
-  ModelImporter.cpp
-  ModelRefitter.cpp
-  onnxOpImporters.cpp
-  ImporterContext.cpp
-  importerUtils.cpp
-  ShapedWeights.cpp
-  ShapeTensor.cpp
-  LoopHelpers.cpp
-  RNNHelpers.cpp
-  OnnxAttrs.cpp
-  onnxErrorRecorder.cpp
-  ConditionalHelpers.cpp
-  bfloat16.cpp
-  onnxOpCheckers.cpp
-  onnxProtoUtils.cpp
-  weightUtils.cpp
-  WeightsContext.cpp
-  TensorOrWeights.cpp
-  errorHelpers.cpp
+    NvOnnxParser.cpp
+    ModelImporter.cpp
+    ModelRefitter.cpp
+    onnxOpImporters.cpp
+    ImporterContext.cpp
+    importerUtils.cpp
+    ShapedWeights.cpp
+    ShapeTensor.cpp
+    Status.cpp
+    LoopHelpers.cpp
+    RNNHelpers.cpp
+    OnnxAttrs.cpp
+    onnxErrorRecorder.cpp
+    ConditionalHelpers.cpp
+    bfloat16.cpp
+    onnxOpCheckers.cpp
+    onnxProtoUtils.cpp
+    TensorOrWeights.cpp
+    WeightsContext.cpp
+    WeightsContextMemoryMap.cpp
+    weightUtils.cpp
+    errorHelpers.cpp
 )
 
 if (BUILD_ONNXIFI)
@@ -70,7 +72,7 @@ set(API_TESTS_SOURCES
 
 # Find protobuf if it's not a target.
 if (NOT TARGET protobuf::libprotobuf)
-  FIND_PACKAGE(Protobuf REQUIRED)
+  FIND_PACKAGE(Protobuf)
 endif()
 
 # Set protobuf libraries between full / lite.

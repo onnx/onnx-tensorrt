@@ -13,8 +13,13 @@
 
 namespace onnx2trt
 {
+#ifdef _WIN32
+typedef void* FileHandle;
+#else
+typedef int FileHandle;
+#endif
 
-// Class reponsible for reading, casting, and converting weight values from an ONNX model and into ShapedWeights
+// Class responsible for reading, casting, and converting weight values from an ONNX model and into ShapedWeights
 // objects. All temporary weights are stored in a buffer owned by the class so they do not go out of scope.
 
 class WeightsContext
@@ -31,15 +36,36 @@ class WeightsContext
 
     nvinfer1::ILogger* mLogger;
 
-    // Vector of hunks to maintain ownership of weights.
+    // Vector of chunks to maintain ownership of weights.
     std::vector<BufferPtr> mWeightBuffers;
 
     // Keeps track of the absolute location of the file in order to read external weights.
     std::string mOnnxFileLocation;
 
+    using MemoryMapping_t = std::pair<void*, int64_t>;
+    std::map<std::string, FileHandle> mMappedFiles;
+#ifdef _WIN32
+    std::map<std::string, FileHandle> mFileMappingHandles;
+#endif
+    std::map<std::string, MemoryMapping_t> mMemoryMappings;
+
+    template <typename T>
+    using StringMap = std::unordered_map<std::string, T>;
+
+    StringMap<::ONNX_NAMESPACE::TensorProto const*> mInitializers;
+
+    StringMap<std::pair<void const*, size_t>> mExternalInits;
+
 public:
     WeightsContext(nvinfer1::ILogger* logger)
         : mLogger(logger){};
+
+    ~WeightsContext();
+
+    WeightsContext(WeightsContext const& other) = delete;
+    WeightsContext& operator=(WeightsContext const& other) = delete;
+    WeightsContext(WeightsContext&& other) = delete;
+    WeightsContext& operator=(WeightsContext&& other) = delete;
 
     int32_t* convertUINT8(uint8_t const* weightValues, nvinfer1::Dims const& shape);
 
@@ -56,10 +82,7 @@ public:
         size_t const nBytes);
 
     // Function to read bytes from an external file and return the data in a buffer.
-    bool parseExternalWeights(
-
-        std::string const& file, int64_t offset, int64_t length, std::vector<char>& weightsBuf, size_t& size);
-
+    bool parseExternalWeights(std::string const& file, int64_t offset, int64_t length, MemoryMapping_t& weightsRef);
     // Function to read data from an ONNX Tensor and move it into a ShapedWeights object.
     // Handles external weights as well.
     bool convertOnnxWeights(
@@ -100,6 +123,17 @@ public:
     {
         return *mLogger;
     }
+
+    MemoryMapping_t mmap(std::string const& file);
+
+    void clearMemoryMappings();
+
+    StringMap<::ONNX_NAMESPACE::TensorProto const*>& initializerMap()
+    {
+        return mInitializers;
+    }
+
+    bool loadExternalInit(char const* name, void const* data, size_t size);
 };
 
 template <typename DataType>

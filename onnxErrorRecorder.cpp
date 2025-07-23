@@ -76,10 +76,9 @@ void ONNXParserErrorRecorder::clear() noexcept
     {
         logError(mLogger, e.what());
     }
-};
+}
 
-bool ONNXParserErrorRecorder::reportError(
-    nvinfer1::ErrorCode val, nvinfer1::IErrorRecorder::ErrorDesc desc) noexcept
+bool ONNXParserErrorRecorder::reportError(nvinfer1::ErrorCode val, nvinfer1::IErrorRecorder::ErrorDesc desc) noexcept
 {
     try
     {

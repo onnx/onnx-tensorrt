@@ -138,7 +138,7 @@ private:
 };
 
 //! Translates an OS-dependent DSO/DLL name into a path on the filesystem
-std::string getOSLibraryPath(std::string const& osLibName)
+inline std::string getOSLibraryPath(std::string const& osLibName)
 {
     DynamicLibrary lib{osLibName};
     return lib.getFullPath();
