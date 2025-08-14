@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 import sys
-import onnx_tensorrt
 from setuptools import setup, find_packages
 
 def no_publish():
@@ -10,6 +10,14 @@ def no_publish():
         if cmd in sys.argv:
             raise RuntimeError("Command \"{}\" blacklisted".format(cmd))
 
+def read_version(filepath = 'onnx_tensorrt/version.py'):
+    try:
+        with open(filepath) as f:
+            version_text = f.read()
+        version, = re.findall('__version__ = "(.*)"', version_text)
+        return version
+    except Exception as error:
+        raise RuntimeError(f"Failed to read version from {filepath}: {error}") from error
 
 REQUIRED_PACKAGES = [
     "pycuda",
@@ -21,7 +29,7 @@ def main():
     no_publish()
     setup(
         name="onnx_tensorrt",
-        version=onnx_tensorrt.__version__,
+        version=read_version('onnx_tensorrt/version.py'),
         description="ONNX-TensorRT - TensorRT backend for running ONNX models",
         long_description=open("README.md", "r", encoding="utf-8").read(),
         url="https://github.com/onnx/onnx-tensorrt",
