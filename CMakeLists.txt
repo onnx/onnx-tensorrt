@@ -89,10 +89,13 @@ if(NOT TARGET onnx_proto)
     set(ONNX_NAMESPACE "onnx2trt_onnx")
   endif()
   add_definitions("-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
+  # Redefine target_compile_features to avoid cross-compilation issues.
+  function(target_compile_features)
+  endfunction()
   add_subdirectory(third_party/onnx EXCLUDE_FROM_ALL)
 endif()
 
-# CUDA
+# Find CUDA
 if (NOT CUDA_TOOLKIT_ROOT_DIR)
   set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
 endif()
