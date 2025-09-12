@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-
-from __future__ import absolute_import
-
+from importlib.metadata import version as _v, PackageNotFoundError  # Py3.8+
 from . import backend
 
-__version__ = "10.13.0"
+try:
+    __version__ = _v("onnx_tensorrt")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
