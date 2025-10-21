@@ -183,7 +183,6 @@ class TensorRTBackendRep(BackendRep):
                     if np.equal(outputs[i], casted_output).all():
                         outputs[i] = np.array(outputs[i], dtype=np.double)
 
-        outputs_tuple = namedtupledict('Outputs', output_names)(*outputs)
         return namedtupledict('Outputs', output_names)(*outputs)
 
 def np2onnx_dtype(np_dtype):
