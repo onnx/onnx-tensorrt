@@ -94,11 +94,13 @@ class ImporterContext
     std::set<std::string> mLayerNames;
     //! An increasing suffix counter used to uniquify layer names.
     int64_t mSuffixCounter{0};
-    //! Set to keep track of how many times a batch norm weight name shows up,
-    //! to avoid duplicate naming in TRT.
-    std::set<std::string> mBatchNormWeightNames;
-    //! An increasing suffix counter used to uniquify batch norm weight names.
-    int64_t mBatchNormWeightSuffixCounter{0};
+    //! Set to keep track of how many times a refittable name created by the parser shows up, to avoid duplicate naming in TRT.
+    //! Currently tracks the following nodes:
+    //!     1. BatchNorm - Parser pre-combines scales and bias weights for the IScaleLayer.
+    //!     2. ConstantOfShape - The value of the ConstantOfShape does not have a name, so the parser needs to create one for it.
+    std::set<std::string> mTempRefittableWeights;
+    //! An increasing suffix counter used to uniquify refittable weight names created by the parser.
+    int64_t mTempRefittableWeightsSuffixCounter{0};
     //! Set to hold output tensor names of layers that produce shape tensor outputs but do not
     //! natively support them.
     std::unordered_set<std::string> mUnsupportedShapeTensors;
@@ -221,12 +223,12 @@ public:
     }
 
     // Register an unique name for the created weights
-    ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, bool batchNormNode = false)
+    ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, bool refittable = false)
     {
-        if (batchNormNode)
+        if (refittable)
         {
             return mWeightsContext.createNamedTempWeights(
-                type, shape, mBatchNormWeightNames, mBatchNormWeightSuffixCounter, /*batchNormNode=*/true);
+                type, shape, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
         }
         return mWeightsContext.createNamedTempWeights(type, shape, mTensorNames, mSuffixCounter);
     }

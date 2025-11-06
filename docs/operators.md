@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.13 supports operators in the inclusive range of opset 9 to opset 23. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.14 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
@@ -28,6 +28,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Asinh                     | Y          | FP32, FP16, BF16 |
 | Atan                      | Y          | FP32, FP16, BF16 |
 | Atanh                     | Y          | FP32, FP16, BF16 |
+| Attention                 | Y          | FP32, FP16, BF16, INT8, FP8 | `Q`, `K`, `V` and `attn_mask ` must be 4D. `past_key`, `past_value` and `nonpad_kv_seqlen` inputs are unsupported. `present_key`, `present_value` and `qk_matmul_output` outputs are unsupported. `qk_matmul_output_mode` and `softcap` attributes are unsupported. `q_num_heads` and `kv_num_heads` attributes are supported via being specified as the second dimension of `Q` and `K`/`V`'s shapes respectively. |
 | AveragePool               | Y          | FP32, FP16, BF16 | 2D or 3D Pooling only. `dilations` must be empty or all ones                                                                                                              |
 | BatchNormalization        | Y          | FP32, FP16, BF16 |
 | Bernoulli                 | N          |

@@ -169,6 +169,20 @@ DEFINE_OP_EMPTY_CHECKER(Atan)
 
 DEFINE_OP_EMPTY_CHECKER(Atanh)
 
+DEFINE_OP_CHECKER(Attention)
+{
+    OnnxAttrs attrs(node, ctx);
+
+    // Check for unsupported attributes.
+    float const softcap = attrs.get<float>("softcap", 0.0);
+    STATIC_CHECK(softcap == 0.0 && "Setting softcap is not supported in TensorRT Attention.",
+        ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
+
+    bool const hasSoftmaxPrecision = static_cast<bool>(attrs.count("softmax_precision"));
+    STATIC_CHECK(!hasSoftmaxPrecision && "Setting softmax precision is not supported in TensorRT Attention.",
+        ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
+}
+
 DEFINE_OP_EMPTY_CHECKER(Add)
 
 DEFINE_OP_CHECKER(ArgMax)
@@ -260,6 +274,7 @@ DEFINE_OP_EMPTY_CHECKER(DepthToSpace)
 DEFINE_OP_EMPTY_CHECKER(QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(DequantizeLinear)
+
 
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8QuantizeLinear)
 

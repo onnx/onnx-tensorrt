@@ -26,6 +26,9 @@
         }                                                                                                              \
     } while (0)
 
+#define STRINGIFY(x) #x
+#define LITERAL(x) STRINGIFY(x)
+
 namespace
 {
 

@@ -28,7 +28,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 10)
-set(ONNX2TRT_MINOR 13)
+set(ONNX2TRT_MINOR 14)
 set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
@@ -37,6 +37,7 @@ set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CAC
 #--------------------------------------------------
 
 set(IMPORTER_SOURCES
+    AttentionHelpers.cpp
     NvOnnxParser.cpp
     ModelImporter.cpp
     ModelRefitter.cpp
@@ -114,11 +115,11 @@ MESSAGE(STATUS "Found TensorRT headers at ${TENSORRT_INCLUDE_DIR}")
 # TensorRT Python Headers
 find_path(TENSORRT_PYTHON_INCLUDE_DIR NvInferPythonPlugin.h
   HINTS ${TENSORRT_ROOT}
-  PATH_SUFFIXES python/include/impl)
+  PATH_SUFFIXES include/impl)
 
 # If header is not found, download it from open source release.
 if(NOT TENSORRT_PYTHON_INCLUDE_DIR)
-  set(PLUGIN_URL "https://raw.githubusercontent.com/NVIDIA/TensorRT/refs/heads/release/${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}/python/include/impl/NvInferPythonPlugin.h")
+  set(PLUGIN_URL "https://raw.githubusercontent.com/NVIDIA/TensorRT/refs/heads/release/${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}/include/impl/NvInferPythonPlugin.h")
   set(FILE_DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/NvInferPythonPlugin.h")
 
   message(NOTICE "Required header NvInferPythonPlugin.h not found. Downloading from ${PLUGIN_URL} to ${FILE_DESTINATION}")

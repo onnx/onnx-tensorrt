@@ -509,7 +509,7 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
     }
     catch (const std::exception& e)
     {
-        ONNXTRT_THROW(MAKE_ERROR("Failed to import initialzer", ErrorCode::kINVALID_GRAPH));
+        ONNXTRT_THROW(MAKE_ERROR(std::string("Failed to import initializer: ") + e.what(), ErrorCode::kINVALID_GRAPH));
     }
 
     // Keep track of graph outputs in the context to validate UINT8 nodes

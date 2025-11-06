@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.14 GA Release - 2025-11-7
+For more details, see the 10.14 GA release notes
+
+- Added support for the `Attention` operator
+- Improved refit for `ConstantOfShape` nodes
+
+
 # TensorRT 10.13 GA Release - 2025-7-24
 For more details, see the 10.13 GA release notes
 

@@ -358,3 +358,4 @@ nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(std::string 
     }
     throw std::runtime_error("Unknown ResizeRoundMode: " + roundMode);
 }
+

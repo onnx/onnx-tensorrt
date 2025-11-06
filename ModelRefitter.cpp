@@ -80,9 +80,9 @@ size_t ModelRefitter::batchnormWeightRefitter(
                                                                          : ::ONNX_NAMESPACE::TensorProto::FLOAT);
 
     ShapedWeights combinedScale = mWeightsContext.createNamedTempWeights(
-        weightType, scale.shape, mBatchNormWeightNames, mBatchNormWeightSuffixCounter, /*batchNormNode=*/true);
+        weightType, scale.shape, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
     ShapedWeights combinedBias = mWeightsContext.createNamedTempWeights(
-        weightType, bias.shape, mBatchNormWeightNames, mBatchNormWeightSuffixCounter, /*batchNormNode=*/true);
+        weightType, bias.shape, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
 
     // Validate that all the weights have the same amount of values
     bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
@@ -189,6 +189,10 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
     {
         refitOnnxConstantNode(node, graph.name());
     }
+    else if (node.op_type() == "ConstantOfShape")
+    {
+        refitOnnxConstantOfShapeNode(node, graph.name());
+    }
     else if (node.op_type() == "BatchNormalization")
     {
         refitOnnxBatchNormNode(node, graph);
@@ -206,6 +210,46 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
         refitOnnxScanNode(node);
     }
     --nestedDepth;
+}
+
+void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
+{
+    ShapedWeights namedConstantOfShape = mWeightsContext.createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, nvinfer1::Dims{1, {1}}, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
+    std::string name = namedConstantOfShape.getName();
+
+    if (!mRefittableWeights.count(name))
+    {
+        return;
+    }
+    mRefittableWeights.erase(name);
+    if (mRefittedWeights.count(name))
+    {
+        LOG_REFITTER_WARNING("Duplicate weight name name ("
+            << name << ") was found when processing the graph (" << graphName
+            << "). The refit process would only work properly if both weights have the same values.");
+    }
+    else
+    {
+        mRefittedWeights.insert(name);
+    }
+
+    ShapedWeights weights;
+    if (node.attribute().size() == 1 && node.attribute(0).name() == "value")
+    {
+        ::ONNX_NAMESPACE::AttributeProto const& nodeAttribute = node.attribute(0);
+        ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = nodeAttribute.t();
+        ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(onnx_weights_tensor, &weights),
+            "Failed to import ConstantOfShape node.", ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+        weights = namedConstantOfShape;
+        static_cast<float*>(weights.values)[0] = 0.f;
+    }
+
+    ONNXTRT_CHECK(mRefitter->setNamedWeights(name.c_str(), std::move(weights)), "Failed to set named weights",
+        ErrorCode::kREFIT_FAILED);
+    ++successfullyRefittedWeights;
 }
 
 void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
