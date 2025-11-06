@@ -95,9 +95,10 @@ public:
     // Helper function to get fp32 representation of fp16, bf16, or fp32 weights.
     float* getFP32Values(ShapedWeights const& w);
 
-    // Register an unique name for the created weights.
+    // Register an unique name for the created weights. If the weights are expected to be refittable by the IParserRefitter,
+    // use a different identifier.
     ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
-        std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode = false);
+        std::set<std::string>& namesSet, int64_t& suffixCounter, bool refittable = false);
 
     // Create weights with a given name.
     ShapedWeights createNamedWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape, std::string const& name,

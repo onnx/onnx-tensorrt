@@ -130,6 +130,11 @@ public:
         return is_tensor() ? tensor().getType() == nvinfer1::DataType::kUINT8
                            : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
     }
+    bool isInt4() const
+    {
+        return is_tensor() ? tensor().getType() == nvinfer1::DataType::kINT4
+                           : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_INT4;
+    }
     bool isBool() const
     {
         return is_tensor() ? tensor().getType() == nvinfer1::DataType::kBOOL
@@ -138,6 +143,17 @@ public:
     bool isFp8() const
     {
         return is_tensor() ? tensor().getType() == nvinfer1::DataType::kFP8 : weights().type == ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN;
+    }
+    void setName(char const* name)
+    {
+        if (is_tensor())
+        {
+            tensor().setName(name);
+        }
+        else
+        {
+            weights().setName(name);
+        }
     }
     std::string getName() const
     {

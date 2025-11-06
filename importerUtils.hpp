@@ -12,7 +12,7 @@
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 
-#include "NvInferPythonPlugin.h"
+#include "impl/NvInferPythonPlugin.h"
 #include <NvInfer.h>
 
 #include "bfloat16.hpp"

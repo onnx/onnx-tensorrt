@@ -506,10 +506,10 @@ float* WeightsContext::getFP32Values(ShapedWeights const& w)
 }
 
 ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
-    std::set<std::string>& namesSet, int64_t& suffixCounter, bool batchNormNode)
+    std::set<std::string>& namesSet, int64_t& suffixCounter, bool refittable)
 {
     return createNamedWeights(type, shape,
-        generateUniqueName(namesSet, suffixCounter, batchNormNode ? "tmp_batch_norm_weight" : "tmp_weight"));
+        generateUniqueName(namesSet, suffixCounter, refittable ? "tmp_refittable_weight" : "tmp_weight"));
 }
 
 ShapedWeights WeightsContext::createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape)

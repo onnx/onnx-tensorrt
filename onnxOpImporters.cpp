@@ -7,6 +7,7 @@
 #endif
 #include <cmath>
 
+#include "AttentionHelpers.hpp"
 #include "ConditionalHelpers.hpp"
 #include "LoopHelpers.hpp"
 #include "ModelImporter.hpp"
@@ -31,6 +32,7 @@
 #include <sstream>
 #include <tuple>
 #include <unordered_set>
+
 
 namespace onnx2trt
 {
@@ -180,6 +182,43 @@ DEFINE_BUILTIN_OP_IMPORTER(Atanh)
     return unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kATANH);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Attention)
+{
+    ONNXTRT_CHECK_NODE(node.output().size() == 1, "TensorRT only supports Attention nodes with one output.", node,
+        nodeIdx, ErrorCode::kINVALID_NODE);
+
+    OnnxAttrs attrs(node, ctx);
+
+    // Get inputs.
+    nvinfer1::ITensor& query = convertToQTensor(inputs.at(0), attrs, ctx);
+    nvinfer1::ITensor& key = convertToKTensor(inputs.at(1), attrs, ctx);
+    nvinfer1::ITensor& value = convertToVTensor(inputs.at(2), attrs, ctx);
+    bool const hasAttnMask = inputs.size() > 3 && !inputs.at(3).isNullTensor();
+    bool const hasPastKey = inputs.size() > 4 && !inputs.at(4).isNullTensor();
+    bool const hasPastValue = inputs.size() > 5 && !inputs.at(5).isNullTensor();
+
+    ONNXTRT_CHECK_NODE(!hasPastKey, "Setting past_key for the Attention node is not supported in TensorRT.", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK_NODE(!hasPastValue, "Setting past_value for the Attention node is not supported in TensorRT.", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Get attributes.
+    bool const isCausal = static_cast<bool>(attrs.get<int64_t>("is_causal", 0));
+    nvinfer1::AttentionNormalizationOp const normOp = parseNormalizationOp(attrs);
+    bool const decomposable = static_cast<bool>(attrs.get<int64_t>("TRT_decomposable", 0));
+
+    // Add the Attention layer.
+    nvinfer1::IAttention* attention = N_CHECK(ctx->network()->addAttention(query, key, value, normOp, isCausal));
+    attention->setDecomposable(decomposable);
+
+    if (hasAttnMask)
+    {
+        attention->setMask(convertToMaskTensor(inputs.at(3), ctx));
+    }
+
+    return {{attention->getOutput(0)}};
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Add)
 {
     return elementwiseHelper(ctx, node, nodeIdx, inputs, nvinfer1::ElementWiseOperation::kSUM);
@@ -316,8 +355,8 @@ NodeOutputs batchnormWeightHelper(
         ? ::ONNX_NAMESPACE::TensorProto::BFLOAT16
         : (typeid(T).hash_code() == typeid(half_float::half).hash_code() ? ::ONNX_NAMESPACE::TensorProto::FLOAT16
                                                                          : ::ONNX_NAMESPACE::TensorProto::FLOAT);
-    auto combinedScale = ctx->createNamedTempWeights(weightType, scale.shape, /*batchNormNode=*/true);
-    auto combinedBias = ctx->createNamedTempWeights(weightType, bias.shape, /*batchNormNode=*/true);
+    auto combinedScale = ctx->createNamedTempWeights(weightType, scale.shape, /*refittable=*/true);
+    auto combinedBias = ctx->createNamedTempWeights(weightType, bias.shape, /*refittable=*/true);
 
     // Validate that all the weights have the same amount of values
     bool allSame = scale.count() == bias.count() && mean.count() == scale.count() && variance.count() == scale.count()
@@ -798,10 +837,12 @@ DEFINE_BUILTIN_OP_IMPORTER(ConstantOfShape)
     OnnxAttrs attrs(node, ctx);
     nvinfer1::ITensor* shape = &convertToTensor(inputs.at(0), ctx);
 
+    // For refit, create named temp weights for ConstantOfShape value tensors since they're not named by default.
     ShapedWeights zeroWeights
-        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, {1}});
+        = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, {1}},  /*refittable=*/ true);
     static_cast<float*>(zeroWeights.values)[0] = 0.f;
-    auto valueWeights = TensorOrWeights{attrs.get("value", zeroWeights)};
+    auto valueWeights = TensorOrWeights{attrs.get<ShapedWeights>("value", zeroWeights)};
+    valueWeights.setName(zeroWeights.getName());
     nvinfer1::ITensor* value = &convertToTensor(valueWeights, ctx);
     return {{constantOfShape(ctx, value, shape)}};
 }
@@ -1319,6 +1360,7 @@ DEFINE_BUILTIN_OP_IMPORTER(DepthToSpace)
     return {{tensorPtr}};
 }
 
+
 // Backward traverse the graph to retrieve the input weights from the constant node. We allow skipping all cast/identity
 // nodes until reaching the constant node.
 ShapedWeights getWeightsFromIdentityOrConstant(nvinfer1::INetworkDefinition& network, nvinfer1::ITensor* input)
@@ -1434,8 +1476,12 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             scaleAllPositive = true;
             isE8M0 = true;
         }
+
+        bool allowNegativeScale = false;
+
         ONNXTRT_CHECK_NODE(
-            scaleAllPositive, "Scale coefficients must all be positive", node, nodeIdx, ErrorCode::kINVALID_NODE);
+            (scaleAllPositive || allowNegativeScale), "Scale coefficients must all be positive", node, nodeIdx,
+            ErrorCode::kINVALID_NODE);
 
         // If the scale is concrete weights, then add a ConstantLayer that will be an input which
         // will initialize the scale weights.
@@ -3453,6 +3499,23 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
         {
             return &convertToTensor(inputs.at(inputIdx), ctx);
         }
+        auto tensorType = inputs.at(0).getType();
+        if (tensorType == "HALF")
+        {
+            return constantOfShape(ctx,
+                addConstantScalar(
+                    ctx, half_float::half(0.f), ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16, nvinfer1::Dims{1, {1}})
+                    ->getOutput(0),
+                gateOutputShape);
+        }
+        if (tensorType == "BF16")
+        {
+            return constantOfShape(ctx,
+                addConstantScalar(
+                    ctx, BFloat16(0.f), ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16, nvinfer1::Dims{1, {1}})
+                    ->getOutput(0),
+                gateOutputShape);
+        }
         return constantOfShape(ctx,
             addConstantScalar(ctx, 0.f, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, {1}})
                 ->getOutput(0),
@@ -4123,8 +4186,8 @@ DEFINE_BUILTIN_OP_IMPORTER(NonMaxSuppression)
         ErrorCode::kUNSUPPORTED_NODE);
 
     // Create the NMS layer
-    auto* layer = N_CHECK(
-        ctx->network()->addNMS(*boxesTensorPtr, *transposedScoresTensorPtr, *maxOutputBoxesPerClassTensorPtr));
+    auto* layer = N_CHECK(ctx->network()->addNMS(
+        *boxesTensorPtr, *transposedScoresTensorPtr, *maxOutputBoxesPerClassTensorPtr, DataType::kINT64));
     ctx->registerLayer(layer, node);
 
     // Handle the optional threshold inputs
@@ -4150,7 +4213,6 @@ DEFINE_BUILTIN_OP_IMPORTER(NonMaxSuppression)
     }
     layer->setBoundingBoxFormat(fmt);
     auto* indices = N_CHECK(layer->getOutput(0));
-    indices = castHelper(ctx, indices, DataType::kINT64);
 
     return {{indices}};
 }
@@ -6289,7 +6351,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
             indices, "Failed to squeeze the input indices.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
     }
 
-    // TensorRT doesn't support int64 for TopK indices
+    // TensorRT will fuse TopK and Cast if dimension exceeds INT32_MAX
     indices = castHelper(ctx, indices, DataType::kINT64);
     return {{values, indices}};
 }
@@ -6916,9 +6978,9 @@ DEFINE_BUILTIN_OP_IMPORTER(NonZero)
         "this version of TensorRT. The current type is "
             + getTrtDtypeName(t) + ".",
         node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-    auto* layer = N_CHECK(ctx->network()->addNonZero(*x));
+    auto* layer = N_CHECK(ctx->network()->addNonZero(*x, DataType::kINT64));
     ctx->registerLayer(layer, node);
-    return {{castHelper(ctx, N_CHECK(layer->getOutput(0)), DataType::kINT64)}};
+    return {{N_CHECK(layer->getOutput(0))}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Mish)
