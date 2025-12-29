@@ -161,6 +161,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Reshape                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Resize                    | Y          | FP32, FP16, BF16 | Supported resize transformation modes: `half_pixel`, `pytorch_half_pixel`, `tf_half_pixel_for_nn`, `asymmetric`, and `align_corners`.<br />Supported resize modes: `nearest`, `linear`.<br />Supported nearest modes: `floor`, `ceil`, `round_prefer_floor`, `round_prefer_ceil`.<br />Supported aspect ratio policy: `stretch`.<br />When `scales` is a tensor input, `axes` must be an iota vector of length rank(input).<br />Antialiasing is not supported.|
 | ReverseSequence           | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
+| RMSNormalization          | Y          | FP32, FP16, BF16 | Only the first output `Y` is supported. Introduced in opset 23.
 | RNN                       | Y          | FP32, FP16, BF16| For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | Y          | FP32, FP16 |
 | Round                     | Y          | FP32, FP16, BF16 |
