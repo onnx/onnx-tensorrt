@@ -22,7 +22,7 @@ void parseNodeStaticCheck(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex);
 
 void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
-    bool deserializingINetwork = false, int32_t* currentNode = nullptr);
+    bool deserializingINetwork = false, int32_t* currentNode = nullptr, int32_t subgraphParentIdx = -1);
 
 class ModelImporter : public nvonnxparser::IParser
 {
@@ -159,6 +159,8 @@ public:
     bool loadInitializer(char const* name, void const* data, size_t size) noexcept override;
 
     bool parseModelProto() noexcept override;
+
+    bool setBuilderConfig(const nvinfer1::IBuilderConfig* const builderConfig) noexcept override;
 };
 
 } // namespace onnx2trt

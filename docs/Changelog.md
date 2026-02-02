@@ -2,6 +2,15 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.15 GA Release - 2026-2-2
+For more details, see the 10.15 GA release notes
+
+- Added support for `RotaryEmbedding`, `RMSNormalization` and `TensorScatter` for improved LLM model support
+- Added more specialized quantization ops for models quantized through TensorRT ModelOptimizer.
+- Added `kREPORT_CAPABILITY_DLA` flag to enable per-node validation when building DLA engines through TensorRT.
+- Added `kENABLE_PLUGIN_OVERRIDE` flag to enable TensorRT plugin override for nodes that share names with user plugins.
+- Improved error reporting for models with multiple subgraphs, such as `Loop` or `Scan` nodes.
+
 # TensorRT 10.14 GA Release - 2025-11-7
 For more details, see the 10.14 GA release notes
 

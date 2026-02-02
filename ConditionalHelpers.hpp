@@ -30,8 +30,10 @@ void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, Subgraph
 
 // Take a snapshot of the network before and after parsing the subgraph and return a list
 // of newly added network layers.
+// subgraphParentIdx is the index of the parent node in the main graph, used for error reporting.
 void importSubgraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& subgraph,
-    std::vector<nvinfer1::ILayer*>& newLayers, std::vector<TensorOrWeights>& subgraphTensors);
+    std::vector<nvinfer1::ILayer*>& newLayers, std::vector<TensorOrWeights>& subgraphTensors,
+    int32_t subgraphParentIdx = -1);
 
 // An InputsMap tracks which IIfConditionalInputLayer we've added to a layer's inputs,
 // so that we can reuse them if needed.

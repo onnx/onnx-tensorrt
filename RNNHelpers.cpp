@@ -80,8 +80,7 @@ nvinfer1::ITensor* clearMissingSequenceElements(ImporterContext* ctx, const ::ON
     nvinfer1::ILoop* loop, nvinfer1::ITensor* seqLens, nvinfer1::ITensor* toMask, nvinfer1::ITensor* maxLen,
     bool reverse, nvinfer1::ITensor* counter)
 {
-    nvinfer1::ITensor* zero
-        = addConstantScalar(ctx, 0.f, ::ONNX_NAMESPACE::TensorProto::FLOAT, nvinfer1::Dims3(1, 1, 1))->getOutput(0);
+    nvinfer1::ITensor* zero = addConstantScalar(ctx, 0.f, ::ONNX_NAMESPACE::TensorProto::FLOAT, 3)->getOutput(0);
     nvinfer1::ITensor* seqMask = getRaggedMask(ctx, node, loop, seqLens, maxLen, reverse, counter);
     auto selectLayer = N_CHECK(ctx->network()->addSelect(*seqMask, *toMask, *zero));
     return N_CHECK(selectLayer->getOutput(0));

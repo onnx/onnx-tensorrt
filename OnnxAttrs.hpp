@@ -43,6 +43,11 @@ public:
         return _attrs.at(key);
     }
 
+    bool exists(std::string key) const
+    {
+        return _attrs.count(key) != 0;
+    }
+
     ::ONNX_NAMESPACE::AttributeProto::AttributeType type(std::string const& key) const
     {
         return this->at(key)->type();

@@ -131,12 +131,20 @@ void ModelImporter::logErrors()
         nvonnxparser::IParserError const* error = getError(i);
         if (error->node() != -1)
         {
-            ::ONNX_NAMESPACE::NodeProto const& node = mOnnxModel.graph().node(error->node());
-            LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \""
-                                                   << node.output(0) << "\""
-                                                   << "]:");
-            LOG_ERROR("--- Begin node ---" << "\n" << node);
-            LOG_ERROR("--- End node ---");
+            auto const& graph = mOnnxModel.graph();
+            if (error->node() >= 0 && error->node() < graph.node_size())
+            {
+                ::ONNX_NAMESPACE::NodeProto const& node = graph.node(error->node());
+                LOG_ERROR("While parsing node number " << error->node() << " [" << node.op_type() << " -> \""
+                                                       << node.output(0) << "\"" << "]:");
+                LOG_ERROR("--- Begin node ---" << "\n" << node);
+                LOG_ERROR("--- End node ---");
+            }
+            else
+            {
+                LOG_ERROR("While parsing node number "
+                    << error->node() << " (index out of bounds, graph size: " << graph.node_size() << ")");
+            }
         }
         LOG_ERROR("ERROR: " << error->file() << ":" << error->line() << " In function " << error->func() << ":\n"
                             << "[" << static_cast<int>(error->code()) << "] " << error->desc());
@@ -200,7 +208,7 @@ void ModelImporter::reportSubgraphs()
         // Add the node to the subgraph if:
         //     1. It is not directly connected to an unsupported input
         //     2. The importer function did not throw an assertion
-        bool unsupportedInput = (input_node.empty()) ? false : checkForInput(node);
+        bool unsupportedInput = !input_node.empty() && checkForInput(node);
         bool unsuccessfulParse = node_idx == error_node;
         if (!unsupportedInput && !unsuccessfulParse)
         {
@@ -223,7 +231,7 @@ void ModelImporter::reportSubgraphs()
         }
     }
     // Only one subgraph, mark it as true.
-    if (allSupported)
+    if (allSupported && mSubGraphSupportVector.size() == 1)
     {
         mSubGraphSupportVector.back().second = true;
     }
@@ -293,49 +301,66 @@ void parseNode(
         || (allowUint8Quantization && node.op_type() == "Constant"));
     skipUInt8Conversion
         |= (node.op_type() == "TRT_MXFP8QuantizeLinear" || node.op_type() == "TRT_MXFP8DequantizeLinear");
-    if (!skipUInt8Conversion)
-    {
-        for (auto& nodeInput : nodeInputs)
+
+        if (!skipUInt8Conversion)
         {
-            if (nodeInput.is_weights()
-                && nodeInput.weights().type == static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::UINT8))
+            for (auto& nodeInput : nodeInputs)
             {
-                auto weights = nodeInput.weights();
-                LOG_WARNING("UINT8 data " << weights.name << " is being converted to INT32.");
-                auto uint8_data = static_cast<uint8_t*>(weights.values);
-                int32_t* int32_data = ctx->getWeightsContext().convertUINT8(uint8_data, weights.shape);
-                auto int32ShapedWeights = ShapedWeights(
-                    static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::INT32), int32_data, weights.shape);
-                ctx->tensors()[std::string(weights.name)] = int32ShapedWeights;
-                nodeInput = int32ShapedWeights;
+                if (nodeInput.is_weights()
+                    && nodeInput.weights().type == static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::UINT8))
+                {
+                    auto weights = nodeInput.weights();
+                    LOG_WARNING("UINT8 data " << weights.name << " is being converted to INT32.");
+                    auto uint8_data = static_cast<uint8_t*>(weights.values);
+                    int32_t* int32_data = ctx->getWeightsContext().convertUINT8(uint8_data, weights.shape);
+                    auto int32ShapedWeights = ShapedWeights(
+                        static_cast<int32_t>(::ONNX_NAMESPACE::TensorProto::INT32), int32_data, weights.shape);
+                    ctx->tensors()[std::string(weights.name)] = int32ShapedWeights;
+                    nodeInput = int32ShapedWeights;
+                }
             }
         }
-    }
 
     // Dispatch to appropriate converter.
     NodeImporter const* importFunc{nullptr};
-    if (opImporters.count(nodeType))
+
+    // if the ENABLE_PLUGIN_OVERRIDE flag is set, then let the plugin override the standard ONNX operator
+    bool const pluginOverriding
+        = ctx->getFlags() & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_PLUGIN_OVERRIDE));
+    OnnxAttrs attrs(node, ctx);
+    bool const isPluginNode = attrs.count("plugin_namespace");
+
+    if (pluginOverriding || isPluginNode)
     {
-        importFunc = &opImporters.at(nodeType);
-    }
-    else if (ctx->localFunctions().count(nodeType))
-    {
-        // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
         if (isNodeInPluginRegistry(ctx, node))
         {
-            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
+            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing this node as a plugin.");
             importFunc = &opImporters.at("FallbackPluginImporter");
         }
-        else
+    }
+
+    if (!importFunc)
+    {
+        if (opImporters.count(nodeType))
+        {
+            importFunc = &opImporters.at(nodeType);
+        }
+        // To be consistent with operator override, local function will be preferred over plugin if the flag is unset.
+        else if (ctx->localFunctions().count(nodeType))
         {
             LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             importFunc = &opImporters.at("LocalFunctionImporter");
         }
+        else if (!pluginOverriding && !isPluginNode) // avoid to check Node in plugin registry again
+        {
+            LOG_VERBOSE("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
+            importFunc = &opImporters.at("FallbackPluginImporter");
+        }
     }
-    else
+    if (!importFunc)
     {
-        LOG_VERBOSE("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
-        importFunc = &opImporters.at("FallbackPluginImporter");
+        ONNXTRT_THROW(
+            MAKE_NODE_ERROR("No importer registered for op: " + nodeType, ErrorCode::kUNSUPPORTED_NODE, node, nodeIdx));
     }
 
     std::vector<TensorOrWeights> outputs;
@@ -493,7 +518,7 @@ void parseNodeStaticCheck(
 }
 
 void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
-    bool deserializingINetwork, int* currentNode)
+    bool deserializingINetwork, int32_t* currentNode, int32_t subgraphParentIdx)
 {
     // Import initializers.
     try
@@ -528,11 +553,23 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
         {
             *currentNode = nodeIndex;
         }
-        parseNodeStaticCheck(ctx, graph.node(nodeIndex), errors, nodeIndex);
+        // When parsing a subgraph, use the parent node index for error reporting.
+        // This ensures errors in subgraphs (e.g., Loop body) report the correct main-graph node index.
+        size_t const nodeIdxForErrors = (subgraphParentIdx >= 0) ? static_cast<size_t>(subgraphParentIdx) : nodeIndex;
+        parseNodeStaticCheck(ctx, graph.node(nodeIndex), errors, nodeIdxForErrors);
+
+        int32_t numPrevLayers = ctx->network()->getNbLayers();
+        // Parse the node
         if (errors.size() == 0)
         {
             // At most one dynamic error will be returned.
-            parseNode(ctx, graph.node(nodeIndex), nodeIndex, deserializingINetwork);
+            parseNode(ctx, graph.node(nodeIndex), nodeIdxForErrors, deserializingINetwork);
+        }
+
+        // Validate DLA support if kREPORT_CAPABILITY_DLA flag is set.
+        if (ctx->getDLACapabilityMode())
+        {
+            ctx->checkDLASupport(numPrevLayers, graph.node(nodeIndex), nodeIdxForErrors);
         }
     }
 
@@ -841,6 +878,13 @@ void ModelImporter::importModel()
     // Propagate OnnxParserFlags down to the importer context.
     mImporterCtx.setFlags(getFlags());
 
+    if (getFlag(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA))
+    {
+        ONNXTRT_CHECK(ctx->getBuilderConfig(),
+            "A valid IBuilderConfig must be set when the kREPORT_CAPABILITY_DLA flag is set.",
+            ErrorCode::kINVALID_VALUE);
+    }
+
     mCurrentNode = -1;
     importInputs(&mImporterCtx, graph, &mImporterCtx.tensors(), mErrors);
     parseGraph(&mImporterCtx, graph, mErrors, mOnnxModel.producer_name() == "TensorRT", &mCurrentNode);
@@ -1094,4 +1138,20 @@ bool ModelImporter::parseModelProto() noexcept
     return false;
 }
 
+bool ModelImporter::setBuilderConfig(const nvinfer1::IBuilderConfig* const builderConfig) noexcept
+{
+    ONNXTRT_TRY
+    {
+        auto* const ctx = &mImporterCtx;
+        if (!builderConfig)
+        {
+            LOG_ERROR("Provided builder config is nullptr.");
+            return false;
+        }
+        ctx->setBuilderConfig(builderConfig);
+        return true;
+    }
+    ONNXTRT_CATCH_RECORD
+    return false;
+}
 } // namespace onnx2trt

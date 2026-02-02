@@ -183,6 +183,8 @@ DEFINE_OP_CHECKER(Attention)
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
+DEFINE_OP_EMPTY_CHECKER(TRT_QuantizedAttention)
+
 DEFINE_OP_EMPTY_CHECKER(Add)
 
 DEFINE_OP_CHECKER(ArgMax)
@@ -276,6 +278,7 @@ DEFINE_OP_EMPTY_CHECKER(QuantizeLinear)
 DEFINE_OP_EMPTY_CHECKER(DequantizeLinear)
 
 
+
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8DequantizeLinear)
@@ -285,6 +288,12 @@ DEFINE_OP_EMPTY_CHECKER(TRT_INT4QuantizeLinear)
 DEFINE_OP_EMPTY_CHECKER(TRT_INT4DequantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(TRT_FP4DynamicQuantize)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_DynamicQuantize)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_BlockQuantize)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_BlockDequantize)
 
 DECLARE_OP_CHECKER(Mul);
 
@@ -601,6 +610,8 @@ DEFINE_OP_EMPTY_CHECKER(ReduceSumSquare)
 
 DEFINE_OP_EMPTY_CHECKER(Relu)
 
+DEFINE_OP_EMPTY_CHECKER(RMSNormalization)
+
 DEFINE_OP_EMPTY_CHECKER(Sign)
 
 
@@ -723,6 +734,8 @@ DEFINE_OP_CHECKER(RoiAlign)
     }
 }
 
+DEFINE_OP_EMPTY_CHECKER(RotaryEmbedding)
+
 DEFINE_OP_EMPTY_CHECKER(ScaledTanh)
 
 DEFINE_OP_EMPTY_CHECKER(Scan)
@@ -780,6 +793,8 @@ DEFINE_OP_EMPTY_CHECKER(Tan)
 
 DEFINE_OP_EMPTY_CHECKER(Tanh)
 
+DEFINE_OP_EMPTY_CHECKER(TensorScatter)
+
 DEFINE_OP_EMPTY_CHECKER(ThresholdedRelu)
 
 DEFINE_OP_EMPTY_CHECKER(Tile)
@@ -835,7 +850,10 @@ DEFINE_OP_CHECKER(FallbackPluginImporter)
     // Fallback check to the node's domain
     if (!creator)
     {
-        LOG_INFO("Searching for plugin wth node domain namespace: " << pluginNamespace);
+        LOG_INFO("Plugin not found with node attribute namespace: using pluginName: "
+            << pluginName << ", pluginVersion: " << pluginVersion << ", pluginNamespace: " << pluginNamespace);
+        LOG_INFO("Searching for plugin with node domain namespace: using pluginName: "
+            << pluginName << ", pluginVersion: " << pluginVersion << ", pluginNamespace: " << node.domain());
         pluginNamespace = node.domain();
         creator = importPluginCreator(ctx, pluginName, pluginVersion, pluginNamespace);
     }
