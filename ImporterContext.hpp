@@ -79,6 +79,7 @@ class ImporterContext
 {
     nvinfer1::INetworkDefinition* mNetwork;
     nvinfer1::ILogger* mLogger;
+    nvinfer1::IBuilderConfig const* mBuilderConfig{nullptr};
     //! WeightsContext object to hold ownership of ONNX weights and any temporary weights created by the Parser.
     WeightsContext mWeightsContext;
     StringMap<int64_t> mOpsets;
@@ -216,6 +217,10 @@ public:
 
     void registerLayer(nvinfer1::ILayer* layer, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node);
     void registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node);
+
+    void registerAttention(
+        nvinfer1::IAttention* attention, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node);
+    void registerAttention(nvinfer1::IAttention* attention, ::ONNX_NAMESPACE::NodeProto const& node);
 
     nvinfer1::ILogger& logger()
     {
@@ -392,6 +397,20 @@ public:
         assert(mNetwork != nullptr);
         return mNetwork->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED);
     }
+    void setBuilderConfig(nvinfer1::IBuilderConfig const* builderConfig)
+    {
+        mBuilderConfig = builderConfig;
+    }
+    nvinfer1::IBuilderConfig const* getBuilderConfig() const
+    {
+        return mBuilderConfig;
+    }
+
+    // Called after each node is parsed to validate that added layers are supported on DLA.
+    // When kREPORT_CAPABILITY_DLA flag is set, it's expected that the parser will run layer validation.
+    void checkDLASupport(int32_t numPrevLayers, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIndex);
+
+    [[nodiscard]] bool getDLACapabilityMode() const;
 };
 
 typedef std::vector<TensorOrWeights> NodeOutputs;

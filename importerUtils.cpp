@@ -1441,7 +1441,7 @@ TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input)
     }
 }
 
-nvinfer1::Dims makeDims(int nbDims, int val)
+nvinfer1::Dims makeDims(int32_t nbDims, int64_t val)
 {
     // Zero all the dimensions, so that unused dimensions are deterministic even if accidentally used.
     nvinfer1::Dims dims{nbDims, {}};
@@ -1450,7 +1450,7 @@ nvinfer1::Dims makeDims(int nbDims, int val)
 }
 
 NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
-    std::vector<TensorOrWeights>& inputs)
+    std::vector<TensorOrWeights>& inputs, bool const useV2)
 {
     auto* input = &convertToTensor(inputs.at(0), ctx);
     auto* scale = &convertToTensor(inputs.at(1), ctx);
@@ -1487,7 +1487,7 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
     scale = unsqueezeTensor(ctx, *scale, unsqueezeAxes);
     bias = unsqueezeTensor(ctx, *bias, unsqueezeAxes);
 
-    auto* layer = N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
+    auto* layer = useV2 ? N_CHECK(ctx->network()->addNormalizationV2(*input, *scale, *bias, axesMask)) : N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
     layer->setNbGroups(nbGroups);
     ctx->registerLayer(layer, node);
@@ -2232,11 +2232,16 @@ NodeOutputs addScatterLayer(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto co
         }
     }
 
-    // TRT doesn't support int64 for indices
-    auto* cast = N_CHECK(ctx->network()->addCast(indices, nvinfer1::DataType::kINT32));
-    auto* indicesInt32 = N_CHECK(cast->getOutput(0));
+    // Only cast to INT32 for weakly-typed networks (strongly-typed supports INT64 indices)
+    nvinfer1::ITensor* indicesForScatter = &indices;
+    if (!ctx->isStronglyTyped() && indices.getType() == nvinfer1::DataType::kINT64)
+    {
+        auto* cast = N_CHECK(ctx->network()->addCast(indices, nvinfer1::DataType::kINT32));
+        indicesForScatter = N_CHECK(cast->getOutput(0));
+    }
 
-    auto* layer = N_CHECK(ctx->network()->addScatter(data, *indicesInt32, updates, mode));
+    auto* layer = N_CHECK(ctx->network()->addScatter(data, *indicesForScatter, updates, mode));
+
     layer->setAxis(axis);
     ctx->registerLayer(layer, node);
     auto output = N_CHECK(layer->getOutput(0));
@@ -2269,6 +2274,11 @@ nvinfer1::IElementWiseLayer* modWithFPInputs(ImporterContext* ctx, nvinfer1::ITe
     return N_CHECK(ctx->network()->addElementWise(*input0, *rhs, eOp::kSUB));
 }
 
+int32_t getNbDims(nvinfer1::ITensor const* tensor)
+{
+    return tensor->getDimensions().nbDims;
+}
+
 std::string truncateString(std::string const& s, int64_t limit)
 {
     if (static_cast<int64_t>(s.size()) <= limit)
@@ -2284,19 +2294,42 @@ void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     // The format of the string is as follows:
     // [ONNX Layer: <name> | property1 | property2 | property3 ...]
 
-    std::string metadata = "[ONNX Layer: " + getNodeName(node);
+    std::ostringstream metadata;
+    metadata << "[ONNX Layer: " << getNodeName(node);
 
     // Generate local function stack string.
     for (auto it = ctx->localFunctionStack().crbegin(); it < ctx->localFunctionStack().crend(); ++it)
     {
-        metadata += " | " + it->nodeName + " (" + it->functionName + ")";
+        metadata << " | " << it->nodeName << " (" << it->functionName << ")";
     }
 
-    metadata += "]";
+    metadata << "]";
 
     // Truncate very long metadata since TRT API has a limit.
     constexpr int64_t kMETADATA_LIMIT{4000};
-    layer->setMetadata(truncateString(metadata, kMETADATA_LIMIT).c_str());
+    layer->setMetadata(truncateString(metadata.str(), kMETADATA_LIMIT).c_str());
+}
+
+void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::IAttention* attention)
+{
+    // Create a docstring that holds node metadata and assign it to the corresponding IAttention.
+    // The format of the string is as follows:
+    // [ONNX Layer: <name> | property1 | property2 | property3 ...]
+
+    std::ostringstream metadata;
+    metadata << "[ONNX Layer: " << getNodeName(node);
+
+    // Generate local function stack string.
+    for (auto it = ctx->localFunctionStack().crbegin(); it < ctx->localFunctionStack().crend(); ++it)
+    {
+        metadata << " | " << it->nodeName << " (" << it->functionName << ")";
+    }
+
+    metadata << "]";
+
+    // Truncate very long metadata since TRT API has a limit.
+    constexpr int64_t kMETADATA_LIMIT{4000};
+    attention->setMetadata(truncateString(metadata.str(), kMETADATA_LIMIT).c_str());
 }
 
 nvinfer1::ITensor* generateWindow(ImporterContext* ctx, nvinfer1::ITensor* N)
@@ -2312,8 +2345,8 @@ nvinfer1::ITensor* generateWindow(ImporterContext* ctx, nvinfer1::ITensor* N)
 nvinfer1::ITensor* windowHelper(ImporterContext* ctx, float numerator, nvinfer1::ITensor* n, nvinfer1::ITensor* N,
     nvinfer1::UnaryOperation op, int32_t periodic)
 {
-    auto* numeratorTensor = N_CHECK(addConstantScalar(ctx, numerator, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT,
-        nvinfer1::Dims{1, {1}})->getOutput(0));
+    auto* numeratorTensor
+        = N_CHECK(addConstantScalar(ctx, numerator, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, 1)->getOutput(0));
     auto numeratorLayer
         = N_CHECK(ctx->network()->addElementWise(*numeratorTensor, *n, nvinfer1::ElementWiseOperation::kPROD));
     auto numeratorOutput = N_CHECK(numeratorLayer->getOutput(0));

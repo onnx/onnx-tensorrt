@@ -142,6 +142,7 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
         {
             continue;
         }
+        LOG_REFITTER_VERBOSE("Refitting model initializer: " << initializer.name());
         // Remove the weight name from the set as some initializers
         // might have the same name across different nested constructs (e.g. IF nodes);
         // the assumption is that those weights would have the same value
@@ -214,13 +215,18 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
 
 void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
 {
-    ShapedWeights namedConstantOfShape = mWeightsContext.createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, nvinfer1::Dims{1, {1}}, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
+
+    ShapedWeights namedConstantOfShape = mWeightsContext.createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT,
+        nvinfer1::Dims{1, {1}}, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
     std::string name = namedConstantOfShape.getName();
 
     if (!mRefittableWeights.count(name))
     {
         return;
     }
+
+    LOG_REFITTER_VERBOSE("Refitting ConstantOfShape node: " << node.name() << ", output: " << node.output(0));
+
     mRefittableWeights.erase(name);
     if (mRefittedWeights.count(name))
     {
@@ -254,10 +260,14 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
 
 void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
 {
+
     if (!mRefittableWeights.count(node.output(0)))
     {
         return;
     }
+
+    LOG_REFITTER_VERBOSE("Refitting Constant node: " << node.name() << ", output: " << node.output(0));
+
     mRefittableWeights.erase(node.output(0));
     if (mRefittedWeights.count(node.output(0)))
     {
@@ -317,6 +327,8 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
 void ModelRefitter::refitOnnxBatchNormNode(
     ::ONNX_NAMESPACE::NodeProto const& node, ::ONNX_NAMESPACE::GraphProto const& graph)
 {
+    LOG_REFITTER_VERBOSE("Refitting BatchNorm node: " << node.name());
+
     ONNXTRT_CHECK(
         node.input().size() == 5, "BatchNorm node does not have five required inputs.", ErrorCode::kINVALID_NODE);
     std::vector<ShapedWeights> batchNormInputs;
@@ -370,6 +382,9 @@ void ModelRefitter::refitOnnxBatchNormNode(
 
 void ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
+
+    LOG_REFITTER_VERBOSE("Refitting If node: " << node.name());
+
     size_t thenGraphOutputSize{};
     size_t elseGraphOutputSize{};
     for (auto const& attr : node.attribute())
@@ -397,12 +412,14 @@ void ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
 
 void ModelRefitter::refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
+    LOG_REFITTER_VERBOSE("Refitting Loop node: " << node.name());
     ::ONNX_NAMESPACE::GraphProto const& body = static_cast<::ONNX_NAMESPACE::GraphProto const&>(node.attribute(0).g());
     refitOnnxGraph(body);
 }
 
 void ModelRefitter::refitOnnxScanNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
+    LOG_REFITTER_VERBOSE("Refitting Scan node: " << node.name());
     for (auto const& attr : node.attribute())
     {
         if (attr.name() == "body")

@@ -35,17 +35,20 @@ struct PluginDeleter
     void operator()(nvinfer1::IPluginV2* t);
 };
 
+// Helper function to create and fill a Dims object with defined values
+nvinfer1::Dims makeDims(int32_t nbDims, int64_t val);
+
 // Helper function to add a single constant value into TensorRT
 template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstantScalar(
-    ImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, nvinfer1::Dims shape = nvinfer1::Dims{0})
+    ImporterContext* ctx, ScalarType scalar, ShapedWeights::DataType type, int32_t nbDims = 0)
 {
     ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, "Found type mismatch when creating scalar value",
         ErrorCode::kINTERNAL_ERROR);
-    ONNXTRT_CHECK(volume(shape) == 1,
-        "Cannot add constant scalar with a shape that has volume > 1. Provided volume: " << volume(shape),
-        ErrorCode::kINTERNAL_ERROR);
-    ShapedWeights scalarWeights = ctx->createNamedTempWeights(type, shape);
+    ONNXTRT_CHECK(nbDims >= 0 && nbDims <= nvinfer1::Dims::MAX_DIMS,
+        "nbDims must be between 0 and " << nvinfer1::Dims::MAX_DIMS, ErrorCode::kINTERNAL_ERROR);
+    nvinfer1::Dims const dims = makeDims(nbDims, 1);
+    ShapedWeights scalarWeights = ctx->createNamedTempWeights(type, dims);
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(scalarWeights.shape, scalarWeights));
     ctx->network()->setWeightsName(scalarWeights, scalarWeights.getName());
@@ -268,12 +271,9 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
 // Helper function to return the identity of a TensorOrWeights
 TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input);
 
-// Helper function to create and fill a Dims object with defined values
-nvinfer1::Dims makeDims(int nbDims, int val);
-
 // Helper function to create normalization layers for GroupNorm and InstanceNorm
 NodeOutputs normalizationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-    std::vector<TensorOrWeights>& inputs);
+    std::vector<TensorOrWeights>& inputs, bool const useV2);
 
 // Given a list of axes in the range of [-rank, rank-1], where rank is the rank
 // of the corresponding data tensor, normalize to [0, rank-1].
@@ -407,6 +407,9 @@ nvinfer1::IElementWiseLayer* modWithIntegerInputs(
 nvinfer1::IElementWiseLayer* modWithFPInputs(ImporterContext* ctx, nvinfer1::ITensor* input0, nvinfer1::ITensor* input1,
     nvinfer1::ITensor* divResult, bool sameSign);
 
+//! Helper function to get the number of dimensions of a tensor.
+int32_t getNbDims(nvinfer1::ITensor const* tensor);
+
 //! RAII wrapper for ImporterContext::pushBaseNameScope() and popBaseNameScope().
 class NameScope
 {
@@ -432,7 +435,12 @@ Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> con
 void checkNotInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes,
     ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx);
 
+// Helper function to truncate string to length limit
+std::string truncateString(std::string const& s, int64_t limit);
+
 void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILayer* layer);
+
+void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::IAttention* attention);
 
 // Helper function to convert TensorRT datatype enum into a human-readable string.
 std::string getTrtDtypeName(nvinfer1::DataType TrtDtype);

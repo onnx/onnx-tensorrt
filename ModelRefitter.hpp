@@ -25,6 +25,7 @@
         mLogger->log(severity, ss.str().c_str());                                                                      \
     } while (0)
 
+#define LOG_REFITTER_VERBOSE(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kVERBOSE)
 #define LOG_REFITTER_WARNING(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kWARNING)
 #define LOG_REFITTER_ERROR(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kERROR)
 

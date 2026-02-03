@@ -2,13 +2,13 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.14 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 10.15 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
 > Note: There is limited support for DOUBLE type. TensorRT will attempt to cast DOUBLE down to FLOAT, clamping values to `+-FLT_MAX` if necessary.
 
-> Note: INT8, INT4, FP8 and FP4 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision. See [section 7.4.2](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#qat-models-work) of the developer guide for more information.
+> Note: INT8, INT4, FP8 and FP4 are treated as `Quantized Types` in TensorRT, where support is available only through quantization from a floating-point type with higher precision. See [our quantization guide](https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/work-quantized-types.html) for more information.
 
 > Note: UINT8 is only supported as network input or output tensor types.
 
@@ -37,7 +37,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | BitwiseNot                | N          |
 | BitwiseOr                 | N          |
 | BitwiseXor                | N          |
-| BlackmanWindow            | Y          |
+| BlackmanWindow            | Y          | FP32, FP16 |
 | Cast                      | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
 | CastLike                  | Y          | FP32, FP16, BF16, INT32, INT64, UINT8, BOOL |                                                                                                       |
 | Ceil                      | Y          | FP32, FP16, BF16 |
@@ -49,7 +49,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Concat                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | ConcatFromSequence        | N          |
 | Constant                  | Y          | FP32, FP16, BF16, FP8, FP4, INT4, INT32, INT64, BOOL | `sparse_value`, `value_string`, and `value_strings` attributes are unsupported.
-| ConstantOfShape           | Y          | FP32, FP16, BF16, FP8, FP4, INT4, INT32, INF64, BOOL |
+| ConstantOfShape           | Y          | FP32, FP16, BF16, FP8, FP4, INT4, INT32, INT64, BOOL |
 | Conv                      | Y          | FP32, FP16, BF16 |
 | ConvInteger               | N          |
 | ConvTranspose             | Y          | FP32, FP16, BF16 |
@@ -62,7 +62,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | DequantizeLinear          | Y          | INT8, FP8, FP4, INT4 | `x_zero_point` must be zero                                                                                    |
 | Det                       | N          |
 | Div                       | Y          | FP32, FP16, BF16, INT32, INT64 |
-| Dropout                   | Y          | FP32, FP16, BF16 | `is_traning` must be an initializer and evaluate to False.
+| Dropout                   | Y          | FP32, FP16, BF16 | `is_training` must be an initializer and evaluate to False.
 | DynamicQuantizeLinear     | N          | Not supported. TensorRT's IDynamicQuantize can be composed from ONNX operators in the form of a model local function.
 | Einsum                    | Y          | FP32, FP16, BF16 |
 | Elu                       | Y          | FP32, FP16, BF16 |
@@ -86,8 +86,8 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | GridSample                | Y          | FP32, FP16 | Input must be 4D input.
 | GroupNormalization        | Y          | FP32, FP16, BF16 |
 | GRU                       | Y          | FP32, FP16, BF16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
-| HammingWindow             | Y          |
-| HannWindow                | Y          |
+| HammingWindow             | Y          | FP32, FP16 |
+| HannWindow                | Y          | FP32, FP16 |
 | HardSigmoid               | Y          | FP32, FP16, BF16 |
 | HardSwish                 | Y          | FP32, FP16, BF16 |
 | Hardmax                   | Y          | FP32, FP16, BF16 | `axis` dimension of input must be a build-time constant
@@ -126,7 +126,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Neg                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | NegativeLogLikelihoodLoss | N          |
 | NonMaxSuppression         | Y          | FP32, FP16 |
-| NonZero                   | Y          | FP32, FP16
+| NonZero                   | Y          | FP32, FP16 |
 | Not                       | Y          | BOOL |
 | OneHot                    | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `depth` must be a build-time constant
 | Optional                  | N          |
@@ -161,10 +161,12 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Reshape                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Resize                    | Y          | FP32, FP16, BF16 | Supported resize transformation modes: `half_pixel`, `pytorch_half_pixel`, `tf_half_pixel_for_nn`, `asymmetric`, and `align_corners`.<br />Supported resize modes: `nearest`, `linear`.<br />Supported nearest modes: `floor`, `ceil`, `round_prefer_floor`, `round_prefer_ceil`.<br />Supported aspect ratio policy: `stretch`.<br />When `scales` is a tensor input, `axes` must be an iota vector of length rank(input).<br />Antialiasing is not supported.|
 | ReverseSequence           | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
+| RMSNormalization          | Y          | FP32, FP16, BF16 |
 | RNN                       | Y          | FP32, FP16, BF16| For bidirectional RNNs, activation functions must be the same for both the forward and reverse pass
 | RoiAlign                  | Y          | FP32, FP16 |
+| RotaryEmbedding           | Y          | FP32, FP16, BF16 | `position_ids` must be INT64 |
 | Round                     | Y          | FP32, FP16, BF16 |
-| STFT                      | Y          | FP32| `frame_step` and `window` must be an initializer. Input must be real-valued.
+| STFT                      | Y          | FP32 | `frame_step` and `window` must be an initializer. Input must be real-valued.
 | ScaledTanh                | Y          | FP32, FP16, BF16 |
 | Scan                      | Y          | FP32, FP16, BF16|
 | Scatter                   | Y          | FP32, FP16, BF16, INT32, INT64 |
@@ -202,6 +204,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Sum                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | Tan                       | Y          | FP32, FP16, BF16 |
 | Tanh                      | Y          | FP32, FP16, BF16 |
+| TensorScatter             | Y          | FP32, FP16, BF16, INT32 | `past_cache` and `update` must be 4D. `axis` must be -2. |
 | TfIdfVectorizer           | N          |
 | ThresholdedRelu           | Y          | FP32, FP16, BF16 |
 | Tile                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |

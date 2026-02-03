@@ -269,8 +269,40 @@ void ImporterContext::registerLayer(
 
 void ImporterContext::registerLayer(nvinfer1::ILayer* layer, ::ONNX_NAMESPACE::NodeProto const& node)
 {
-    std::string const& basename = getNodeName(node);
-    registerLayer(layer, basename, &node);
+    registerLayer(layer, getNodeName(node), &node);
+}
+
+void ImporterContext::registerAttention(
+    nvinfer1::IAttention* attention, std::string const& basename, ::ONNX_NAMESPACE::NodeProto const* node)
+{
+    if (attention)
+    {
+        std::string const name = basename.empty() ? attention->getName() : basename;
+        std::string const& uniqueName = generateUniqueName(mLayerNames, mSuffixCounter, basename);
+
+        auto* ctx = this; // Logging macro uses ctx.
+        if (node != nullptr)
+        {
+            LOG_VERBOSE("Registering attention: " << uniqueName << " for ONNX node: " << basename);
+        }
+        else
+        {
+            LOG_VERBOSE("Registering attention: " << uniqueName << " required by ONNX-TRT");
+        }
+
+        attention->setName(uniqueName.c_str());
+    }
+
+    // Set metadata if the attention is associated with an ONNX node.
+    if (node != nullptr && attention != nullptr)
+    {
+        processMetadata(this, *node, attention);
+    }
+}
+
+void ImporterContext::registerAttention(nvinfer1::IAttention* attention, ::ONNX_NAMESPACE::NodeProto const& node)
+{
+    registerAttention(attention, getNodeName(node), &node);
 }
 
 void ImporterContext::addUsedVCPluginLibrary(
@@ -300,6 +332,23 @@ std::vector<std::string> ImporterContext::getUsedVCPluginLibraries()
     LOG_WARNING("getUsedVCPluginLibraries not implemented on platform!");
     return {};
 #endif
+}
+
+void ImporterContext::checkDLASupport(int32_t numPrevLayers, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIndex)
+{
+    for (int32_t i = numPrevLayers; i < network()->getNbLayers(); ++i)
+    {
+        auto* layer = network()->getLayer(i);
+        if (!mBuilderConfig->canRunOnDLA(layer))
+        {
+            ONNXTRT_THROW(MAKE_NODE_ERROR("DLA validation failed for layer: " + std::string(layer->getName()), ErrorCode::kUNSUPPORTED_NODE, node, nodeIndex));
+        }
+    }
+}
+
+[[nodiscard]] bool ImporterContext::getDLACapabilityMode() const
+{
+    return mOnnxParserFlags & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA));
 }
 
 } // namespace onnx2trt

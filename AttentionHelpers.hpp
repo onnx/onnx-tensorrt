@@ -25,9 +25,11 @@ namespace onnx2trt
 //! \param qInput The input tensor to convert.
 //! \param attrs The attributes of the Attention node.
 //! \param ctx The importer context.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
 //! \return nvinfer1::ITensor& The converted Q tensor with shape (batchSize, numHeads, sequenceLength, headSize).
 //!
-nvinfer1::ITensor& convertToQTensor(TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx);
+nvinfer1::ITensor& convertToQTensor(
+    TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
 
 //!
 //! \brief Convert the input tensor to the K (key) tensor accepted by TensorRT.
@@ -41,9 +43,11 @@ nvinfer1::ITensor& convertToQTensor(TensorOrWeights& qInput, OnnxAttrs const& at
 //! \param kInput The input tensor to convert.
 //! \param attrs The attributes of the Attention node.
 //! \param ctx The importer context.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
 //! \return nvinfer1::ITensor& The converted K tensor with shape (batchSize, numHeads, sequenceLength, headSize).
 //!
-nvinfer1::ITensor& convertToKTensor(TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx);
+nvinfer1::ITensor& convertToKTensor(
+    TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
 
 //!
 //! \brief Convert the input tensor to the V (value) tensor accepted by TensorRT.
@@ -55,9 +59,11 @@ nvinfer1::ITensor& convertToKTensor(TensorOrWeights& kInput, OnnxAttrs const& at
 //! \param vInput The input tensor to convert.
 //! \param attrs The attributes of the Attention node.
 //! \param ctx The importer context.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
 //! \return nvinfer1::ITensor& The converted V tensor with shape (batchSize, numHeads, sequenceLength, headSize).
 //!
-nvinfer1::ITensor& convertToVTensor(TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx);
+nvinfer1::ITensor& convertToVTensor(
+    TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
 
 //!
 //! \brief Convert the input tensor to the mask tensor accepted by TensorRT.
@@ -89,4 +95,13 @@ nvinfer1::ITensor& convertToMaskTensor(TensorOrWeights& maskInput, ImporterConte
 //!
 nvinfer1::AttentionNormalizationOp parseNormalizationOp(OnnxAttrs const& attrs);
 
+//!
+//! \brief Reshape the output tensor to the original input rank.
+//!
+//! \param tensor The output tensor to reshape.
+//! \param ctx The importer context.
+//! \param needsReshape True if the output tensor needs to be reshaped back to 3d, false otherwise.
+//! \return nvinfer1::ITensor& The reshaped output tensor.
+nvinfer1::ITensor& reshapeOutputTensor(
+    nvinfer1::ITensor& tensor, ImporterContext* ctx, bool const needsReshape = false);
 } // namespace onnx2trt

@@ -40,9 +40,9 @@ namespace onnx2trt
 //! \return nvinfer1::ITensor& The Q, K, or V tensor.
 //!
 nvinfer1::ITensor& reshapeQKVTensor(
-    TensorOrWeights& qkvInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const isQ)
+    TensorOrWeights& qkvInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const isQ, bool const needsReshape)
 {
-    if (qkvInput.shape().nbDims == 3)
+    if (needsReshape)
     {
         // qkvInput is a 3D tensor (batchSize, sequenceLength, hiddenSize=numHeads * headSize).
         // Get relevant dimensions.
@@ -102,8 +102,8 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
     if (attrs.count("scale"))
     {
         // Obtain the sqrt of scale as a constant (output of a constant layer).
-        nvinfer1::IConstantLayer* constant = addConstantScalar(
-            ctx, std::sqrt(attrs.get<float>("scale")), ::ONNX_NAMESPACE::TensorProto::FLOAT, {4, {1, 1, 1, 1}});
+        nvinfer1::IConstantLayer* constant
+            = addConstantScalar(ctx, std::sqrt(attrs.get<float>("scale")), ::ONNX_NAMESPACE::TensorProto::FLOAT, 4);
         sqrtScale = castHelper(ctx, N_CHECK(constant)->getOutput(0), qkTensor.getType());
     }
     else
@@ -123,19 +123,22 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
     return *getElementWiseResult(ctx, qkTensor, *sqrtScale, nvinfer1::ElementWiseOperation::kPROD);
 }
 
-nvinfer1::ITensor& convertToQTensor(TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx)
+nvinfer1::ITensor& convertToQTensor(
+    TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return scaleQKTensor(reshapeQKVTensor(qInput, attrs, ctx, true), attrs, ctx);
+    return scaleQKTensor(reshapeQKVTensor(qInput, attrs, ctx, true /*isQ*/, needsReshape), attrs, ctx);
 }
 
-nvinfer1::ITensor& convertToKTensor(TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx)
+nvinfer1::ITensor& convertToKTensor(
+    TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return scaleQKTensor(reshapeQKVTensor(kInput, attrs, ctx, false), attrs, ctx);
+    return scaleQKTensor(reshapeQKVTensor(kInput, attrs, ctx, false /*isQ*/, needsReshape), attrs, ctx);
 }
 
-nvinfer1::ITensor& convertToVTensor(TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx)
+nvinfer1::ITensor& convertToVTensor(
+    TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return reshapeQKVTensor(vInput, attrs, ctx, false);
+    return reshapeQKVTensor(vInput, attrs, ctx, false /*isQ*/, needsReshape);
 }
 
 nvinfer1::ITensor& convertToMaskTensor(TensorOrWeights& maskInput, ImporterContext* ctx)
@@ -178,4 +181,29 @@ nvinfer1::AttentionNormalizationOp parseNormalizationOp(OnnxAttrs const& attrs)
     }
 }
 
+nvinfer1::ITensor& reshapeOutputTensor(nvinfer1::ITensor& tensor, ImporterContext* ctx, bool const needsReshape)
+{
+    if (!needsReshape)
+    {
+        return tensor;
+    }
+    else
+    {
+        ShapeTensor numHeads = gather(ctx, shapeOf(tensor), shapeVector(1));
+        ShapeTensor headSize = gather(ctx, shapeOf(tensor), shapeVector(3));
+        ShapeTensor hiddenSize = mul(ctx, numHeads, headSize);
+
+        // == Transform (batchSize, numHeads, sequenceLength, headSize) -> (batchSize, sequenceLength, hiddenSize) by ==
+        // 1. Transpose the middle two dimensions: (batchSize, numHeads, sequenceLength, headSize) -> (batchSize,
+        // sequenceLength, numHeads, headSize)
+        // 2. Reshape to (batchSize, sequenceLength, hiddenSize).
+        // Use (0, 0, hiddenSize) as a shorthand to propagate `batchSize` and `sequenceLength` from the input
+        // tensor without instantiating them. Set `zeroIsPlaceholder` to enable this shorthand.
+        ShapeTensor newShape = concat(ctx, fillShapeVector(ctx, 0, shapeVector(2)), hiddenSize);
+        nvinfer1::IShuffleLayer* shuffle = addShuffle(ctx, tensor, newShape, /*zeroIsPlaceholder*/ true);
+        shuffle->setFirstTranspose({0, 2, 1, 3});
+
+        return *N_CHECK(shuffle->getOutput(0));
+    }
+}
 } // namespace onnx2trt
