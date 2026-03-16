@@ -584,7 +584,19 @@ DEFINE_BUILTIN_OP_IMPORTER(CastLike)
 
 DEFINE_BUILTIN_OP_IMPORTER(Ceil)
 {
-    return unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kCEIL);
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::IConstantLayer* negOne
+        = addConstantScalar(ctx, -1.f, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, getNbDims(&input));
+    nvinfer1::IElementWiseLayer* negInput
+        = N_CHECK(ctx->network()->addElementWise(input, *negOne->getOutput(0), nvinfer1::ElementWiseOperation::kPROD));
+    ctx->registerLayer(negInput, node);
+    nvinfer1::IUnaryLayer* floorNegInput
+        = N_CHECK(ctx->network()->addUnary(*negInput->getOutput(0), nvinfer1::UnaryOperation::kFLOOR));
+    ctx->registerLayer(floorNegInput, node);
+    nvinfer1::IElementWiseLayer* result = N_CHECK(ctx->network()->addElementWise(
+        *floorNegInput->getOutput(0), *negOne->getOutput(0), nvinfer1::ElementWiseOperation::kPROD));
+    ctx->registerLayer(result, node);
+    return {{result->getOutput(0)}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Celu)
@@ -5043,7 +5055,16 @@ DEFINE_BUILTIN_OP_IMPORTER(Sign)
 
 DEFINE_BUILTIN_OP_IMPORTER(Round)
 {
-    return unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kROUND);
+    nvinfer1::ITensor& input = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::IConstantLayer* half
+        = addConstantScalar(ctx, 0.5f, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, getNbDims(&input));
+    nvinfer1::IElementWiseLayer* addHalf
+        = N_CHECK(ctx->network()->addElementWise(input, *half->getOutput(0), nvinfer1::ElementWiseOperation::kSUM));
+    ctx->registerLayer(addHalf, node);
+    nvinfer1::IUnaryLayer* result
+        = N_CHECK(ctx->network()->addUnary(*addHalf->getOutput(0), nvinfer1::UnaryOperation::kFLOOR));
+    ctx->registerLayer(result, node);
+    return {{result->getOutput(0)}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(Resize)
