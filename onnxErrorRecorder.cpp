@@ -103,13 +103,12 @@ bool ONNXParserErrorRecorder::reportError(nvinfer1::ErrorCode val, nvinfer1::IEr
 
 nvinfer1::IErrorRecorder::RefCount ONNXParserErrorRecorder::incRefCount() noexcept
 {
-    // Atomically increment or decrement the ref counter.
-    return ++mRefCount;
+    return mRefCount.fetch_add(1) + 1;
 }
 
 nvinfer1::IErrorRecorder::RefCount ONNXParserErrorRecorder::decRefCount() noexcept
 {
-    auto newVal = --mRefCount;
+    auto newVal = mRefCount.fetch_sub(1) - 1;
     if (newVal == 0)
     {
         delete this;

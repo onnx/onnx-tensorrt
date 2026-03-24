@@ -13,10 +13,11 @@
 
 namespace onnx2trt
 {
+using FileHandle =
 #ifdef _WIN32
-typedef void* FileHandle;
+    void*;
 #else
-typedef int FileHandle;
+    int;
 #endif
 
 // Class responsible for reading, casting, and converting weight values from an ONNX model and into ShapedWeights
@@ -24,29 +25,19 @@ typedef int FileHandle;
 
 class WeightsContext
 {
-    struct BufferDeleter
-    {
-        void operator()(void* ptr)
-        {
-            operator delete(ptr);
-        }
-    };
-
-    using BufferPtr = std::unique_ptr<void, BufferDeleter>;
-
-    nvinfer1::ILogger* mLogger;
+    nvinfer1::ILogger* mLogger{};
 
     // Vector of chunks to maintain ownership of weights.
-    std::vector<BufferPtr> mWeightBuffers;
+    std::vector<std::unique_ptr<std::byte[]>> mWeightBuffers;
 
     // Keeps track of the absolute location of the file in order to read external weights.
     std::string mOnnxFileLocation;
 
-    using MemoryMapping_t = std::pair<void*, int64_t>;
     std::map<std::string, FileHandle> mMappedFiles;
 #ifdef _WIN32
     std::map<std::string, FileHandle> mFileMappingHandles;
 #endif
+    using MemoryMapping_t = std::pair<void*, int64_t>;
     std::map<std::string, MemoryMapping_t> mMemoryMappings;
 
     template <typename T>
@@ -57,8 +48,10 @@ class WeightsContext
     StringMap<std::pair<void const*, size_t>> mExternalInits;
 
 public:
-    WeightsContext(nvinfer1::ILogger* logger)
-        : mLogger(logger){};
+    explicit WeightsContext(nvinfer1::ILogger* logger)
+        : mLogger(logger)
+    {
+    }
 
     ~WeightsContext();
 
@@ -113,7 +106,7 @@ public:
         mOnnxFileLocation = location;
     }
 
-    // Returns the absolutate filepath of the loaded ONNX model.
+    // Returns the absolute filepath of the loaded ONNX model.
     std::string getOnnxFileLocation()
     {
         return mOnnxFileLocation;

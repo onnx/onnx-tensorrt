@@ -126,13 +126,12 @@ std::string normalizePath(std::string const& path)
 
     size_t i = 0;
     size_t n = path.size();
-    std::string sep = "/";
+    std::string const sep = "/";
 
     // Loop through path, split on all path seperator tokens, and append to normPath if applicable.
     while (i < n)
     {
-        auto slashPos = path.find(sep, i);
-        if (slashPos == std::string::npos)
+        if (auto const slashPos = path.find(sep, i); slashPos == std::string::npos)
         {
             addToPath(path.substr(i, n - i));
             break;

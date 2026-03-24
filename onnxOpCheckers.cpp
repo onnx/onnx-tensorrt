@@ -278,6 +278,36 @@ DEFINE_OP_EMPTY_CHECKER(QuantizeLinear)
 DEFINE_OP_EMPTY_CHECKER(DequantizeLinear)
 
 
+DEFINE_OP_CHECKER(DistCollective)
+{
+    OnnxAttrs attrs(node, ctx);
+
+    int64_t const root = attrs.get<int64_t>("root", 0);
+    int64_t const groupSize = attrs.get<int64_t>("group_size", 0);
+    nvinfer1::CollectiveOperation const collectiveOperation
+        = attrs.get<nvinfer1::CollectiveOperation>("collective_operation");
+    auto groups = attrs.get<std::vector<int64_t>>("groups", {});
+
+    if (collectiveOperation == nvinfer1::CollectiveOperation::kREDUCE
+        || collectiveOperation == nvinfer1::CollectiveOperation::kBROADCAST)
+    {
+        STATIC_CHECK(root >= 0 && "Root rank must be >= 0 on reduce or broadcast operations.", ErrorCode::kINVALID_NODE,
+            node, errors, nodeIndex);
+    }
+
+    STATIC_CHECK(groupSize >= 0 && "Group size must be >= 0.", ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+
+    if (groups.empty())
+    {
+        STATIC_CHECK(groupSize == 0 && "Group size must be 0 if groups is empty.", ErrorCode::kINVALID_NODE, node,
+            errors, nodeIndex);
+    }
+    else
+    {
+        STATIC_CHECK(groupSize > 0 && "Group size must be > 0 if groups is non-empty.", ErrorCode::kINVALID_NODE, node,
+            errors, nodeIndex);
+    }
+}
 
 DEFINE_OP_EMPTY_CHECKER(TRT_FP8QuantizeLinear)
 
@@ -744,7 +774,25 @@ DEFINE_OP_EMPTY_CHECKER(GridSample)
 
 DEFINE_OP_EMPTY_CHECKER(ScatterND)
 
-DEFINE_OP_EMPTY_CHECKER(ScatterElements)
+DEFINE_OP_CHECKER(ScatterElements)
+{
+    for (auto const& attr : node.attribute())
+    {
+        std::string const& name = attr.name();
+        if (name == "reduction")
+        {
+            std::string reduction = attr.s();
+            STATIC_CHECK((reduction == "none" || reduction == "add" || reduction == "mul" || reduction == "max"
+                             || reduction == "min")
+                    && "ScatterElements reduction attribute must be one of: none, add, mul, max, min.",
+                ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+        }
+        else if (name != "axis")
+        {
+            ADD_STATIC_ERROR("Unknown attribute: " + name, ErrorCode::kINVALID_NODE, node, nodeIndex, errors);
+        }
+    }
+}
 
 DEFINE_OP_EMPTY_CHECKER(Scatter)
 

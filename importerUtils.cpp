@@ -755,6 +755,7 @@ nvinfer1::ITensor* getUnaryResult(ImporterContext* ctx, nvinfer1::ITensor& input
     return N_CHECK(unaryLayer->getOutput(0));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void getKernelParams(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::Dims* kernelSize,
     nvinfer1::Dims* strides, nvinfer1::Dims* begPadding, nvinfer1::Dims* endPadding, nvinfer1::PaddingMode& paddingMode,
     bool& countExcludePadding, nvinfer1::Dims* dilations, nvinfer1::Dims* outputPadding, bool const poolingCeilMode)
@@ -1487,9 +1488,16 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
     scale = unsqueezeTensor(ctx, *scale, unsqueezeAxes);
     bias = unsqueezeTensor(ctx, *bias, unsqueezeAxes);
 
-    auto* layer = useV2 ? N_CHECK(ctx->network()->addNormalizationV2(*input, *scale, *bias, axesMask)) : N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
+    auto* layer = useV2 ? N_CHECK(ctx->network()->addNormalizationV2(*input, *scale, *bias, axesMask))
+                        : N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
     layer->setNbGroups(nbGroups);
+
+    if (ctx->getAdjustForDLAMode())
+    {
+        layer->setComputePrecision(nvinfer1::DataType::kHALF);
+    }
+
     ctx->registerLayer(layer, node);
     auto* output = N_CHECK(layer->getOutput(0));
     return {{output}};

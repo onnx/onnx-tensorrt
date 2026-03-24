@@ -351,5 +351,10 @@ void ImporterContext::checkDLASupport(int32_t numPrevLayers, ::ONNX_NAMESPACE::N
     return mOnnxParserFlags & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA));
 }
 
+[[nodiscard]] bool ImporterContext::getAdjustForDLAMode() const
+{
+    return mOnnxParserFlags & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kADJUST_FOR_DLA));
+}
+
 } // namespace onnx2trt
 

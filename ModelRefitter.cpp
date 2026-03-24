@@ -61,7 +61,7 @@ size_t ModelRefitter::batchnormWeightRefitter(
     T const* const meanValues = f(mean);
     T const* const varianceValues = f(variance);
 
-    T eps = static_cast<T>(1e-5f);
+    T eps = static_cast<T>(1e-5);
 
     for (auto const& attr : node.attribute())
     {
@@ -125,12 +125,12 @@ public:
 
 void ModelRefitter::refitOnnxWeights()
 {
-    nestedDepth = 0;
-    successfullyRefittedWeights = 0;
+    mNestedDepth = 0;
+    mSuccessfullyRefittedWeights = 0;
     size_t const numberOfWeightsToRefit = mRefittableWeights.size();
     refitOnnxGraph(mOnnxModel.graph());
-    ONNXTRT_CHECK(successfullyRefittedWeights == numberOfWeightsToRefit,
-        "Only successfully refitted " << successfullyRefittedWeights << " weights out of " << numberOfWeightsToRefit,
+    ONNXTRT_CHECK(mSuccessfullyRefittedWeights == numberOfWeightsToRefit,
+        "Only successfully refitted " << mSuccessfullyRefittedWeights << " weights out of " << numberOfWeightsToRefit,
         ErrorCode::kREFIT_FAILED);
 }
 
@@ -162,7 +162,7 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
             "Failed to import initializer.", ErrorCode::kUNSUPPORTED_NODE);
         ONNXTRT_CHECK(mRefitter->setNamedWeights(initializer.name().c_str(), std::move(weights)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
-        ++successfullyRefittedWeights;
+        ++mSuccessfullyRefittedWeights;
     }
 
     std::vector<size_t> topoOrder;
@@ -180,9 +180,9 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
 {
     // For nodes that contain subgraphs (Ifs, Loops, Scans),
     // ensure that the recursion depth is limited to a set amount.
-    ++nestedDepth;
+    ++mNestedDepth;
     static size_t const MAX_NESTED_SUBGRAPHS = 24;
-    ONNXTRT_CHECK((nestedDepth <= MAX_NESTED_SUBGRAPHS),
+    ONNXTRT_CHECK((mNestedDepth <= MAX_NESTED_SUBGRAPHS),
         "ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!",
         ErrorCode::kUNSUPPORTED_GRAPH);
 
@@ -210,7 +210,7 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
     {
         refitOnnxScanNode(node);
     }
-    --nestedDepth;
+    --mNestedDepth;
 }
 
 void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
@@ -255,7 +255,7 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
 
     ONNXTRT_CHECK(mRefitter->setNamedWeights(name.c_str(), std::move(weights)), "Failed to set named weights",
         ErrorCode::kREFIT_FAILED);
-    ++successfullyRefittedWeights;
+    ++mSuccessfullyRefittedWeights;
 }
 
 void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
@@ -321,7 +321,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
     }
     ONNXTRT_CHECK(mRefitter->setNamedWeights(node.output(0).c_str(), std::move(weights)), "Failed to set named weights",
         ErrorCode::kREFIT_FAILED);
-    ++successfullyRefittedWeights;
+    ++mSuccessfullyRefittedWeights;
 }
 
 void ModelRefitter::refitOnnxBatchNormNode(
@@ -377,7 +377,7 @@ void ModelRefitter::refitOnnxBatchNormNode(
         batchnormRefittedWeights = batchnormWeightRefitter<float>(
             node, batchNormInputs, [this](ShapedWeights const& w) { return mWeightsContext.getFP32Values(w); });
     }
-    successfullyRefittedWeights += batchnormRefittedWeights;
+    mSuccessfullyRefittedWeights += batchnormRefittedWeights;
 }
 
 void ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)

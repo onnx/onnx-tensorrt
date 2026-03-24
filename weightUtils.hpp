@@ -27,30 +27,64 @@ size_t getTensorOrWeightsSizeBytes(int64_t count, int32_t onnxDtype);
 
 // Find the corresponding ONNX data type of a built-in data type.
 template <typename T>
-ShapedWeights::DataType getShapedWeightsDataType()
+[[nodiscard]] constexpr ShapedWeights::DataType getShapedWeightsDataType()
 {
-    static std::unordered_map<std::type_index, ::ONNX_NAMESPACE::TensorProto::DataType> const tMap({
-        {std::type_index(typeid(bool)), ::ONNX_NAMESPACE::TensorProto::BOOL},
-        {std::type_index(typeid(int8_t)), ::ONNX_NAMESPACE::TensorProto::INT8},
-        {std::type_index(typeid(uint8_t)), ::ONNX_NAMESPACE::TensorProto::UINT8},
-        {std::type_index(typeid(int16_t)), ::ONNX_NAMESPACE::TensorProto::INT16},
-        {std::type_index(typeid(uint16_t)), ::ONNX_NAMESPACE::TensorProto::UINT16},
-        {std::type_index(typeid(int32_t)), ::ONNX_NAMESPACE::TensorProto::INT32},
-        {std::type_index(typeid(uint32_t)), ::ONNX_NAMESPACE::TensorProto::UINT32},
-        {std::type_index(typeid(int64_t)), ::ONNX_NAMESPACE::TensorProto::INT64},
-        {std::type_index(typeid(uint64_t)), ::ONNX_NAMESPACE::TensorProto::UINT64},
-        {std::type_index(typeid(float)), ::ONNX_NAMESPACE::TensorProto::FLOAT},
-        {std::type_index(typeid(double)), ::ONNX_NAMESPACE::TensorProto::DOUBLE},
-        {std::type_index(typeid(half_float::half)), ::ONNX_NAMESPACE::TensorProto::FLOAT16},
-        {std::type_index(typeid(BFloat16)), ::ONNX_NAMESPACE::TensorProto::BFLOAT16},
-        // TRT-22989: Add fp8 and int4 support
-    });
-
-    if (tMap.find(std::type_index(typeid(T))) != tMap.end())
+    if constexpr (std::is_same_v<T, bool>)
     {
-        return tMap.at(std::type_index(typeid(T)));
+        return ::ONNX_NAMESPACE::TensorProto::BOOL;
     }
-    return ::ONNX_NAMESPACE::TensorProto::UNDEFINED;
+    else if constexpr (std::is_same_v<T, int8_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::INT8;
+    }
+    else if constexpr (std::is_same_v<T, uint8_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::UINT8;
+    }
+    else if constexpr (std::is_same_v<T, int16_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::INT16;
+    }
+    else if constexpr (std::is_same_v<T, uint16_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::UINT16;
+    }
+    else if constexpr (std::is_same_v<T, int32_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::INT32;
+    }
+    else if constexpr (std::is_same_v<T, uint32_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::UINT32;
+    }
+    else if constexpr (std::is_same_v<T, int64_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::INT64;
+    }
+    else if constexpr (std::is_same_v<T, uint64_t>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::UINT64;
+    }
+    else if constexpr (std::is_same_v<T, float>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::FLOAT;
+    }
+    else if constexpr (std::is_same_v<T, double>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::DOUBLE;
+    }
+    else if constexpr (std::is_same_v<T, half_float::half>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::FLOAT16;
+    }
+    else if constexpr (std::is_same_v<T, BFloat16>)
+    {
+        return ::ONNX_NAMESPACE::TensorProto::BFLOAT16;
+    }
+    else
+    {
+        static_assert(!std::is_same_v<T, T>, "Unsupported type"); //< C++23: `static_assert(false, "Unsupported type")`
+    }
 }
 
 // Return the volume of a Dims object
