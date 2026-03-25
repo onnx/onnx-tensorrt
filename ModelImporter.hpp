@@ -16,10 +16,10 @@ namespace onnx2trt
 {
 
 void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-    bool deserializingINetwork = false);
+    bool deserializingINetwork = false, bool importAsPlugin = false);
 
-void parseNodeStaticCheck(
-    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex);
+void parseNodeStaticCheck(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,
+    size_t const nodeIndex, bool importAsPlugin = false);
 
 void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
     bool deserializingINetwork = false, int32_t* currentNode = nullptr, int32_t subgraphParentIdx = -1);
@@ -66,10 +66,10 @@ public:
     bool parseWithWeightDescriptors(
         void const* serialized_onnx_model, size_t serialized_onnx_model_size) noexcept override;
     bool parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        const char* model_path = nullptr) noexcept override;
+        char const* model_path = nullptr) noexcept override;
 
     bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        SubGraphCollection_t& sub_graph_collection, const char* model_path = nullptr) noexcept override;
+        SubGraphCollection_t& sub_graph_collection, char const* model_path = nullptr) noexcept override;
     bool supportsModelV2(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         char const* model_path = nullptr) noexcept override;
 
@@ -77,7 +77,7 @@ public:
     bool isSubgraphSupported(int64_t const index) noexcept override;
     int64_t* getSubgraphNodes(int64_t const index, int64_t& subgraphLength) noexcept override;
 
-    bool supportsOperator(const char* op_name) const noexcept override;
+    bool supportsOperator(char const* op_name) const noexcept override;
 
     void setFlags(nvonnxparser::OnnxParserFlags onnxParserFlags) noexcept override
     {
@@ -151,7 +151,7 @@ public:
 
     bool parseFromFile(char const* onnxModelFile, int32_t verbosity) noexcept override;
 
-    virtual char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept override;
+    char const* const* getUsedVCPluginLibraries(int64_t& nbPluginLibs) const noexcept override;
 
     bool loadModelProto(void const* serializedOnnxModel, size_t serializedOnnxModelSize,
         char const* modelPath = nullptr) noexcept override;
@@ -160,7 +160,7 @@ public:
 
     bool parseModelProto() noexcept override;
 
-    bool setBuilderConfig(const nvinfer1::IBuilderConfig* const builderConfig) noexcept override;
+    bool setBuilderConfig(nvinfer1::IBuilderConfig const* const builderConfig) noexcept override;
 };
 
 } // namespace onnx2trt

@@ -165,16 +165,9 @@ bool WeightsContext::parseExternalWeights(
         return false;
     }
     // The weight paths in the ONNX model are relative paths to the main ONNX file.
-#ifdef _MSC_VER
-    size_t slash = path.rfind("\\");
-    // When using WSL path can have "\" or "/". Need to check both options here.
-    if (slash == std::string::npos)
-    {
-        slash = path.rfind("/");
-    }
-#else
-    size_t slash = path.rfind("/");
-#endif
+    // The model path can contain mixed separators (e.g. UNC + POSIX fragments on Windows),
+    // so use whichever separator appears last.
+    size_t slash = path.find_last_of("\\/");
     if (slash != std::string::npos)
     {
         path.replace(slash + 1, path.size() - (slash + 1), normalizedFile);
@@ -210,6 +203,7 @@ bool WeightsContext::parseExternalWeights(
 }
 
 // Function to read data from an ONNX Tensor and move it into a ShapedWeights object. Handles model, user-provided, and external weights.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool WeightsContext::convertOnnxWeights(
     ::ONNX_NAMESPACE::TensorProto const& onnxTensor, ShapedWeights* weights, bool ownAllWeights)
 {
@@ -521,10 +515,8 @@ ShapedWeights WeightsContext::createTempWeights(ShapedWeights::DataType type, nv
     {
         return weights;
     }
-    void* ptr = operator new(nbBytes);
-    std::memset(ptr, 0, nbBytes);
-    mWeightBuffers.push_back(BufferPtr{ptr});
-    weights.values = ptr;
+    // Create a zero'd buffer (`std::make_unique<T[]>(n)` uses value initialization):
+    weights.values = mWeightBuffers.emplace_back(std::make_unique<std::byte[]>(nbBytes)).get();
     return weights;
 }
 
@@ -532,15 +524,11 @@ ShapedWeights WeightsContext::createNamedWeights(ShapedWeights::DataType type, n
     std::string const& name, std::set<std::string>* bufferedNames)
 {
     ShapedWeights weights = createTempWeights(type, shape);
-    if (bufferedNames)
-    {
-        bufferedNames->insert(name);
-        weights.setName((*bufferedNames->find(name)).c_str());
-    }
-    else
-    {
-        weights.setName(name.c_str());
-    }
+    //! \return \p name by reference, caching in `*bufferedNames` if `bufferedNames` is not `nullptr`.
+    auto getBufferedName = [&](std::string const& name) -> std::string const& {
+        return bufferedNames ? *bufferedNames->insert(name).first : name;
+    };
+    weights.setName(getBufferedName(name).c_str());
     return weights;
 }
 

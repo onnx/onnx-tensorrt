@@ -359,3 +359,60 @@ nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(std::string 
     throw std::runtime_error("Unknown ResizeRoundMode: " + roundMode);
 }
 
+template <>
+nvinfer1::CollectiveOperation OnnxAttrs::get<nvinfer1::CollectiveOperation>(std::string const& key) const
+{
+    std::string const s = this->get<std::string>(key);
+    if (s == "all_gather")
+    {
+        return nvinfer1::CollectiveOperation::kALL_GATHER;
+    }
+    if (s == "all_reduce")
+    {
+        return nvinfer1::CollectiveOperation::kALL_REDUCE;
+    }
+    if (s == "broadcast")
+    {
+        return nvinfer1::CollectiveOperation::kBROADCAST;
+    }
+    if (s == "reduce")
+    {
+        return nvinfer1::CollectiveOperation::kREDUCE;
+    }
+    if (s == "reduce_scatter")
+    {
+        return nvinfer1::CollectiveOperation::kREDUCE_SCATTER;
+    }
+    throw std::runtime_error("Unknown CollectiveOperation: " + s);
+}
+
+template <>
+nvinfer1::ReduceOperation OnnxAttrs::get<nvinfer1::ReduceOperation>(std::string const& key) const
+{
+    std::string const s = this->get<std::string>(key);
+    if (s == "sum")
+    {
+        return nvinfer1::ReduceOperation::kSUM;
+    }
+    if (s == "max")
+    {
+        return nvinfer1::ReduceOperation::kMAX;
+    }
+    if (s == "min")
+    {
+        return nvinfer1::ReduceOperation::kMIN;
+    }
+    if (s == "prod")
+    {
+        return nvinfer1::ReduceOperation::kPROD;
+    }
+    if (s == "avg")
+    {
+        return nvinfer1::ReduceOperation::kAVG;
+    }
+    if (s == "none")
+    {
+        return nvinfer1::ReduceOperation::kNONE;
+    }
+    throw std::runtime_error("Unknown ReduceOperation: " + s);
+}

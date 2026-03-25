@@ -237,6 +237,8 @@ void ModelImporter::reportSubgraphs()
     }
 }
 
+namespace
+{
 bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node)
 {
     OnnxAttrs attrs(node, ctx);
@@ -249,8 +251,69 @@ bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto co
     return creator;
 }
 
-void parseNode(
-    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, bool deserializingINetwork)
+bool shouldImportAsPlugin(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node)
+{
+    bool const pluginOverriding
+        = ctx->getFlags() & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_PLUGIN_OVERRIDE));
+    OnnxAttrs attrs(node, ctx);
+    bool const isPluginNode = attrs.count("plugin_namespace");
+    return (pluginOverriding || isPluginNode) && isNodeInPluginRegistry(ctx, node);
+}
+} // anonymous namespace
+
+void parseNodeStaticCheck(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors,
+    size_t const nodeIndex, bool importAsPlugin)
+{
+    StringMap<OpStaticErrorChecker> const& opCheckers = getOpStaticErrorCheckerMap();
+    StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
+    std::string const& nodeName = getNodeName(node);
+    std::string const& nodeType = node.op_type();
+    LOG_VERBOSE("Static check for parsing node: " << nodeName << " [" << nodeType << "]");
+
+    // Dispatch to appropriate static error checker.
+    OpStaticErrorChecker const* checkerFunc{nullptr};
+    if (importAsPlugin)
+    {
+        LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing this node as a plugin.");
+        checkerFunc = &opCheckers.at("FallbackPluginImporter");
+    }
+
+    if (!checkerFunc)
+    {
+        if (auto it = opCheckers.find(nodeType); it != opCheckers.end())
+        {
+            checkerFunc = &it->second;
+        }
+        else if (opImporters.count(nodeType))
+        {
+            // Internal error: op has an importer but no checker
+            std::string errorMsg = "No static checker was found for " + nodeType;
+            errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
+            return;
+        }
+        else if (ctx->localFunctions().count(nodeType))
+        {
+            LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
+            checkerFunc = &opCheckers.at("LocalFunctionImporter");
+        }
+        else
+        {
+            LOG_VERBOSE("No checker registered for op: " << nodeType << ". Attempting to check as plugin.");
+            checkerFunc = &opCheckers.at("FallbackPluginImporter");
+        }
+    }
+    if (!checkerFunc)
+    {
+        std::string errorMsg = "No static checker was found for " + nodeType;
+        errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
+        return;
+    }
+    (*checkerFunc)(ctx, node, errors, nodeIndex);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    bool deserializingINetwork, bool importAsPlugin)
 {
     // For nodes that contain subgraphs (Ifs, Loops, Scans, LocalFunctions), ensure that the recursion depth is
     // limited to a set amount. Recursion depth is tracked by the size of ctx->mBaseNameScopeStack().
@@ -325,18 +388,10 @@ void parseNode(
     NodeImporter const* importFunc{nullptr};
 
     // if the ENABLE_PLUGIN_OVERRIDE flag is set, then let the plugin override the standard ONNX operator
-    bool const pluginOverriding
-        = ctx->getFlags() & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_PLUGIN_OVERRIDE));
-    OnnxAttrs attrs(node, ctx);
-    bool const isPluginNode = attrs.count("plugin_namespace");
-
-    if (pluginOverriding || isPluginNode)
+    if (importAsPlugin)
     {
-        if (isNodeInPluginRegistry(ctx, node))
-        {
-            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing this node as a plugin.");
-            importFunc = &opImporters.at("FallbackPluginImporter");
-        }
+        LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing this node as a plugin.");
+        importFunc = &opImporters.at("FallbackPluginImporter");
     }
 
     if (!importFunc)
@@ -351,8 +406,9 @@ void parseNode(
             LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             importFunc = &opImporters.at("LocalFunctionImporter");
         }
-        else if (!pluginOverriding && !isPluginNode) // avoid to check Node in plugin registry again
+        else if (!importAsPlugin) // avoid to check Node in plugin registry again
         {
+            // the node without plugin-namespace attribute may still be registered as a plugin
             LOG_VERBOSE("No importer registered for op: " << nodeType << ". Attempting to import as plugin.");
             importFunc = &opImporters.at("FallbackPluginImporter");
         }
@@ -470,53 +526,6 @@ void parseNode(
     LOG_VERBOSE(ssOutputs.str());
 }
 
-void parseNodeStaticCheck(
-    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
-{
-    StringMap<OpStaticErrorChecker> const& opCheckers = getOpStaticErrorCheckerMap();
-    StringMap<NodeImporter> const& opImporters = getBuiltinOpImporterMap();
-    std::string const& nodeName = getNodeName(node);
-    std::string const& nodeType = node.op_type();
-    LOG_VERBOSE("Static check for parsing node: " << nodeName << " [" << nodeType << "]");
-
-    // Dispatch to appropriate static error checker.
-    OpStaticErrorChecker const* checkerFunc{nullptr};
-    if (opImporters.count(nodeType))
-    {
-        if (!opCheckers.count(nodeType))
-        {
-            std::string errorMsg = "No static checker was found for " + nodeType;
-            errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
-            return;
-        }
-        checkerFunc = &opCheckers.at(nodeType);
-    }
-    else if (opCheckers.count(nodeType))
-    {
-        checkerFunc = &opCheckers.at(nodeType);
-    }
-    else if (ctx->localFunctions().count(nodeType))
-    {
-        // Let plugin take precedence over local function. So first check if this can be dispatched to a plugin.
-        if (isNodeInPluginRegistry(ctx, node))
-        {
-            LOG_VERBOSE("Found registered plugin: " << nodeType << ". Importing local function as a plugin.");
-            checkerFunc = &opCheckers.at("FallbackPluginImporter");
-        }
-        else
-        {
-            LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
-            checkerFunc = &opCheckers.at("LocalFunctionImporter");
-        }
-    }
-    else
-    {
-        LOG_VERBOSE("No checker registered for op: " << nodeType << ". Attempting to check as plugin.");
-        checkerFunc = &opCheckers.at("FallbackPluginImporter");
-    }
-    (*checkerFunc)(ctx, node, errors, nodeIndex);
-}
-
 void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
     bool deserializingINetwork, int32_t* currentNode, int32_t subgraphParentIdx)
 {
@@ -532,13 +541,13 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
             ctx->registerTensor(TensorOrWeights{std::move(weights)}, initializer.name());
         }
     }
-    catch (const std::exception& e)
+    catch (std::exception const& e)
     {
         ONNXTRT_THROW(MAKE_ERROR(std::string("Failed to import initializer: ") + e.what(), ErrorCode::kINVALID_GRAPH));
     }
 
     // Keep track of graph outputs in the context to validate UINT8 nodes
-    for (const auto& output : graph.output())
+    for (auto const& output : graph.output())
     {
         ctx->getGraphOutputNames().push_back(output);
     }
@@ -556,14 +565,15 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
         // When parsing a subgraph, use the parent node index for error reporting.
         // This ensures errors in subgraphs (e.g., Loop body) report the correct main-graph node index.
         size_t const nodeIdxForErrors = (subgraphParentIdx >= 0) ? static_cast<size_t>(subgraphParentIdx) : nodeIndex;
-        parseNodeStaticCheck(ctx, graph.node(nodeIndex), errors, nodeIdxForErrors);
+        bool const importAsPlugin = shouldImportAsPlugin(ctx, graph.node(nodeIndex));
+        parseNodeStaticCheck(ctx, graph.node(nodeIndex), errors, nodeIdxForErrors, importAsPlugin);
 
         int32_t numPrevLayers = ctx->network()->getNbLayers();
         // Parse the node
         if (errors.size() == 0)
         {
             // At most one dynamic error will be returned.
-            parseNode(ctx, graph.node(nodeIndex), nodeIdxForErrors, deserializingINetwork);
+            parseNode(ctx, graph.node(nodeIndex), nodeIdxForErrors, deserializingINetwork, importAsPlugin);
         }
 
         // Validate DLA support if kREPORT_CAPABILITY_DLA flag is set.
@@ -700,7 +710,7 @@ bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t seri
         sub_graph_collection.clear();
 
         // SubGraphCollection uses size_t, while SubGraphSupportVector_t uses int64_t
-        for (const auto& pair : mSubGraphSupportVector)
+        for (auto const& pair : mSubGraphSupportVector)
         {
             bool subgraphSupports = pair.second;
 
@@ -798,7 +808,7 @@ bool ModelImporter::parseWithWeightDescriptors(
 }
 
 bool ModelImporter::parse(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path) noexcept
+    void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path) noexcept
 {
     ONNXTRT_TRY
     {
@@ -838,6 +848,7 @@ bool ModelImporter::parse(
     return false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void ModelImporter::importModel()
 {
     auto* ctx = &mImporterCtx;
@@ -1138,7 +1149,7 @@ bool ModelImporter::parseModelProto() noexcept
     return false;
 }
 
-bool ModelImporter::setBuilderConfig(const nvinfer1::IBuilderConfig* const builderConfig) noexcept
+bool ModelImporter::setBuilderConfig(nvinfer1::IBuilderConfig const* const builderConfig) noexcept
 {
     ONNXTRT_TRY
     {

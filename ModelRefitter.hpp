@@ -44,17 +44,18 @@ private:
     ::ONNX_NAMESPACE::ModelProto mOnnxModel;
 
     //! Counter to limit the recursion depth to a set amount for nodes containing subgraphs.
-    size_t nestedDepth{0};
+    size_t mNestedDepth{0};
 
-    //! Set to keep track of how many times a refittable name created by the parser shows up, to avoid duplicate naming in TRT.
-    //! Currently tracks the following nodes:
+    //! Set to keep track of how many times a refittable name created by the parser shows up, to avoid duplicate naming
+    //! in TRT. Currently tracks the following nodes:
     //!     1. BatchNorm - Parser pre-combines scales and bias weights for the IScaleLayer.
-    //!     2. ConstantOfShape - The value of the ConstantOfShape does not have a name, so the parser needs to create one for it.
+    //!     2. ConstantOfShape - The value of the ConstantOfShape does not have a name, so the parser needs to create
+    //!     one for it.
     std::set<std::string> mTempRefittableWeights;
     //! An increasing suffix counter used to uniquify refittable weight names created by the parser.
     int64_t mTempRefittableWeightsSuffixCounter{0};
 
-    size_t successfullyRefittedWeights{};
+    size_t mSuccessfullyRefittedWeights{};
     std::unordered_set<std::string> mRefittableWeights;
     std::unordered_set<std::string> mRefittedWeights;
 

@@ -1,4 +1,5 @@
 /*
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -47,8 +48,10 @@ typedef std::vector<SubGraph_t> SubGraphCollection_t;
 namespace nvonnxparser
 {
 
+//! \return the numerical value of the highest-valued enumerator for type T.
+//! It must be specialized for each enum type that uses it.
 template <typename T>
-constexpr inline int32_t EnumMax() noexcept;
+constexpr int32_t EnumMax() noexcept = delete;
 
 //!
 //! \enum ErrorCode
@@ -74,13 +77,9 @@ enum class ErrorCode : int
     kREFIT_FAILED = 14
 };
 
-//!
-//! Maximum number of flags in the ErrorCode enum.
-//!
-//! \see ErrorCode
-//!
+//! Specialization. See `nvonnxparser::EnumMax()` for details.
 template <>
-constexpr inline int32_t EnumMax<ErrorCode>() noexcept
+constexpr int32_t EnumMax<ErrorCode>() noexcept
 {
     return 14;
 }
@@ -91,7 +90,8 @@ constexpr inline int32_t EnumMax<ErrorCode>() noexcept
 //!
 //! \see IParser::setFlags() and IParser::getFlags()
 //!
-using OnnxParserFlags = uint32_t;
+using OnnxParserFlags
+    = uint32_t;
 
 enum class OnnxParserFlag : int32_t
 {
@@ -113,16 +113,14 @@ enum class OnnxParserFlag : int32_t
     //! even if the plugin namespace attribute is not set.
     //! Useful for custom plugins that replace standard ONNX operators, such as alternative implementations for better
     //! performance. This flag is set to be OFF by default.
-    kENABLE_PLUGIN_OVERRIDE = 3
+    kENABLE_PLUGIN_OVERRIDE = 3,
+    //! Opportunistically rewrite or modify layers to make them more amenable to running on DLA.
+    kADJUST_FOR_DLA = 4
 };
 
-//!
-//! Maximum number of flags in the OnnxParserFlag enum.
-//!
-//! \see OnnxParserFlag
-//!
+//! Specialization. See `nvonnxparser::EnumMax()` for details.
 template <>
-constexpr inline int32_t EnumMax<OnnxParserFlag>() noexcept
+constexpr int32_t EnumMax<OnnxParserFlag>() noexcept
 {
     return 3;
 }

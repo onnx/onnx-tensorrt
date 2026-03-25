@@ -105,7 +105,7 @@ public:
 
     Status getStatus() const noexcept;
 
-    virtual char const* what() const noexcept override;
+    char const* what() const noexcept override;
 
     virtual ~OnnxTrtException() {}
 };

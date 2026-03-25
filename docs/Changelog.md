@@ -2,6 +2,12 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 10.16 GA Release - 2026-3-24
+For more details, see the 10.16 GA release notes.
+
+- Added `kADJUST_FOR_DLA` flag to adjust parsing behavior for ONNX models to be more amenable for DLA hardware execution.
+- Added `DistCollective` operator support for multi-device execution in TensorRT.
+
 # TensorRT 10.15 GA Release - 2026-2-2
 For more details, see the 10.15 GA release notes
 

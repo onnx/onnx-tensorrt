@@ -16,7 +16,11 @@
 
 namespace onnx2trt
 {
-int64_t getFileSize(std::string const& file)
+
+namespace
+{
+//! \return The size of the file in bytes, or -1 if the file does not exist.
+[[nodiscard]] int64_t getFileSize(std::string const& file)
 {
     std::ifstream fileStream(file, std::ios::binary);
     if (!fileStream)
@@ -27,6 +31,7 @@ int64_t getFileSize(std::string const& file)
     std::streamsize fileSize = fileStream.tellg();
     return static_cast<int64_t>(fileSize);
 }
+} // namespace
 
 #ifdef _WIN32
 WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
@@ -105,15 +110,14 @@ void WeightsContext::clearMemoryMappings()
 #else
 WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
 {
-    auto* ctx = this; // For logging macros.
+    auto* const ctx = this; // For logging macros.
 
-    auto it = mMemoryMappings.find(file);
-    if (it != mMemoryMappings.end())
+    if (auto it = mMemoryMappings.find(file); it != mMemoryMappings.end())
     {
         return it->second;
     }
 
-    int64_t fileSize = getFileSize(file);
+    int64_t const fileSize = getFileSize(file);
 
     if (fileSize < 0L)
     {
@@ -139,8 +143,8 @@ WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
     }
 
     mMappedFiles[file] = fd;
-    mMemoryMappings[file] = std::make_pair(mappedAddr, fileSize);
-    return std::make_pair(mappedAddr, fileSize);
+    auto it = mMemoryMappings.insert_or_assign(file, MemoryMapping_t{mappedAddr, fileSize}).first;
+    return it->second;
 }
 
 void WeightsContext::clearMemoryMappings()

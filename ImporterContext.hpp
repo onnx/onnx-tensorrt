@@ -246,7 +246,7 @@ public:
     {
         mOpsets.emplace(domain, version);
     }
-    int64_t getOpsetVersion(const char* domain = "") const
+    int64_t getOpsetVersion(char const* domain = "") const
     {
         if (mOpsets.empty())
         {
@@ -276,7 +276,7 @@ public:
     {
         return mErrorWrapper ? mErrorWrapper->getErrorRecorder() : nullptr;
     }
-    nvinfer1::IConstantLayer* getConstantLayer(const char* name) const
+    nvinfer1::IConstantLayer* getConstantLayer(char const* name) const
     {
         if (name == nullptr)
         {
@@ -411,6 +411,7 @@ public:
     void checkDLASupport(int32_t numPrevLayers, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIndex);
 
     [[nodiscard]] bool getDLACapabilityMode() const;
+    [[nodiscard]] bool getAdjustForDLAMode() const;
 };
 
 typedef std::vector<TensorOrWeights> NodeOutputs;
