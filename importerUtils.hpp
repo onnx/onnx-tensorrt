@@ -271,9 +271,9 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
 // Helper function to return the identity of a TensorOrWeights
 TensorOrWeights identity(ImporterContext* ctx, TensorOrWeights input);
 
-// Helper function to create normalization layers for GroupNorm and InstanceNorm
+// Helper function to create normalization layers for GroupNorm and InstanceNorm.
 NodeOutputs normalizationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-    std::vector<TensorOrWeights>& inputs, bool const useV2);
+    std::vector<TensorOrWeights>& inputs, bool const useV2, bool const includeChannelAxis = false);
 
 // Given a list of axes in the range of [-rank, rank-1], where rank is the rank
 // of the corresponding data tensor, normalize to [0, rank-1].

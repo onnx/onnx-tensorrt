@@ -158,6 +158,7 @@ backend_test.include(r'.*test_resize.*custom.*')
 backend_test.include(r'.*test_split.*custom.*')
 backend_test.include(r'.*test_instancenorm_.*_custom.*')
 backend_test.include(r'.*test_slice.*custom.*')
+backend_test.include(r'.*test_group_normalization_.*')
 
 
 # exclude unenabled ops get pulled in with wildcards

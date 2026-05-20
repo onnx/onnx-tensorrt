@@ -2649,7 +2649,7 @@ DEFINE_BUILTIN_OP_IMPORTER(GreaterOrEqual)
 DEFINE_BUILTIN_OP_IMPORTER(GroupNormalization)
 {
     bool const useV2 = ctx->getOpsetVersion() >= 21;
-    return normalizationHelper(ctx, node, nodeIdx, inputs, useV2);
+    return normalizationHelper(ctx, node, nodeIdx, inputs, useV2, /*includeChannelAxis=*/true);
 }
 
 // singlePassShape is the shape of the output from a single pass.
