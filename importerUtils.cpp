@@ -1451,7 +1451,7 @@ nvinfer1::Dims makeDims(int32_t nbDims, int64_t val)
 }
 
 NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
-    std::vector<TensorOrWeights>& inputs, bool const useV2)
+    std::vector<TensorOrWeights>& inputs, bool const useV2, bool const includeChannelAxis)
 {
     auto* input = &convertToTensor(inputs.at(0), ctx);
     auto* scale = &convertToTensor(inputs.at(1), ctx);
@@ -1483,6 +1483,11 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
             axesMask |= 1 << i;
         }
         unsqueezeAxes.push_back(i);
+    }
+
+    if (includeChannelAxis && nbGroups == 1)
+    {
+        axesMask |= 1u << 1;
     }
 
     scale = unsqueezeTensor(ctx, *scale, unsqueezeAxes);
