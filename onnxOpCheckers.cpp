@@ -153,6 +153,22 @@ void emptyOutputChecker(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const&
     }
 }
 
+void squeezeUnsqueezeDLACheck(
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
+{
+    bool const hasNetworkInput = std::any_of(ctx->getGraphInputNames().begin(), ctx->getGraphInputNames().end(),
+        [&node](auto const& input) { return node.input(0) == input.name(); });
+    bool const hasNetworkOutput = std::any_of(ctx->getGraphOutputNames().begin(), ctx->getGraphOutputNames().end(),
+        [&node](auto const& output) { return node.output(0) == output.name(); });
+    if (hasNetworkInput && hasNetworkOutput)
+    {
+        std::ostringstream ssMsg{};
+        ssMsg << "This version of TensorRT doesn't support the graph pattern Input -> " << node.op_type()
+              << " -> Output on DLA.";
+        ADD_STATIC_ERROR(ssMsg.str(), ErrorCode::kUNSUPPORTED_NODE, node, nodeIndex, errors);
+    }
+}
+
 DEFINE_OP_EMPTY_CHECKER(Abs)
 
 DEFINE_OP_EMPTY_CHECKER(Acos)
@@ -184,6 +200,8 @@ DEFINE_OP_CHECKER(Attention)
 }
 
 DEFINE_OP_EMPTY_CHECKER(TRT_QuantizedAttention)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_Attention)
 
 DEFINE_OP_EMPTY_CHECKER(Add)
 
@@ -223,6 +241,7 @@ DEFINE_OP_CHECKER(Cast)
     STATIC_CHECK(convertDtype(onnxType, &newType) && "Unsupported data type for the Cast operator!",
         ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 }
+
 
 DEFINE_OP_EMPTY_CHECKER(CastLike)
 
@@ -277,6 +296,8 @@ DEFINE_OP_EMPTY_CHECKER(QuantizeLinear)
 
 DEFINE_OP_EMPTY_CHECKER(DequantizeLinear)
 
+
+DEFINE_OP_EMPTY_CHECKER(TRT_MoE)
 
 DEFINE_OP_CHECKER(DistCollective)
 {
@@ -477,6 +498,7 @@ DEFINE_OP_CHECKER(LayerNormalization)
 DEFINE_OP_EMPTY_CHECKER(LeakyRelu)
 
 DEFINE_OP_EMPTY_CHECKER(Less)
+
 
 DEFINE_OP_EMPTY_CHECKER(LessOrEqual)
 
@@ -831,17 +853,27 @@ DEFINE_OP_EMPTY_CHECKER(Split)
 
 DEFINE_OP_EMPTY_CHECKER(Sqrt)
 
-DEFINE_OP_EMPTY_CHECKER(Squeeze)
+DEFINE_OP_CHECKER(Squeeze)
+{
+    if (ctx->getAdjustForDLAMode())
+    {
+        squeezeUnsqueezeDLACheck(ctx, node, errors, nodeIndex);
+    }
+}
 
 DEFINE_OP_EMPTY_CHECKER(Sub)
 
 DEFINE_OP_EMPTY_CHECKER(Sum)
+
+DEFINE_OP_EMPTY_CHECKER(Swish)
 
 DEFINE_OP_EMPTY_CHECKER(Tan)
 
 DEFINE_OP_EMPTY_CHECKER(Tanh)
 
 DEFINE_OP_EMPTY_CHECKER(TensorScatter)
+
+DEFINE_OP_EMPTY_CHECKER(TRT_KVCacheUpdate)
 
 DEFINE_OP_EMPTY_CHECKER(ThresholdedRelu)
 
@@ -862,7 +894,13 @@ DEFINE_OP_EMPTY_CHECKER(Transpose)
 
 DEFINE_OP_EMPTY_CHECKER(Trilu)
 
-DEFINE_OP_EMPTY_CHECKER(Unsqueeze)
+DEFINE_OP_CHECKER(Unsqueeze)
+{
+    if (ctx->getAdjustForDLAMode())
+    {
+        squeezeUnsqueezeDLACheck(ctx, node, errors, nodeIndex);
+    }
+}
 
 DEFINE_OP_CHECKER(Upsample)
 {

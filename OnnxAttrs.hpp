@@ -5,7 +5,7 @@
 #pragma once
 
 #include <NvInfer.h>
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx-ml.pb.h>
 #include <unordered_map>
 #include <vector>
 

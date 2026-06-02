@@ -5,7 +5,7 @@
 #include "OnnxAttrs.hpp"
 #include "ShapedWeights.hpp"
 #include "importerUtils.hpp"
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx-ml.pb.h>
 
 bool isExternalAttribute(std::string const& key, onnx2trt::ImporterContext* ctx)
 {
@@ -382,6 +382,18 @@ nvinfer1::CollectiveOperation OnnxAttrs::get<nvinfer1::CollectiveOperation>(std:
     if (s == "reduce_scatter")
     {
         return nvinfer1::CollectiveOperation::kREDUCE_SCATTER;
+    }
+    if (s == "all_to_all")
+    {
+        return nvinfer1::CollectiveOperation::kALL_TO_ALL;
+    }
+    if (s == "gather")
+    {
+        return nvinfer1::CollectiveOperation::kGATHER;
+    }
+    if (s == "scatter")
+    {
+        return nvinfer1::CollectiveOperation::kSCATTER;
     }
     throw std::runtime_error("Unknown CollectiveOperation: " + s);
 }

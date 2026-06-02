@@ -99,16 +99,20 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
 {
     nvinfer1::ITensor* sqrtScale = nullptr;
 
+    // Use the tensor's actual rank so this works for both 4D padded BHND and 3D packed NHD tensors.
+    int32_t const nbDims = qkTensor.getDimensions().nbDims;
+
     if (attrs.count("scale"))
     {
         // Obtain the sqrt of scale as a constant (output of a constant layer).
-        nvinfer1::IConstantLayer* constant
-            = addConstantScalar(ctx, std::sqrt(attrs.get<float>("scale")), ::ONNX_NAMESPACE::TensorProto::FLOAT, 4);
+        nvinfer1::IConstantLayer* constant = addConstantScalar(
+            ctx, std::sqrt(attrs.get<float>("scale")), ::ONNX_NAMESPACE::TensorProto::FLOAT, nbDims);
         sqrtScale = castHelper(ctx, N_CHECK(constant)->getOutput(0), qkTensor.getType());
     }
     else
     {
-        ShapeTensor headSize = gather(ctx, shapeOf(qkTensor), shapeScalar(3));
+        // headSize is always the last dimension: dim 3 for 4D BHND, dim 2 for 3D NHD.
+        ShapeTensor headSize = gather(ctx, shapeOf(qkTensor), shapeScalar(nbDims - 1));
         nvinfer1::ITensor* headSizeF = castHelper(ctx, &headSize.tensor(ctx), qkTensor.getType());
 
         // By default, scale := 1/sqrt(headSize)
@@ -116,7 +120,9 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
         nvinfer1::ITensor* scale = getUnaryResult(ctx, *sqrtHeadSize, nvinfer1::UnaryOperation::kRECIP);
 
         sqrtScale = getUnaryResult(ctx, *scale, nvinfer1::UnaryOperation::kSQRT);
-        sqrtScale = unsqueezeTensor(ctx, *sqrtScale, {0, 1, 2, 3});
+        std::vector<int32_t> unsqueezeAxes(nbDims);
+        std::iota(unsqueezeAxes.begin(), unsqueezeAxes.end(), 0);
+        sqrtScale = unsqueezeTensor(ctx, *sqrtScale, unsqueezeAxes);
     }
 
     // Scale Q or K tensor by `sqrt(scale)`.
@@ -178,6 +184,44 @@ nvinfer1::AttentionNormalizationOp parseNormalizationOp(OnnxAttrs const& attrs)
     else
     {
         ONNXTRT_CHECK(false, "Unsupported normalization op: " << normalizationOp, ErrorCode::kINVALID_NODE);
+    }
+}
+
+nvinfer1::CausalMaskKind parseCausalKind(OnnxAttrs const& attrs)
+{
+    std::string const kind = attrs.get<std::string>("causal_kind", "none");
+    if (kind == "none")
+    {
+        return nvinfer1::CausalMaskKind::kNONE;
+    }
+    else if (kind == "upper_left")
+    {
+        return nvinfer1::CausalMaskKind::kUPPER_LEFT;
+    }
+    else if (kind == "lower_right")
+    {
+        return nvinfer1::CausalMaskKind::kLOWER_RIGHT;
+    }
+    else
+    {
+        ONNXTRT_CHECK(false, "Unsupported causal_kind: " << kind, ErrorCode::kINVALID_NODE);
+    }
+}
+
+nvinfer1::AttentionIOForm parseIOForm(OnnxAttrs const& attrs, std::string const& attrName)
+{
+    std::string form = attrs.get<std::string>(attrName, "padded_bhnd");
+    if (form == "padded_bhnd")
+    {
+        return nvinfer1::AttentionIOForm::kPADDED_BHND;
+    }
+    else if (form == "packed_nhd")
+    {
+        return nvinfer1::AttentionIOForm::kPACKED_NHD;
+    }
+    else
+    {
+        ONNXTRT_CHECK(false, "Unsupported IO form: " << form, ErrorCode::kINVALID_NODE);
     }
 }
 

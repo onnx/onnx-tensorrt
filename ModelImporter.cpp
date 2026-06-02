@@ -16,6 +16,7 @@
 
 #include <functional>
 #include <limits>
+#include <optional>
 #include <sys/stat.h>
 #include <unordered_set>
 
@@ -153,85 +154,92 @@ void ModelImporter::logErrors()
 
 void ModelImporter::reportSubgraphs()
 {
-    int32_t error_node = -1;
-    std::string input_node{};
+    std::set<int32_t> errorNodes{};
+    std::set<std::string> unsupportedInputNames{};
 
-    bool allSupported = getNbErrors() == 0;
-
-    if (!allSupported)
+    int32_t numErrors = getNbErrors();
+    for (int32_t i = 0; i < numErrors; ++i)
     {
-        int32_t nerror = getNbErrors();
-        for (int32_t i = 0; i < nerror; ++i)
+        nvonnxparser::IParserError const* error = N_CHECK(getError(i));
+        int32_t errorNodeIdx = error->node();
+        if (errorNodeIdx != -1)
         {
-            nvonnxparser::IParserError const* error = getError(i);
-            if (error->node() != -1)
-            {
-                error_node = error->node();
-                allSupported = false;
-            }
-            // The node that we failed on is one of the input nodes (-1). Get the name of the input node
-            // that we failed on and remove all nodes that spawn out of it.
-            else
-            {
-                // Node name is extracted through error->file as all errors thrown on input nodes are wrapped
-                // around MAKE_INPUT_ERROR.
-                input_node = error->file();
-            }
+            errorNodes.insert(errorNodeIdx);
+        }
+        // Error node index of -1 indicates that it's an input tensor that's unsupported. Track the name of the input
+        // tensor so that we can mark all consumer nodes as unsupported.
+        else
+        {
+            // Input name is extracted through error->file as all errors thrown on input tensors are wrapped
+            // around the macro MAKE_INPUT_ERROR.
+            unsupportedInputNames.insert(error->file());
         }
     }
+
     auto* ctx = &mImporterCtx;
-    auto checkForInput = [&input_node, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
-        for (auto input : node.input())
-        {
-            if (input_node == input || ctx->loopTensors()[input_node] == input)
+
+    // Returns whether the provided node contains an input tensor that's being tracked in unsupportedInputNames.
+    // Checks node inputs and loop inputs.
+    auto checkForInput = [&unsupportedInputNames, &ctx](::ONNX_NAMESPACE::NodeProto const& node) {
+        auto const loopTensors = ctx->loopTensors();
+        auto findLoopTensor = [&unsupportedInputNames, &loopTensors]() -> std::optional<std::string> {
+            for (auto const& k : unsupportedInputNames)
             {
-                return true;
+                auto it = loopTensors.find(k);
+                if (it != loopTensors.end())
+                {
+                    return it->second;
+                }
             }
-        }
-        return false;
+            return std::nullopt;
+        };
+        auto&& nodeInput = node.input();
+        return std::any_of(nodeInput.begin(), nodeInput.end(), [&](auto const& input) {
+            auto loopInput = findLoopTensor();
+            return unsupportedInputNames.count(input) || (loopInput.has_value() && *loopInput == input);
+        });
     };
 
     bool newSubGraph(true);
 
     // Sort and partition supported subgraphs
-    std::vector<size_t> topological_order;
-    if (!toposort(mOnnxModel.graph().node(), &topological_order))
+    std::vector<size_t> topologicalOrder;
+    if (!toposort(mOnnxModel.graph().node(), &topologicalOrder))
     {
         LOG_ERROR("Failed to sort model topologically");
         return;
     }
 
     mSubGraphSupportVector.clear();
-    for (int32_t node_idx : topological_order)
+    for (int32_t nodeIdx : topologicalOrder)
     {
-        ::ONNX_NAMESPACE::NodeProto const& node = mOnnxModel.graph().node(node_idx);
+        ::ONNX_NAMESPACE::NodeProto const& node = mOnnxModel.graph().node(nodeIdx);
         // Add the node to the subgraph if:
         //     1. It is not directly connected to an unsupported input
-        //     2. The importer function did not throw an assertion
-        bool unsupportedInput = !input_node.empty() && checkForInput(node);
-        bool unsuccessfulParse = node_idx == error_node;
+        //     2. An error was not reported when attempting to parse the node.
+        bool unsupportedInput = checkForInput(node);
+        bool unsuccessfulParse = errorNodes.count(nodeIdx);
         if (!unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
             {
                 // If it is the beginning of a new subGraph, we start a new vector
                 mSubGraphSupportVector.emplace_back();
-                // Mark all new graphs as "unknown"
+                // Mark all new graphs as unsupported since the parser never got that far.
                 mSubGraphSupportVector.back().second = false;
                 newSubGraph = false;
             }
             // We add the new node to the last graph
-            mSubGraphSupportVector.back().first.emplace_back(node_idx);
+            mSubGraphSupportVector.back().first.emplace_back(nodeIdx);
         }
         else
         {
-            // This is not a supported node, reset newSubGraph
+            // This is an unsupported node, reset newSubGraph
             newSubGraph = true;
-            allSupported = false;
         }
     }
-    // Only one subgraph, mark it as true.
-    if (allSupported && mSubGraphSupportVector.size() == 1)
+    // Only one subgraph without any reported errors. Mark it as true.
+    if (numErrors == 0 && mSubGraphSupportVector.size() == 1)
     {
         mSubGraphSupportVector.back().second = true;
     }
@@ -354,14 +362,17 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
     }
     LOG_VERBOSE(ssInputs.str());
 
-    // UINT8 weights that are not Q/DQ inputs will be converted to INT32
-    // If the UINT8 quantization flag is enabled, constants with UINT8 will also be permitted.
+    // UINT8 weights that are not Q/DQ inputs will be converted to INT32.
+    // If the UINT8 quantization flag is enabled, constants (or identities with constant initializers) with UINT8 will
+    // also be permitted.
+    // Note that such identities are allowed only if their outputs are network outputs (enforced later).
     uint32_t uint8AsymmetricQuantizationFlag = 1U
         << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
-    bool allowUint8Quantization = ctx->getFlags() & uint8AsymmetricQuantizationFlag;
+    bool const allowUint8Quantization = ctx->getFlags() & uint8AsymmetricQuantizationFlag;
+    bool const isConstantIdentity = node.op_type() == "Identity" && nodeInputs.at(0).is_weights();
 
     bool skipUInt8Conversion = (node.op_type() == "QuantizeLinear" || node.op_type() == "DequantizeLinear"
-        || (allowUint8Quantization && node.op_type() == "Constant"));
+        || (allowUint8Quantization && (node.op_type() == "Constant" || isConstantIdentity)));
     skipUInt8Conversion
         |= (node.op_type() == "TRT_MXFP8QuantizeLinear" || node.op_type() == "TRT_MXFP8DequantizeLinear");
 
@@ -526,6 +537,55 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
     LOG_VERBOSE(ssOutputs.str());
 }
 
+namespace
+{
+
+//! Collect all tensor names referenced in \p subgraph that are not defined within it.
+//! These are outer-scope references that the parent node implicitly depends on.
+void collectSubgraphOuterScopeRefs(
+    ::ONNX_NAMESPACE::GraphProto const& subgraph, std::unordered_set<std::string>& outerRefs)
+{
+    std::unordered_set<std::string> localTensors;
+    for (auto const& init : subgraph.initializer())
+    {
+        localTensors.insert(init.name());
+    }
+    for (auto const& input : subgraph.input())
+    {
+        localTensors.insert(input.name());
+    }
+    for (auto const& node : subgraph.node())
+    {
+        for (auto const& output : node.output())
+        {
+            if (!output.empty())
+            {
+                localTensors.insert(output);
+            }
+        }
+    }
+    for (auto const& node : subgraph.node())
+    {
+        for (auto const& input : node.input())
+        {
+            if (!input.empty() && !localTensors.count(input))
+            {
+                outerRefs.insert(input);
+            }
+        }
+        // Recurse into nested subgraphs (e.g. nested If/Loop nodes).
+        for (auto const& attr : node.attribute())
+        {
+            if (attr.type() == ::ONNX_NAMESPACE::AttributeProto::GRAPH)
+            {
+                collectSubgraphOuterScopeRefs(attr.g(), outerRefs);
+            }
+        }
+    }
+}
+
+} // namespace
+
 void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
     bool deserializingINetwork, int32_t* currentNode, int32_t subgraphParentIdx)
 {
@@ -546,15 +606,42 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
         ONNXTRT_THROW(MAKE_ERROR(std::string("Failed to import initializer: ") + e.what(), ErrorCode::kINVALID_GRAPH));
     }
 
+    // Keep track of graph inputs in the context to validate DLA squeeze / unsqueeze nodes.
+    for (auto const& input : graph.input())
+    {
+        ctx->getGraphInputNames().push_back(input);
+    }
     // Keep track of graph outputs in the context to validate UINT8 nodes
     for (auto const& output : graph.output())
     {
         ctx->getGraphOutputNames().push_back(output);
     }
 
+    // Build extra dependency edges for nodes that have subgraph attributes (If, Loop, Scan).
+    // Nodes inside those subgraphs may reference outer-scope tensors that are produced by
+    // other nodes in this graph. The standard toposort only follows node.input() edges and
+    // therefore cannot see these implicit dependencies. We collect them here so that the
+    // topological sort places their producers before the node that owns the subgraph.
+    std::unordered_map<size_t, std::vector<std::string>> subgraphOuterDeps;
+    for (int32_t i = 0; i < graph.node_size(); ++i)
+    {
+        for (auto const& attr : graph.node(i).attribute())
+        {
+            if (attr.type() == ::ONNX_NAMESPACE::AttributeProto::GRAPH)
+            {
+                std::unordered_set<std::string> outerRefs;
+                collectSubgraphOuterScopeRefs(attr.g(), outerRefs);
+                for (auto const& ref : outerRefs)
+                {
+                    subgraphOuterDeps[static_cast<size_t>(i)].push_back(ref);
+                }
+            }
+        }
+    }
+
     std::vector<size_t> topoOrder;
-    ONNXTRT_CHECK(
-        toposort(graph.node(), &topoOrder), "Failed to sort the model topologically.", ErrorCode::kINVALID_GRAPH);
+    ONNXTRT_CHECK(toposort(graph.node(), &topoOrder, subgraphOuterDeps), "Failed to sort the model topologically.",
+        ErrorCode::kINVALID_GRAPH);
 
     for (auto const& nodeIndex : topoOrder)
     {
@@ -587,7 +674,7 @@ void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
     if (errors.size() != 0)
     {
         auto result = errors.back();
-        errors.pop_back(); // this error will be added back to the list in ModelImporter::parseWithWeightDescriptors.
+        errors.pop_back(); // this error will be added back to the list in ModelImporter::parse.
 
         ONNXTRT_THROW(result);
     }
@@ -700,32 +787,6 @@ void importLocalFunctions(ImporterContext* ctx, ::ONNX_NAMESPACE::ModelProto con
     }
 }
 
-bool ModelImporter::supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-    SubGraphCollection_t& sub_graph_collection, char const* model_path) noexcept
-{
-    ONNXTRT_TRY
-    {
-        bool supports = parse(serialized_onnx_model, serialized_onnx_model_size, model_path);
-        reportSubgraphs();
-        sub_graph_collection.clear();
-
-        // SubGraphCollection uses size_t, while SubGraphSupportVector_t uses int64_t
-        for (auto const& pair : mSubGraphSupportVector)
-        {
-            bool subgraphSupports = pair.second;
-
-            std::vector<int64_t> const& subgraphNodes = pair.first;
-            std::vector<size_t> subgraphNodesRet(subgraphNodes.begin(), subgraphNodes.end());
-
-            // Create a new pair and add it to vector b
-            sub_graph_collection.push_back(std::make_pair(subgraphNodesRet, subgraphSupports));
-        }
-        return supports;
-    }
-    ONNXTRT_CATCH_RECORD
-    return false;
-}
-
 bool ModelImporter::supportsModelV2(
     void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path) noexcept
 {
@@ -789,18 +850,6 @@ bool ModelImporter::supportsOperator(char const* op_name) const noexcept
     ONNXTRT_TRY
     {
         return _op_importers.count(op_name);
-    }
-    ONNXTRT_CATCH_RECORD
-
-    return false;
-}
-
-bool ModelImporter::parseWithWeightDescriptors(
-    void const* serialized_onnx_model, size_t serialized_onnx_model_size) noexcept
-{
-    ONNXTRT_TRY
-    {
-        return parse(serialized_onnx_model, serialized_onnx_model_size, nullptr);
     }
     ONNXTRT_CATCH_RECORD
 
@@ -929,9 +978,10 @@ void ModelImporter::importModel()
         // For INT32 data type, output type must match tensor type
         ONNXTRT_CHECK((output_tensor_ptr->getType() != nvinfer1::DataType::kINT32
                           || output_trt_dtype == nvinfer1::DataType::kINT32),
-            "For INT32 tensors, the output type must also be INT32.", ErrorCode::kUNSUPPORTED_NODE);
-        // Note: Without this, output type is always float32
-        output_tensor_ptr->setType(output_trt_dtype);
+            "For output tensor " << output_tensor_ptr->getName() << ", the parsed type is "
+                                 << nvinfer1::DataType::kINT32 << " which does not match the ONNX specification type "
+                                 << output_trt_dtype << ".",
+            ErrorCode::kUNSUPPORTED_NODE);
         if (output_trt_dtype == nvinfer1::DataType::kINT64)
         {
             LOG_WARNING("Make sure output " << output.name() << " has Int64 binding.");
@@ -989,27 +1039,6 @@ void ModelImporter::importModel()
             tensors.at(tensor.first)->setLocation(tensor.second);
         }
         // Set dynamic range for all tensors
-        for (auto const& tensor : ctx->tensorRangeMins())
-        {
-            // if there's a min range, there must be a max range as well
-            ONNXTRT_CHECK((tensors.count(tensor.first) > 0), "The tensor does not have its dynamic range set.",
-                nvonnxparser::ErrorCode::kINVALID_GRAPH);
-            if (!std::isnan(tensor.second))
-            {
-                tensors.at(tensor.first)->setDynamicRange(tensor.second, ctx->tensorRangeMaxes().at(tensor.first));
-            }
-        }
-        // Avoid setting layer precision if graph is strongly typed.
-        if (!ctx->network()->getFlag(nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED))
-        {
-            // Set precisions for all layers.
-            for (auto const& layer : ctx->layerPrecisions())
-            {
-                ONNXTRT_CHECK((layers.count(layer.first) > 0), "The layer does not have an assigned precision.",
-                    nvonnxparser::ErrorCode::kINVALID_GRAPH);
-                layers.at(layer.first)->setPrecision(layer.second);
-            }
-        }
     }
 
     // Regenerate the plugin library list

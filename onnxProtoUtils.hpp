@@ -7,7 +7,7 @@
 #include "Status.hpp"
 #include "errorHelpers.hpp"
 #include <iostream>
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx-ml.pb.h>
 #include <sstream>
 
 #include <fstream>

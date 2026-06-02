@@ -8,7 +8,7 @@
 #include "Status.hpp"
 #include "WeightsContext.hpp"
 #include "errorHelpers.hpp"
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx-ml.pb.h>
 #include <set>
 #include <string>
 #include <unordered_set>

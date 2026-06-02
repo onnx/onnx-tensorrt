@@ -96,6 +96,28 @@ nvinfer1::ITensor& convertToMaskTensor(TensorOrWeights& maskInput, ImporterConte
 nvinfer1::AttentionNormalizationOp parseNormalizationOp(OnnxAttrs const& attrs);
 
 //!
+//! \brief Parse the causal mask kind from the \p causal_kind string attribute.
+//!
+//! Supported values are "none" (kNONE), "upper_left" (kUPPER_LEFT), and "lower_right" (kLOWER_RIGHT).
+//! Defaults to "none" when the attribute is absent.
+//!
+//! \param attrs The attributes of the TRT_Attention node.
+//! \return nvinfer1::CausalMaskKind The parsed causal mask kind.
+//!
+nvinfer1::CausalMaskKind parseCausalKind(OnnxAttrs const& attrs);
+
+//!
+//! \brief Parse an AttentionIOForm from a string attribute.
+//!
+//! Supported values are "padded_bhnd" (kPADDED_BHND) and "packed_nhd" (kPACKED_NHD).
+//!
+//! \param attrs The attributes of the node.
+//! \param attrName The name of the attribute to parse.
+//! \return nvinfer1::AttentionIOForm The parsed IO form.
+//!
+nvinfer1::AttentionIOForm parseIOForm(OnnxAttrs const& attrs, std::string const& attrName);
+
+//!
 //! \brief Reshape the output tensor to the original input rank.
 //!
 //! \param tensor The output tensor to reshape.

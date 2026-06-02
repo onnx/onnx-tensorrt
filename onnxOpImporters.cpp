@@ -28,8 +28,10 @@
 #include <cstring> // For std::memcpy, std::memset
 #include <iostream>
 #include <iterator>
+#include <limits> // For std::numeric_limits
 #include <numeric> // For std::iota
 #include <sstream>
+#include <string_view>
 #include <tuple>
 #include <unordered_set>
 
@@ -128,7 +130,6 @@ bool onlySupportInt32TRTPlugin(std::string const& pluginName)
     static std::vector<std::string> const names = {
         "CustomQKVToContextPluginDynamic",
         "EfficientNMS_TRT",
-        "EfficientNMS_ONNX_TRT",
         "EfficientNMS_Implicit_TF_TRT",
         "EfficientNMS_Explicit_TF_TRT",
         "VoxelGeneratorPlugin",
@@ -283,6 +284,70 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_QuantizedAttention)
     if (hasAttnMask)
     {
         attention->setMask(convertToMaskTensor(inputs.at(3), ctx));
+    }
+
+    return {{attention->getOutput(0)}};
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(TRT_Attention)
+{
+    // TRT_Attention mirrors the TRT IAttention API directly: no implicit reshaping or scaling.
+    // The user must provide Q/K/V in the correct shape for the chosen IO form.
+    //
+    // Inputs: Q(0), K(1), V(2), mask(3, optional), query_lengths(4, optional), kv_lengths(5, optional).
+    ONNXTRT_CHECK_NODE(node.output().size() == 1, "TensorRT only supports Attention nodes with one output.", node,
+        nodeIdx, ErrorCode::kINVALID_NODE);
+
+    OnnxAttrs attrs(node, ctx);
+
+    // Parse attributes.
+    auto const queryForm = parseIOForm(attrs, "query_form");
+    auto const kvForm = parseIOForm(attrs, "kv_form");
+    nvinfer1::CausalMaskKind const causalKind = parseCausalKind(attrs);
+    nvinfer1::AttentionNormalizationOp const normOp = parseNormalizationOp(attrs);
+    bool const decomposable = static_cast<bool>(attrs.get<int64_t>("TRT_decomposable", 0));
+    int32_t const nbRanks = attrs.get<int32_t>("nb_rank", 1);
+
+    // Get inputs directly — no reshape or scale transforms.
+    nvinfer1::ITensor& query = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& key = convertToTensor(inputs.at(1), ctx);
+    nvinfer1::ITensor& value = convertToTensor(inputs.at(2), ctx);
+    bool const hasAttnMask = inputs.size() > 3 && !inputs.at(3).isNullTensor();
+
+    // Add the Attention layer.
+    nvinfer1::IAttention* attention = N_CHECK(ctx->network()->addAttentionV2(query, key, value, normOp, causalKind));
+    ctx->registerAttention(attention, node);
+    attention->setDecomposable(decomposable);
+    ONNXTRT_CHECK_NODE(
+        attention->setQueryForm(queryForm), "Failed to set query form.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK_NODE(
+        attention->setKeyValueForm(kvForm), "Failed to set key-value form.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    if (nbRanks > 1)
+    {
+        attention->setNbRanks(nbRanks);
+    }
+
+    if (hasAttnMask)
+    {
+        ONNXTRT_CHECK_NODE(attention->setMask(convertToMaskTensor(inputs.at(3), ctx)), "Failed to set mask.", node,
+            nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
+    // Handle optional length inputs.
+    bool const hasQueryLengths = inputs.size() > 4 && !inputs.at(4).isNullTensor();
+    bool const hasKVLengths = inputs.size() > 5 && !inputs.at(5).isNullTensor();
+
+    if (hasQueryLengths)
+    {
+        ONNXTRT_CHECK_NODE(attention->setQueryLengths(
+                               castHelper(ctx, &convertToTensor(inputs.at(4), ctx), nvinfer1::DataType::kINT32)),
+            "Failed to set query lengths.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+    if (hasKVLengths)
+    {
+        ONNXTRT_CHECK_NODE(attention->setKeyValueLengths(
+                               castHelper(ctx, &convertToTensor(inputs.at(5), ctx), nvinfer1::DataType::kINT32)),
+            "Failed to set key-value lengths.", node, nodeIdx, ErrorCode::kINVALID_NODE);
     }
 
     return {{attention->getOutput(0)}};
@@ -569,8 +634,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Cast)
     // Get data type to cast to. Ignore "saturate" attribute as TRT will reject casts to FP8.
     auto onnxType = attrs.get<int32_t>("to");
     DataType newType{DataType::kFLOAT};
-    LOG_VERBOSE("Casting to type: " << newType);
     ONNXTRT_CHECK_NODE(convertDtype(onnxType, &newType), "Unsupported cast!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    LOG_VERBOSE("Casting to type: " << newType);
 
     // Add the layer.
     nvinfer1::ICastLayer* layer = N_CHECK(ctx->network()->addCast(tensor, newType));
@@ -1638,13 +1703,6 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             precision == DataType::kFLOAT || precision == DataType::kHALF || precision == DataType::kBF16,
             "Attribute precision specifies an invalid data type for QuantizeLinear " << precision << ".", node, nodeIdx,
             nvonnxparser::ErrorCode::kINVALID_NODE);
-
-        DataType trtPrecisionType = isMX ? inputType : scaleType;
-        if (precision != trtPrecisionType)
-        {
-            LOG_WARNING("TensorRT does not support setting quantization precision, the precision will be set to "
-                << trtPrecisionType << ".");
-        }
     }
 
     auto checkQuantizationDatatype = [&node, &nodeIdx, enableUInt8AsymmetricQuantization](DataType dtype) {
@@ -1663,7 +1721,12 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     {
         // ONNX spec definition is that when zero point is set, use its datatype for quantization
         DataType zeroPointDataType = inputs.at(2).getDataType();
-        ONNXTRT_CHECK_NODE(!isOutputDtypeSet || outputDtype == zeroPointDataType,
+        // For QuantizeLinear, output_dtype should match zero_point type.
+        // For DequantizeLinear, output_dtype specifies the dequantized output type (FP16/FP32),
+        // which is different from zero_point type (INT8/UINT8), so this check doesn't apply.
+        // See: https://onnx.ai/onnx/operators/text_diff_QuantizeLinear_19_21.html (opset 21)
+        //      https://onnx.ai/onnx/operators/text_diff_DequantizeLinear_21_23.html (opset 23)
+        ONNXTRT_CHECK_NODE(!isOutputDtypeSet || isDQ || outputDtype == zeroPointDataType,
             "Mismatch between attribute output_dtype " << outputDtype << " and zero-point data type "
                                                        << zeroPointDataType << ".",
             node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
@@ -1725,7 +1788,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             {
                 ONNXTRT_CHECK_NODE(shiftIsAllZeros(zeroPoint),
                     "Non-zero zero point is not supported. Please set kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA"
-                    "to enable asymmetric quantization if it is on DLA.",
+                    " to enable asymmetric quantization if it is on DLA.",
                     node, nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
                 // Convert the zero-point to float because TRT uses float for zero-point. Note this zero-point is
                 // not refittable because refit need the same data type as builder time.
@@ -1836,60 +1899,29 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     checkQuantizationDatatype(chosenDataType);
 
     bool stronglyTyped = ctx->isStronglyTyped();
-    if (!stronglyTyped && chosenDataType != DataType::kINT8)
-    {
-        LOG_WARNING(
-            "A strongly typed network is recommended for networks with QuantizedLinear/DequantizedLinear nodes using "
-            "precisions other than int8.");
-    }
     if (isDQ)
     {
         // Add and configure a DequantizeLayer.
         outputDtype = isOutputDtypeSet ? outputDtype : (isMX ? DataType::kFLOAT : scaleType);
-        if (stronglyTyped)
         {
-            // Input type is inferred. Layer output type is specified with scaleType.
             nvinfer1::IDequantizeLayer* dq
                 = N_CHECK(ctx->network()->addDequantize(*dataInput, *scaleInput, outputDtype));
             dq->setAxis(axis);
             layer = dq;
         }
-        else
-        {
-            // Use legacy API for weakly typed network.
-            nvinfer1::IDequantizeLayer* dq = N_CHECK(ctx->network()->addDequantize(*dataInput, *scaleInput));
-            dq->setAxis(axis);
-            layer = dq;
-            // Type constraint for layer output type.
-            layer->setOutputType(0, outputDtype);
-        }
     }
     else
     {
         // Add and configure a QuantizeLayer.
-        if (stronglyTyped)
         {
-            if (ctx->getOpsetVersion() < 19 && scaleInput->getType() != inputType)
+            if (stronglyTyped && ctx->getOpsetVersion() < 19 && scaleInput->getType() != inputType)
             {
-                // Ensure that Q scale type matches input type.
                 auto* scaleCastLayer = N_CHECK(ctx->network()->addCast(*scaleInput, inputType));
                 scaleInput = N_CHECK(scaleCastLayer->getOutput(0));
             }
-            // Input type is inferred. Layer output type is specified with chosenDataType.
             nvinfer1::IQuantizeLayer* q = N_CHECK(ctx->network()->addQuantize(*dataInput, *scaleInput, chosenDataType));
             q->setAxis(axis);
             layer = q;
-        }
-        else
-        {
-            // Use legacy API for weakly typed network.
-            nvinfer1::IQuantizeLayer* q = N_CHECK(ctx->network()->addQuantize(*dataInput, *scaleInput));
-            q->setAxis(axis);
-            layer = q;
-            // This implicitly sets layer input type.
-            layer->setPrecision(isPrecisionSet ? precision : (isMX ? DataType::kFLOAT : scaleType));
-            // Type constraint for layer output type.
-            layer->setOutputType(0, chosenDataType);
         }
     }
 
@@ -2543,11 +2575,22 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
 
     nvinfer1::ITensor* matmulTensor = N_CHECK(matmul->getOutput(0));
 
+    auto makeScalar = [&](nvinfer1::ITensor* t, float val) -> nvinfer1::IConstantLayer* {
+        switch (t->getType())
+        {
+        case nvinfer1::DataType::kHALF:
+            return addConstantScalar(
+                ctx, static_cast<half_float::half>(val), ::ONNX_NAMESPACE::TensorProto::FLOAT16, getNbDims(t));
+        case nvinfer1::DataType::kBF16:
+            return addConstantScalar(ctx, BFloat16(val), ::ONNX_NAMESPACE::TensorProto::BFLOAT16, getNbDims(t));
+        default: return addConstantScalar(ctx, val, ::ONNX_NAMESPACE::TensorProto::FLOAT, getNbDims(t));
+        }
+    };
+
     // Scale A*B if needed.
     if (alpha != 1.f)
     {
-        nvinfer1::IConstantLayer* alphaConstant
-            = addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, getNbDims(matmulTensor));
+        nvinfer1::IConstantLayer* alphaConstant = makeScalar(matmulTensor, alpha);
         nvinfer1::ITensor* alphaConstantTensor = N_CHECK(alphaConstant->getOutput(0));
         nvinfer1::IElementWiseLayer* scaledMatmul = N_CHECK(
             ctx->network()->addElementWise(*alphaConstantTensor, *matmulTensor, nvinfer1::ElementWiseOperation::kPROD));
@@ -2563,8 +2606,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Gemm)
         // Scale C if needed
         if (beta != 1.f)
         {
-            nvinfer1::IConstantLayer* betaConstant
-                = addConstantScalar(ctx, beta, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, getNbDims(biasTensor));
+            nvinfer1::IConstantLayer* betaConstant = makeScalar(biasTensor, beta);
             nvinfer1::ITensor* betaConstantTensor = N_CHECK(betaConstant->getOutput(0));
             nvinfer1::IElementWiseLayer* scaledBias = N_CHECK(ctx->network()->addElementWise(
                 *betaConstantTensor, *biasTensor, nvinfer1::ElementWiseOperation::kPROD));
@@ -3459,18 +3501,6 @@ DEFINE_BUILTIN_OP_IMPORTER(LayerNormalization)
 
     auto* layer = N_CHECK(ctx->network()->addNormalizationV2(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
-    auto const stronglyTyped = ctx->isStronglyTyped();
-    if (!stronglyTyped)
-    {
-        layer->setComputePrecision(computeType);
-    }
-    // DLA supprts FP32 IO for LayerNorm, but not FP32 compute precision.
-    // Since DLA is only used with weakly typed mode, auto-downgrading the default compute precision (FP32) to FP16.
-    if (ctx->getAdjustForDLAMode())
-    {
-        layer->setComputePrecision(nvinfer1::DataType::kHALF);
-    }
-
     ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -5000,6 +5030,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceL2)
         RETURN_IDENTITY(inputs.at(0), node, nodeIdx);
     }
 
+
     auto sum_sqr_result = importReduceSumSquare(ctx, node, nodeIdx, inputs);
     TensorOrWeights sum_sqr = sum_sqr_result.at(0);
     return unaryHelper(ctx, node, nodeIdx, sum_sqr, nvinfer1::UnaryOperation::kSQRT);
@@ -5432,7 +5463,8 @@ DEFINE_BUILTIN_OP_IMPORTER(RotaryEmbedding)
     nvinfer1::ITensor* cosCache = &convertToTensor(inputs.at(1), ctx);
     nvinfer1::ITensor* sinCache = &convertToTensor(inputs.at(2), ctx);
 
-    auto layer = N_CHECK(ctx->network()->addRotaryEmbedding(*input, *cosCache, *sinCache, interleaved, rotaryEmbeddingDim));
+    auto layer
+        = N_CHECK(ctx->network()->addRotaryEmbedding(*input, *cosCache, *sinCache, interleaved, rotaryEmbeddingDim));
     ctx->registerLayer(layer, node);
 
     if (inputs.size() > 3)
@@ -6653,6 +6685,36 @@ DEFINE_BUILTIN_OP_IMPORTER(Sum)
     return elementwiseHelper(ctx, node, nodeIdx, inputs, nvinfer1::ElementWiseOperation::kSUM);
 }
 
+DEFINE_BUILTIN_OP_IMPORTER(Swish)
+{
+    // Swish is implemented as x * sigmoid(alpha * x)
+    OnnxAttrs attrs(node, ctx);
+    float alpha = attrs.get<float>("alpha", 1.F);
+
+    // Input: X
+    nvinfer1::ITensor* x = &convertToTensor(inputs.at(0), ctx);
+
+    // Ensure alpha is the same type and broadcastable to X
+    auto* alphaTensor = N_CHECK(addConstantScalar(ctx, alpha, ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, 1)->getOutput(0));
+    auto* alphaCasted = castHelper(ctx, alphaTensor, x->getType());
+    broadcastTensors(ctx, alphaCasted, x);
+
+    // Perform alpha * x
+    auto* alphaMulXLayer = N_CHECK(ctx->network()->addElementWise(*alphaCasted, *x, nvinfer1::ElementWiseOperation::kPROD));
+    ctx->registerLayer(alphaMulXLayer, node);
+    auto* alphaMulX = N_CHECK(alphaMulXLayer->getOutput(0));
+
+    // Perform sigmoid(alpha * x)
+    auto* sigmoidLayer = N_CHECK(ctx->network()->addActivation(*alphaMulX, nvinfer1::ActivationType::kSIGMOID));
+    ctx->registerLayer(sigmoidLayer, node);
+    auto* sigmoid = N_CHECK(sigmoidLayer->getOutput(0));
+
+    // Perform x * sigmoid(alpha * x)
+    auto* swishLayer = N_CHECK(ctx->network()->addElementWise(*x, *sigmoid, nvinfer1::ElementWiseOperation::kPROD));
+    ctx->registerLayer(swishLayer, node);
+    RETURN_FIRST_OUTPUT(swishLayer, node, nodeIdx);
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Tan)
 {
     return unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kTAN);
@@ -6715,6 +6777,85 @@ DEFINE_BUILTIN_OP_IMPORTER(TensorScatter)
     // Create KVCacheUpdate layer
     auto* layer = N_CHECK(ctx->network()->addKVCacheUpdate(cache, update, *writeIndices, cacheMode));
     ctx->registerLayer(layer, node);
+    RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(TRT_KVCacheUpdate)
+{
+    OnnxAttrs attrs(node, ctx);
+
+    auto const cacheDims = inputs.at(0).shape().nbDims;
+    auto const updateDims = inputs.at(1).shape().nbDims;
+
+    // Parse the update form attribute (no TRT_ prefix since op is already TRT-namespaced).
+    auto const updateForm = parseIOForm(attrs, "update_form");
+
+    // past_cache must always be 4D (batch_size, num_heads, sequence_length, head_size).
+    ONNXTRT_CHECK_NODE(cacheDims == 4, "The past_cache tensor is required to be 4D, got " << cacheDims << "D.", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    if (updateForm == nvinfer1::AttentionIOForm::kPADDED_BHND)
+    {
+        ONNXTRT_CHECK_NODE(updateDims == 4,
+            "The update tensor is required to be 4D for padded form, got " << updateDims << "D.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+        ONNXTRT_CHECK_NODE(updateDims == 3,
+            "The update tensor is required to be 3D for packed form, got " << updateDims << "D.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    // Convert inputs to tensors
+    nvinfer1::ITensor& cache = convertToTensor(inputs.at(0), ctx);
+    nvinfer1::ITensor& update = convertToTensor(inputs.at(1), ctx);
+
+    // Get the axis attribute
+    auto axis = attrs.get<int32_t>("axis", -2);
+    if (axis > 0)
+    {
+        axis -= cacheDims;
+    }
+    ONNXTRT_CHECK_NODE(
+        axis == -2, "Sequence dimension must be -2, got " << axis, node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+    // Get the mode attribute
+    auto const mode = attrs.get<std::string>("mode", "linear");
+    ONNXTRT_CHECK_NODE(mode == "linear", "Only linear mode is supported for now, got " << mode, node, nodeIdx,
+        ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::KVCacheMode cacheMode = nvinfer1::KVCacheMode::kLINEAR;
+
+    // Handle optional write_indices input (index 2)
+    nvinfer1::ITensor* writeIndices{nullptr};
+    if (inputs.size() >= 3 && !inputs.at(2).isNullTensor())
+    {
+        writeIndices = castHelper(ctx, &convertToTensor(inputs.at(2), ctx), DataType::kINT32);
+    }
+    else
+    {
+        // Create default write_indices: [batch_size] filled with zeros
+        auto const cacheShape = shapeOf(cache);
+        auto const batchSize = gather(ctx, cacheShape, shapeVector(0));
+        writeIndices = constantOfShape(ctx,
+            N_CHECK(addConstantScalar(ctx, 0, ::ONNX_NAMESPACE::TensorProto_DataType_INT32, 1)->getOutput(0)),
+            &batchSize.tensor(ctx));
+    }
+
+    // Create KVCacheUpdate layer
+    auto* layer = N_CHECK(ctx->network()->addKVCacheUpdate(cache, update, *writeIndices, cacheMode));
+    ctx->registerLayer(layer, node);
+
+    // Set update form and optional update_lengths.
+    ONNXTRT_CHECK_NODE(
+        layer->setUpdateForm(updateForm), "Failed to set update form.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    if (inputs.size() > 3 && !inputs.at(3).isNullTensor())
+    {
+        ONNXTRT_CHECK_NODE(
+            layer->setUpdateLengths(castHelper(ctx, &convertToTensor(inputs.at(3), ctx), DataType::kINT32)),
+            "Failed to set update lengths.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
@@ -6789,11 +6930,34 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
         ONNXTRT_CHECK_NODE((inputs.size() == 2),
             "Expects two input tensors for opset >= 10: X and K. Current input size = " << inputs.size() << ".", node,
             nodeIdx, ErrorCode::kINVALID_NODE);
-        nvinfer1::ITensor* kPtr = &convertToTensor(inputs.at(1), ctx);
-        kPtr = convertToScalar(ctx, kPtr);
-        layer->setInput(1, *kPtr);
+        if (ctx->getAdjustForDLAMode() && inputs.at(1).is_weights())
+        {
+            auto const& kWeights = inputs.at(1).weights();
+            ONNXTRT_CHECK_NODE((kWeights.count() == 1), "The K input is required to be a scalar.", node, nodeIdx,
+                ErrorCode::kINVALID_NODE);
+            int64_t kValue = 1;
+            if (kWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
+            {
+                kValue = static_cast<int64_t const*>(kWeights.values)[0];
+            }
+            else if (kWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
+            {
+                kValue = static_cast<int32_t const*>(kWeights.values)[0];
+            }
+            else
+            {
+                ONNXTRT_CHECK_NODE(false, "The K input must be of type INT32 or INT64, but got type: " << kWeights.type,
+                    node, nodeIdx, ErrorCode::kINVALID_NODE);
+            }
+            layer->setK(static_cast<int32_t>(kValue));
+        }
+        else
+        {
+            nvinfer1::ITensor* kPtr = &convertToTensor(inputs.at(1), ctx);
+            kPtr = convertToScalar(ctx, kPtr);
+            layer->setInput(1, *kPtr);
+        }
     }
-    ctx->registerLayer(layer, node);
     ONNXTRT_CHECK_NODE(layer, "Failed to add TopK layer.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::ITensor* values = N_CHECK(layer->getOutput(0));
@@ -6811,7 +6975,11 @@ DEFINE_BUILTIN_OP_IMPORTER(TopK)
     }
 
     // TensorRT will fuse TopK and Cast if dimension exceeds INT32_MAX
-    indices = castHelper(ctx, indices, DataType::kINT64);
+    // Skip the cast when adjustForDLA is enabled.
+    if (!ctx->getAdjustForDLAMode())
+    {
+        indices = castHelper(ctx, indices, DataType::kINT64);
+    }
     return {{values, indices}};
 }
 
@@ -7258,6 +7426,7 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
     std::string const& pluginNamespace, std::vector<TensorOrWeights>& inputs, OnnxAttrs const& attrs,
     nvinfer1::IPluginCreatorInterface* creator)
 {
+    using namespace std::string_view_literals;
     ONNXTRT_CHECK_NODE(creator, "Invalid plugin creator.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::PluginFieldCollection const* fieldNames = static_cast<TPluginCreator*>(creator)->getFieldNames();
@@ -7270,7 +7439,7 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
 
     if (attrs.count("tensorrt_plugin_shape_input_indices"))
     {
-        if (std::strcmp(creator->getInterfaceInfo().kind, "PLUGIN CREATOR_V1") != 0)
+        if (creator->getInterfaceInfo().kind != "PLUGIN CREATOR_V1"sv)
         {
             ONNXTRT_CHECK_NODE(
                 attrs.type("tensorrt_plugin_shape_input_indices") == ::ONNX_NAMESPACE::AttributeProto::INTS,
@@ -7841,10 +8010,12 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_PluginV2)
     std::string nspace = attrs.get<std::string>("namespace");
     std::string buffer = attrs.get<std::string>("data");
 
-    nvinfer1::IPluginCreator* creator = registry.getPluginCreator(name.c_str(), version.c_str(), nspace.c_str());
-    ONNXTRT_CHECK_NODE(creator, "Plugin not found, are the plugin name, version, and namespace correct?", node, nodeIdx,
-        nvonnxparser::ErrorCode::kINVALID_NODE);
+    nvinfer1::IPluginCreatorInterface* creatorInterface
+        = registry.getCreator(name.c_str(), version.c_str(), nspace.c_str());
+    ONNXTRT_CHECK_NODE(creatorInterface, "Plugin not found, are the plugin name, version, and namespace correct?", node,
+        nodeIdx, nvonnxparser::ErrorCode::kINVALID_NODE);
 
+    auto* creator = static_cast<nvinfer1::IPluginCreator*>(creatorInterface);
     auto const plugin = creator->deserializePlugin("", buffer.data(), buffer.size());
 
     std::vector<nvinfer1::ITensor*> tensors;
@@ -7994,6 +8165,142 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_Conv)
 DEFINE_BUILTIN_OP_IMPORTER(TRT_Deconv)
 {
     return importConvTranspose(ctx, node, nodeIdx, inputs);
+}
+
+DEFINE_BUILTIN_OP_IMPORTER(TRT_MoE)
+{
+    // The TRT_MoE op expects:
+    // Inputs:
+    //   0: hiddenStates [batchSize, seqLen, hiddenSize]
+    //   1: selectedExpertsForTokens [batchSize, seqLen, topK]
+    //   2: scoresForSelectedExperts [batchSize, seqLen, topK]
+    //   3: fcGateWeights [numExperts, hiddenSize, moeInterSize]
+    //   4: fcUpWeights [numExperts, hiddenSize, moeInterSize]
+    //   5: fcDownWeights [numExperts, moeInterSize, hiddenSize]
+    //   6: fcGateBiases (optional, null if not provided)
+    //   7: fcUpBiases (optional, null if not provided)
+    //   8: fcDownBiases (optional, null if not provided)
+    //   9: fcDownActivationScale (optional, for quantization)
+    // Attributes:
+    //   activation_type: int32_t (0 = kNONE, 1 = kSILU) [default: 1]
+    //   quantization_mode: int32_t (0 = none, 1 = static, 2 = dynamic_dblq) [default: 0]
+    //   quantization_dtype: int32_t (DataType value for quantization, e.g., kFP8, kFP4) [default: kFP8]
+    //   quantization_block_shape: int32_t array [4] (block shape for quantization) [default: [1,1,-1,-1]]
+    //   dyn_q_output_scale_dtype: int32_t (DataType value for dynamic quantization output scale) [default: kFLOAT]
+    //   swiglu_limit: float [default: +inf]
+    //   swiglu_alpha: float [default: 1.0]
+    //   swiglu_beta: float [default: 0.0]
+
+    // Validate number of inputs (6 required + 3 optional biases + 1 optional scale)
+    ONNXTRT_CHECK_NODE((inputs.size() >= 6 && inputs.size() <= 10),
+        "TRT_MoE requires 6 to 10 inputs (activations + weights + optional biases + optional quantization scale). "
+        "Current input size = "
+            << inputs.size() << ".",
+        node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    // Extract activation inputs
+    auto& hiddenStates = convertToTensor(inputs.at(0), ctx);
+    auto& selectedExpertsForTokens = convertToTensor(inputs.at(1), ctx);
+    auto& scoresForSelectedExperts = convertToTensor(inputs.at(2), ctx);
+
+    // Extract weight inputs
+    auto& fcGateWeights = convertToTensor(inputs.at(3), ctx);
+    auto& fcUpWeights = convertToTensor(inputs.at(4), ctx);
+    auto& fcDownWeights = convertToTensor(inputs.at(5), ctx);
+
+    // Get activation type attribute
+    OnnxAttrs attrs(node, ctx);
+    int32_t activationTypeInt = attrs.get<int32_t>("activation_type", 0); // Default to kSILU
+
+    // Validate activation type
+    ONNXTRT_CHECK_NODE((activationTypeInt == 0 || activationTypeInt == 1),
+        "activation_type must be 0 (kNONE) or 1 (kSILU). Provided value = " << activationTypeInt << ".", node, nodeIdx,
+        ErrorCode::kINVALID_NODE);
+
+    nvinfer1::MoEActType activationType = static_cast<nvinfer1::MoEActType>(activationTypeInt);
+
+    // Create MoE layer
+    nvinfer1::IMoELayer* layer
+        = N_CHECK(ctx->network()->addMoE(hiddenStates, selectedExpertsForTokens, scoresForSelectedExperts));
+
+    // Set gated weights
+    layer->setGatedWeights(fcGateWeights, fcUpWeights, fcDownWeights, activationType);
+
+    // Check for optional biases at fixed positions 6, 7, 8
+    bool hasBiases = inputs.size() > 6 && !inputs.at(6).isNullTensor();
+
+    if (hasBiases)
+    {
+        ONNXTRT_CHECK_NODE(inputs.size() >= 9 && !inputs.at(7).isNullTensor() && !inputs.at(8).isNullTensor(),
+            "Biases must be provided for all three (gate, up, down) or none.", node, nodeIdx,
+            ErrorCode::kINVALID_NODE);
+
+        auto& fcGateBiases = convertToTensor(inputs.at(6), ctx);
+        auto& fcUpBiases = convertToTensor(inputs.at(7), ctx);
+        auto& fcDownBiases = convertToTensor(inputs.at(8), ctx);
+
+        layer->setGatedBiases(fcGateBiases, fcUpBiases, fcDownBiases);
+    }
+
+    // Handle quantization — scale is always at index 9
+    int32_t quantizationMode = attrs.get<int32_t>("quantization_mode", 0); // 0 = none, 1 = static, 2 = dynamic_dblq
+
+    if (quantizationMode != 0)
+    {
+        size_t const scaleInputIdx = 9;
+        ONNXTRT_CHECK_NODE(inputs.size() >= scaleInputIdx + 1,
+            "Expected at least 10 inputs when quantization scale is provided, but got " << inputs.size() << ".", node, nodeIdx,
+            ErrorCode::kINVALID_NODE);
+        auto& fcDownActivationScale = convertToTensor(inputs.at(scaleInputIdx), ctx);
+
+        // Get quantization data type
+        ONNXTRT_CHECK_NODE(attrs.exists("quantization_dtype"), "quantization_dtype must be specified", node, nodeIdx,
+            ErrorCode::kINVALID_NODE);
+        int32_t quantDTypeInt = attrs.get<int32_t>("quantization_dtype");
+        nvinfer1::DataType quantDType = static_cast<nvinfer1::DataType>(quantDTypeInt);
+
+        if (quantizationMode == 1)
+        {
+            // Set static quantization
+            layer->setQuantizationStatic(fcDownActivationScale, quantDType);
+        }
+        else if (quantizationMode == 2)
+        {
+            // Get quantization block shape
+            ONNXTRT_CHECK_NODE(attrs.exists("quantization_block_shape"), "quantization_block_shape must be specified", node,
+                nodeIdx, ErrorCode::kINVALID_NODE);
+            std::vector<int32_t> blockShapeVec = attrs.get<std::vector<int32_t>>("quantization_block_shape");
+            ONNXTRT_CHECK_NODE(blockShapeVec.size() == 4,
+                "quantization_block_shape must have exactly 4 dimensions. Provided size = " << blockShapeVec.size() << ".",
+                node, nodeIdx, ErrorCode::kINVALID_NODE);
+            nvinfer1::Dims blockShape{4, {blockShapeVec[0], blockShapeVec[1], blockShapeVec[2], blockShapeVec[3]}};
+
+            // Get dynamic quantization output scale type
+            ONNXTRT_CHECK_NODE(attrs.exists("dyn_q_output_scale_dtype"), "dyn_q_output_scale_dtype must be specified", node, nodeIdx, ErrorCode::kINVALID_NODE);
+            int32_t dynQScaleDTypeInt = attrs.get<int32_t>("dyn_q_output_scale_dtype");
+            nvinfer1::DataType dynQScaleDType = static_cast<nvinfer1::DataType>(dynQScaleDTypeInt);
+
+            // Set dynamic quantization with double quantization
+            layer->setQuantizationDynamicDblQ(fcDownActivationScale, quantDType, blockShape, dynQScaleDType);
+        }
+        else
+        {
+            ONNXTRT_CHECK_NODE(false, "Invalid quantization mode", node, nodeIdx, ErrorCode::kINVALID_NODE);
+        }
+    }
+
+    // Handle SwiGLU parameters
+    if (attrs.count("swiglu_limit") || attrs.count("swiglu_alpha") || attrs.count("swiglu_beta"))
+    {
+        float swigluLimit = attrs.get<float>("swiglu_limit", std::numeric_limits<float>::infinity());
+        float swigluAlpha = attrs.get<float>("swiglu_alpha", 1.0F);
+        float swigluBeta = attrs.get<float>("swiglu_beta", 0.0F);
+
+        layer->setSwigluParams(swigluLimit, swigluAlpha, swigluBeta);
+    }
+
+    ctx->registerLayer(layer, node);
+    RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(TRT_MaxPool)
