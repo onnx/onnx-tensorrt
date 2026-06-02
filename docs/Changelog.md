@@ -2,6 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 11.0 GA Release - 2026-6-2
+For more details, see the 11.0 GA release notes.
+
+- Added support for `Swish` operator
+- Added support for custom operators `TRT_Attention`, `TRT_MoE`, and `TRT_KVCacheUpdate`
+- Removed deprecated APIs - `IParser::supportsModel` and `IParser::parseWithWeightDescriptors`
+
 # TensorRT 10.16 GA Release - 2026-3-24
 For more details, see the 10.16 GA release notes.
 

@@ -7,11 +7,12 @@
 #include "bfloat16.hpp"
 #include "half.h"
 #include <NvInfer.h>
+#include <set>
 #include <typeindex>
 #include <unordered_map>
 
-// Subset of helper functions that deal exclusively with weights to be shared across IParser and IParserRefitter classes.
-// Define weightLog Macros here to ensure that an ImporterCtx class is not needed to log.
+// Subset of helper functions that deal exclusively with weights to be shared across IParser and IParserRefitter
+// classes. Define weightLog Macros here to ensure that an ImporterCtx class is not needed to log.
 
 namespace onnx2trt
 {

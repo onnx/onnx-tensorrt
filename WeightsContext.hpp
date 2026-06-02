@@ -8,6 +8,7 @@
 #include "Status.hpp"
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
+#include <map>
 #include <string>
 #include <vector>
 

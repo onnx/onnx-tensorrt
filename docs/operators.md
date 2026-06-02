@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 10.16 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 11.0 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
@@ -202,6 +202,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | StringSplit               | N          |
 | Sub                       | Y          | FP32, FP16, BF16, INT32, INT64 |
 | Sum                       | Y          | FP32, FP16, BF16, INT32, INT64 |
+| Swish                     | Y          | FP32, FP16, BF16 |
 | Tan                       | Y          | FP32, FP16, BF16 |
 | Tanh                      | Y          | FP32, FP16, BF16 |
 | TensorScatter             | Y          | FP32, FP16, BF16, INT32 | `past_cache` and `update` must be 4D. `axis` must be -2. |
@@ -216,3 +217,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Upsample                  | Y          | FP32, FP16, BF16 |
 | Where                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
 | Xor                       | Y          | BOOL
+
+## TensorRT Custom Operators
+
+For TensorRT custom operator specifications, see [TRT_custom_ops.md](TRT_custom_ops.md).

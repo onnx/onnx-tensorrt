@@ -1132,6 +1132,9 @@ NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     for (int32_t i = 0; i < nbValues; i++)
     {
         auto axesIndex = convertAxes(axesVals[i]);
+        ONNXTRT_CHECK_NODE((axesIndex >= 0 && axesIndex < nbDims),
+            "Slice axis " << axesVals[i] << " is out of bounds for a tensor with " << nbDims << " dimensions.",
+            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         // Modify starts
         int32_t stepSign = stepVals[i] < 0 ? -1 : 0;
         starts.d[axesIndex] = convertStarts(startVals[i], inputDims.d[axesIndex], stepSign);
@@ -1492,11 +1495,6 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
                         : N_CHECK(ctx->network()->addNormalization(*input, *scale, *bias, axesMask));
     layer->setEpsilon(epsilon);
     layer->setNbGroups(nbGroups);
-
-    if (ctx->getAdjustForDLAMode())
-    {
-        layer->setComputePrecision(nvinfer1::DataType::kHALF);
-    }
 
     ctx->registerLayer(layer, node);
     auto* output = N_CHECK(layer->getOutput(0));
@@ -2240,13 +2238,7 @@ NodeOutputs addScatterLayer(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto co
         }
     }
 
-    // Only cast to INT32 for weakly-typed networks (strongly-typed supports INT64 indices)
     nvinfer1::ITensor* indicesForScatter = &indices;
-    if (!ctx->isStronglyTyped() && indices.getType() == nvinfer1::DataType::kINT64)
-    {
-        auto* cast = N_CHECK(ctx->network()->addCast(indices, nvinfer1::DataType::kINT32));
-        indicesForScatter = N_CHECK(cast->getOutput(0));
-    }
 
     auto* layer = N_CHECK(ctx->network()->addScatter(data, *indicesForScatter, updates, mode));
 

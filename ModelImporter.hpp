@@ -63,13 +63,9 @@ public:
         , mImporterCtx(network, logger)
     {
     }
-    bool parseWithWeightDescriptors(
-        void const* serialized_onnx_model, size_t serialized_onnx_model_size) noexcept override;
     bool parse(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         char const* model_path = nullptr) noexcept override;
 
-    bool supportsModel(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
-        SubGraphCollection_t& sub_graph_collection, char const* model_path = nullptr) noexcept override;
     bool supportsModelV2(void const* serialized_onnx_model, size_t serialized_onnx_model_size,
         char const* model_path = nullptr) noexcept override;
 

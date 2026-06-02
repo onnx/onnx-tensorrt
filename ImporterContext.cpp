@@ -87,34 +87,34 @@ public:
         }
     }
 
+    //! \return a pointer to a symbol from the DynamicLibrary with the given function signature.
     //!
-    //! Retrieve a function symbol from the loaded library.
-    //!
-    //! \return the loaded symbol on success
     //! \throw std::invalid_argument if loading the symbol failed.
     //!
+    //! \note Type checking is not possible, so if `Signature` is incorrect, the behavior is undefined.
     template <typename Signature>
-    std::function<Signature> symbolAddress(char const* name)
+    [[nodiscard]] Signature& symbolAddress(char const* name) const
     {
+        static_assert(std::is_function_v<Signature>, "Signature must be a function type.");
         if (mHandle == nullptr)
         {
             throw std::runtime_error("Handle to library is nullptr.");
         }
-        void* ret;
+        void* const ret =
 #if defined(_MSC_VER)
-        ret = static_cast<void*>(GetProcAddress(static_cast<HMODULE>(mHandle), name));
+            static_cast<void*>(GetProcAddress(static_cast<HMODULE>(mHandle), name));
 #else
-        ret = dlsym(mHandle, name);
+            dlsym(mHandle, name);
 #endif
         if (ret == nullptr)
         {
             std::string const kERROR_MSG(mLibName + ": error loading symbol: " + std::string(name));
             throw std::invalid_argument(kERROR_MSG);
         }
-        return reinterpret_cast<Signature*>(ret);
+        return *reinterpret_cast<Signature*>(ret);
     }
 
-    std::string getFullPath() const
+    [[nodiscard]] std::string getFullPath() const
     {
         RT_ASSERT(mHandle != nullptr);
 #if defined(__linux__)

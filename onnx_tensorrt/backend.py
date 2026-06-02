@@ -164,9 +164,6 @@ class TensorRTBackendRep(BackendRep):
             if output_shape == (-99,):
                 # WAR for TRT requiring at least 2 dims (NC)
                 min_dims = 2
-                if _tensorrt_version()[0] < 4:
-                    # WAR for TRT only supporting 4D (NCHW) tensors
-                    min_dims = 4
                 if array.ndim == min_dims:
                     npadding_dims = count_trailing_ones(array.shape)
                     if npadding_dims > 0:

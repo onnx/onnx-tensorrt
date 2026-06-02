@@ -15,9 +15,16 @@ namespace onnx2trt
 void* WeightsContext::ownWeights(
     void const* weightValues, const ShapedWeights::DataType dataType, nvinfer1::Dims const& shape, const size_t nBytes)
 {
-    void* reservedWeights{createTempWeights(dataType, shape).values};
-    std::memcpy(reservedWeights, weightValues, nBytes);
-    return reservedWeights;
+    auto* ctx = this; // For logging macros.
+    ShapedWeights reservedWeightsObj{createTempWeights(dataType, shape)};
+    if (nBytes > reservedWeightsObj.size_bytes())
+    {
+        LOG_ERROR("Weights data size (" << nBytes << " bytes) exceeds the shape-derived allocation size ("
+            << reservedWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
+        return nullptr;
+    }
+    std::memcpy(reservedWeightsObj.values, weightValues, nBytes);
+    return reservedWeightsObj.values;
 }
 
 WeightsContext::~WeightsContext()
@@ -73,8 +80,15 @@ float* WeightsContext::convertDouble(double const* weightValues, nvinfer1::Dims 
 uint8_t* WeightsContext::convertPackedInt32Data(
     int32_t const* weightValues, nvinfer1::Dims const& shape, size_t nbytes, int32_t onnxdtype)
 {
-    uint8_t* newWeights{static_cast<uint8_t*>(createTempWeights(onnxdtype, shape).values)};
-
+    auto* ctx = this; // For logging macros.
+    ShapedWeights newWeightsObj{createTempWeights(onnxdtype, shape)};
+    if (nbytes > newWeightsObj.size_bytes())
+    {
+        LOG_ERROR("Packed int32 data size (" << nbytes << " bytes) exceeds the shape-derived allocation size ("
+            << newWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
+        return nullptr;
+    }
+    uint8_t* newWeights{static_cast<uint8_t*>(newWeightsObj.values)};
     for (size_t i = 0; i < nbytes; i++)
     {
         newWeights[i] = static_cast<uint8_t>(weightValues[i]);
@@ -277,7 +291,7 @@ bool WeightsContext::convertOnnxWeights(
         }
 
         // Buffer to hold the data read from the file
-        MemoryMapping_t weightsRef;
+        MemoryMapping_t weightsRef{};
         // Will update dataBuf and nbytes by reference.
         if (!parseExternalWeights(location, offset, length, weightsRef))
         {

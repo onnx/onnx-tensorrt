@@ -120,7 +120,7 @@ public:
     T const* operator()(ShapedWeights const& w) const
     {
         return static_cast<T const*>(w.values);
-    };
+    }
 };
 
 void ModelRefitter::refitOnnxWeights()

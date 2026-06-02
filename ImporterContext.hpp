@@ -13,7 +13,7 @@
 #include <fstream>
 #include <functional>
 #include <list>
-#include <onnx/onnx_pb.h>
+#include <onnx/onnx-ml.pb.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -155,6 +155,8 @@ class ImporterContext
     //! Vector to hold the local function names at each error
     std::vector<std::vector<std::string>> mLocalFunctionErrors;
 
+    //! Vector to hold expected graph inputs
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphInputNames;
     //! Vector to hold expected graph outputs
     std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphOutputNames;
 
@@ -347,6 +349,10 @@ public:
     std::vector<std::vector<std::string>>& localFunctionErrors()
     {
         return mLocalFunctionErrors;
+    }
+    std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphInputNames()
+    {
+        return mGraphInputNames;
     }
     std::vector<::ONNX_NAMESPACE::ValueInfoProto>& getGraphOutputNames()
     {
