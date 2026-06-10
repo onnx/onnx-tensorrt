@@ -5011,16 +5011,57 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSumExp)
         RETURN_IDENTITY(inputs.at(0), node, nodeIdx);
     }
 
-    std::vector<TensorOrWeights> expResult
-        = unaryHelper(ctx, node, nodeIdx, inputs.at(0), nvinfer1::UnaryOperation::kEXP);
+    TensorOrWeights input = inputs.at(0);
+    TensorOrWeights inputAxes = inputs.size() >= 2 ? inputs.at(1) : TensorOrWeights();
 
-    // Include the axes input if present to ensure reduction is performed correctly
-    if (inputs.size() >= 2)
+    auto maxResult = reduceTensor(ctx, node, nodeIdx, input, nvinfer1::ReduceOperation::kMAX, inputAxes);
+    nvinfer1::ITensor* reducedMax = &convertToTensor(maxResult.at(0), ctx);
+
+    OnnxAttrs attrs(node, ctx);
+    bool const keepdims = attrs.get("keepdims", 1);
+    int32_t const ndim = input.shape().nbDims;
+
+    std::vector<int32_t> axes;
+    if (attrs.count("axes"))
     {
-        expResult.push_back(inputs.at(1));
+        axes = attrs.get<std::vector<int32_t>>("axes");
+    }
+    else if (!inputAxes.isNullTensor())
+    {
+        ONNXTRT_CHECK_NODE(
+            inputAxes.is_weights(), "Axis input must be an initializer!", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        weightsToVector<int32_t>(inputAxes.weights(), &axes);
+    }
+    if (axes.empty())
+    {
+        axes.resize(ndim);
+        std::iota(axes.begin(), axes.end(), 0);
+    }
+    for (int32_t& axis : axes)
+    {
+        convertAxis(axis, ndim, node, nodeIdx);
+    }
+    std::sort(axes.begin(), axes.end());
+
+    nvinfer1::ITensor* maxForSub = reducedMax;
+    if (!keepdims)
+    {
+        maxForSub = unsqueezeTensor(ctx, *reducedMax, axes);
     }
 
-    return importReduceLogSum(ctx, node, nodeIdx, expResult);
+    auto& inputTensor = convertToTensor(input, ctx);
+    auto* shifted = getElementWiseResult(ctx, inputTensor, *maxForSub, nvinfer1::ElementWiseOperation::kSUB);
+    auto* shiftedExp = getUnaryResult(ctx, *shifted, nvinfer1::UnaryOperation::kEXP);
+
+    std::vector<TensorOrWeights> sumInputs{TensorOrWeights{shiftedExp}};
+    if (inputs.size() >= 2)
+    {
+        sumInputs.push_back(inputAxes);
+    }
+    auto sumResult = importReduceSum(ctx, node, nodeIdx, sumInputs);
+    auto* logSum = getUnaryResult(ctx, convertToTensor(sumResult.at(0), ctx), nvinfer1::UnaryOperation::kLOG);
+    auto* stableResult = getElementWiseResult(ctx, *logSum, *reducedMax, nvinfer1::ElementWiseOperation::kSUM);
+    return {{stableResult}};
 }
 DECLARE_BUILTIN_OP_IMPORTER(ReduceSumSquare);
 DEFINE_BUILTIN_OP_IMPORTER(ReduceL2)
