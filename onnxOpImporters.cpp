@@ -5014,9 +5014,6 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSumExp)
     TensorOrWeights input = inputs.at(0);
     TensorOrWeights inputAxes = inputs.size() >= 2 ? inputs.at(1) : TensorOrWeights();
 
-    auto maxResult = reduceTensor(ctx, node, nodeIdx, input, nvinfer1::ReduceOperation::kMAX, inputAxes);
-    nvinfer1::ITensor* reducedMax = &convertToTensor(maxResult.at(0), ctx);
-
     OnnxAttrs attrs(node, ctx);
     bool const keepdims = attrs.get("keepdims", 1);
     int32_t const ndim = input.shape().nbDims;
@@ -5034,6 +5031,10 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSumExp)
     }
     if (axes.empty())
     {
+        if (attrs.get("noop_with_empty_axes", 0) == 1)
+        {
+            RETURN_IDENTITY(inputs.at(0), node, nodeIdx);
+        }
         axes.resize(ndim);
         std::iota(axes.begin(), axes.end(), 0);
     }
@@ -5042,6 +5043,9 @@ DEFINE_BUILTIN_OP_IMPORTER(ReduceLogSumExp)
         convertAxis(axis, ndim, node, nodeIdx);
     }
     std::sort(axes.begin(), axes.end());
+
+    auto maxResult = reduceTensor(ctx, node, nodeIdx, input, nvinfer1::ReduceOperation::kMAX, inputAxes);
+    nvinfer1::ITensor* reducedMax = &convertToTensor(maxResult.at(0), ctx);
 
     nvinfer1::ITensor* maxForSub = reducedMax;
     if (!keepdims)

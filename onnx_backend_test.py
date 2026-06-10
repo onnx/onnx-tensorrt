@@ -201,6 +201,46 @@ class TensorRTCustomReduceLogSumExpTest(unittest.TestCase):
         self.assertTrue(np.isfinite(actual))
         self.assertAlmostEqual(actual, float(expected), places=5)
 
+    def test_reduce_log_sum_exp_keepdims_zero_custom(self):
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x"], ["y"], keepdims=0, axes=[1])
+        graph = onnx_helper.make_graph(
+            [node],
+            "reduce_log_sum_exp_keepdims_zero_custom",
+            [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 4])],
+            [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [2])],
+        )
+        model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
+        model.ir_version = 10
+
+        x = np.array([[250.0, 248.0, 255.0, 251.0], [100.0, 101.0, 99.0, 97.0]], dtype=np.float32)
+        expected = np.log(np.sum(np.exp(x - np.max(x, axis=1, keepdims=True)), axis=1)) + np.max(x, axis=1)
+
+        outputs = trt.run_model(model, [x], device="CUDA:0")
+        actual = np.asarray(outputs.y)
+
+        self.assertTrue(np.all(np.isfinite(actual)))
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+    def test_reduce_log_sum_exp_noop_empty_axes_custom(self):
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x", "axes"], ["y"], keepdims=0, noop_with_empty_axes=1)
+        graph = onnx_helper.make_graph(
+            [node],
+            "reduce_log_sum_exp_noop_empty_axes_custom",
+            [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 2])],
+            [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 2])],
+            initializer=[onnx_helper.make_tensor("axes", TensorProto.INT64, [0], np.array([], dtype=np.int64))],
+        )
+        model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
+        model.ir_version = 10
+
+        x = np.array([[250.0, 248.0], [255.0, 251.0]], dtype=np.float32)
+
+        outputs = trt.run_model(model, [x], device="CUDA:0")
+        actual = np.asarray(outputs.y)
+
+        self.assertEqual(actual.shape, x.shape)
+        np.testing.assert_allclose(actual, x, rtol=1e-6, atol=1e-6)
+
 globals().update(backend_test
                  .enable_report()
                  .test_cases)
