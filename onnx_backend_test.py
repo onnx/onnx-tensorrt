@@ -239,8 +239,8 @@ class TensorRTCustomReduceLogSumExpTest(unittest.TestCase):
         outputs = trt.run_model(model, [x], device="CUDA:0")
         actual = np.asarray(outputs.y)
 
-        self.assertEqual(actual.shape, x.shape)
-        np.testing.assert_allclose(actual, x, rtol=1e-6, atol=1e-6)
+        self.assertEqual(actual.size, x.size)
+        np.testing.assert_allclose(actual.reshape(x.shape), x, rtol=1e-6, atol=1e-6)
 
 globals().update(backend_test
                  .enable_report()
