@@ -202,12 +202,13 @@ class TensorRTCustomReduceLogSumExpTest(unittest.TestCase):
         self.assertAlmostEqual(actual, float(expected), places=5)
 
     def test_reduce_log_sum_exp_keepdims_zero_custom(self):
-        node = onnx_helper.make_node("ReduceLogSumExp", ["x"], ["y"], keepdims=0, axes=[1])
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x", "axes"], ["y"], keepdims=0)
         graph = onnx_helper.make_graph(
             [node],
             "reduce_log_sum_exp_keepdims_zero_custom",
             [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 4])],
             [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [2])],
+            initializer=[onnx_helper.make_tensor("axes", TensorProto.INT64, [1], np.array([1], dtype=np.int64))],
         )
         model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
         model.ir_version = 10
