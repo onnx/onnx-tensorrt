@@ -254,18 +254,22 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_QuantizedAttention)
     }
 
     bool const isCausal = static_cast<bool>(attrs.get<int64_t>("is_causal", 0));
+    nvinfer1::CausalMaskKind const causalKind
+        = isCausal ? nvinfer1::CausalMaskKind::kUPPER_LEFT : nvinfer1::CausalMaskKind::kNONE;
+    auto const queryForm = parseIOForm(attrs, "query_form");
+    auto const kvForm = parseIOForm(attrs, "kv_form");
     nvinfer1::AttentionNormalizationOp const normOp = parseNormalizationOp(attrs);
     bool const decomposable = static_cast<bool>(attrs.get<int64_t>("TRT_decomposable", 0));
 
-    ONNXTRT_CHECK_NODE(inputs.size() == 5, "Quantized Attention requires 5 inputs.", node, nodeIdx,
-        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK_NODE(5 <= inputs.size() && inputs.size() <= 7, "Quantized Attention requires 5 to 7 inputs.", node,
+        nodeIdx, nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
 
-    ONNXTRT_CHECK_NODE(inputs.at(0).shape().nbDims == inputs.at(1).shape().nbDims
-            && inputs.at(0).shape().nbDims == inputs.at(2).shape().nbDims,
-        "Q, K, and V inputs must have the same number of dimensions.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-
-    ONNXTRT_CHECK_NODE(inputs.at(0).shape().nbDims == 4, "Quantized Attention only supports 4D inputs.", node, nodeIdx,
-        nvonnxparser::ErrorCode::kUNSUPPORTED_NODE);
+    int32_t const expectedQueryDims = queryForm == nvinfer1::AttentionIOForm::kPACKED_NHD ? 3 : 4;
+    int32_t const expectedKVDims = kvForm == nvinfer1::AttentionIOForm::kPACKED_NHD ? 3 : 4;
+    ONNXTRT_CHECK_NODE(inputs.at(0).shape().nbDims == expectedQueryDims,
+        "Quantized Attention Q input rank does not match query_form.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK_NODE(inputs.at(1).shape().nbDims == expectedKVDims && inputs.at(2).shape().nbDims == expectedKVDims,
+        "Quantized Attention K and V input ranks do not match kv_form.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     // Get inputs.
     nvinfer1::ITensor& query = convertToQTensor(inputs.at(0), attrs, ctx);
@@ -275,15 +279,36 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_QuantizedAttention)
     nvinfer1::ITensor& normalizationQuantizeScale = convertToTensor(inputs.at(4), ctx);
 
     // Add the Attention layer.
-    nvinfer1::IAttention* attention = N_CHECK(ctx->network()->addAttention(query, key, value, normOp, isCausal));
+    nvinfer1::IAttention* attention = N_CHECK(ctx->network()->addAttentionV2(query, key, value, normOp, causalKind));
     ctx->registerAttention(attention, node);
     attention->setDecomposable(decomposable);
+    ONNXTRT_CHECK_NODE(
+        attention->setQueryForm(queryForm), "Failed to set query form.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK_NODE(
+        attention->setKeyValueForm(kvForm), "Failed to set key-value form.", node, nodeIdx, ErrorCode::kINVALID_NODE);
     attention->setNormalizationQuantizeToType(normQuantizeToType);
     attention->setNormalizationQuantizeScale(normalizationQuantizeScale);
 
     if (hasAttnMask)
     {
-        attention->setMask(convertToMaskTensor(inputs.at(3), ctx));
+        ONNXTRT_CHECK_NODE(attention->setMask(convertToMaskTensor(inputs.at(3), ctx)), "Failed to set mask.", node,
+            nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
+    bool const hasQueryLengths = inputs.size() > 5 && !inputs.at(5).isNullTensor();
+    bool const hasKVLengths = inputs.size() > 6 && !inputs.at(6).isNullTensor();
+
+    if (hasQueryLengths)
+    {
+        ONNXTRT_CHECK_NODE(attention->setQueryLengths(
+                               castHelper(ctx, &convertToTensor(inputs.at(5), ctx), nvinfer1::DataType::kINT32)),
+            "Failed to set query lengths.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+    if (hasKVLengths)
+    {
+        ONNXTRT_CHECK_NODE(attention->setKeyValueLengths(
+                               castHelper(ctx, &convertToTensor(inputs.at(6), ctx), nvinfer1::DataType::kINT32)),
+            "Failed to set key-value lengths.", node, nodeIdx, ErrorCode::kINVALID_NODE);
     }
 
     return {{attention->getOutput(0)}};

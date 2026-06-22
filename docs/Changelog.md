@@ -2,6 +2,11 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 11.1 GA Release - 2026-6-22
+For more details, see the 11.1 GA release notes.
+
+- Updated TRT_Attention to support raggedness
+
 # TensorRT 11.0 GA Release - 2026-6-2
 For more details, see the 11.0 GA release notes.
 
