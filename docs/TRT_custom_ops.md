@@ -4,11 +4,15 @@
 
 ## TRT_QuantizedAttention
 
-Custom op for quantized Attention based on ONNX [Attention-23](https://github.com/onnx/onnx/blob/main/docs/Operators.md#Attention). The common attributes, inputs, and outputs between this op and the standard Attention op follow the same rules as in the standard spec; only the ones unique to this custom op are followed by a description.
+Custom op for quantized Attention based on ONNX [Attention-23](https://github.com/onnx/onnx/blob/main/docs/Operators.md#Attention). The common attributes, inputs, and outputs between this op and the standard Attention op follow the same rules as in the standard spec; only the ones unique to this custom op are followed by a description. This op supports the same padded and packed/ragged tensor forms as `TRT_Attention`.
 
 ### Attributes
 
 <dl>
+<dt><tt>query_form - STRING</tt></dt>
+<dd>"padded_bhnd" (default) or "packed_nhd". Sets the IO form of the Q tensor and output. Controls Q independently of KV.</dd>
+<dt><tt>kv_form - STRING</tt></dt>
+<dd>"padded_bhnd" (default) or "packed_nhd". Sets the IO form of the K and V tensors. Controls KV independently of Q.</dd>
 <dt><tt>is_causal</tt></dt>
 <dt><tt>kv_num_heads</tt></dt>
 <dt><tt>q_num_heads</tt></dt>
@@ -21,15 +25,21 @@ Custom op for quantized Attention based on ONNX [Attention-23](https://github.co
 <dd>"softmax" (default) or "none".</dd>
 </dl>
 
-### Inputs (4 or 5)
+See the `TRT_Attention` tensor format notation for the meaning of `"padded_bhnd"` and `"packed_nhd"`.
+
+### Inputs (5-7)
 
 <dl>
-<dt><tt>Q</tt></dt>
-<dt><tt>K</tt></dt>
-<dt><tt>V</tt></dt>
-<dt><tt>attn_mask</tt> (optional)</dt>
-<dt><tt>normalization_quantize_scale</tt></dt>
+<dt><tt>Q</tt> (index 0)</dt>
+<dt><tt>K</tt> (index 1)</dt>
+<dt><tt>V</tt> (index 2)</dt>
+<dt><tt>attn_mask</tt> (optional, index 3)</dt>
+<dt><tt>normalization_quantize_scale</tt> (optional, index 4)</dt>
 <dd>Scalar tensor of fp32, fp16, or bf16 type. The quantization scale for Q/DQ between normalization and BMM2.</dd>
+<dt><tt>query_lengths</tt> (optional, index 5) - INT32</dt>
+<dd>1D tensor of shape [batchSize + 1] containing cumulative token counts for the query sequence, starting with 0, e.g. [0, len_0, len_0 + len_1, ...]. Must be provided when <tt>query_form</tt> is <tt>"packed_nhd"</tt>.</dd>
+<dt><tt>kv_lengths</tt> (optional, index 6) - INT32</dt>
+<dd>1D tensor whose shape depends on <tt>kv_form</tt>: when <tt>"packed_nhd"</tt>, shape is [batchSize + 1] containing cumulative token counts starting with 0, e.g. [0, len_0, len_0 + len_1, ...] and this input must be provided; when <tt>"padded_bhnd"</tt>, shape is [batchSize] containing per-batch sequence lengths and this input is optional, e.g. [len_0, len_1, ...].</dd>
 </dl>
 
 ### Outputs
@@ -40,7 +50,9 @@ Custom op for quantized Attention based on ONNX [Attention-23](https://github.co
 
 ## TRT_Attention
 
-Custom op for attention with packed (ragged) batching support. Based on ONNX [Attention-23](https://github.com/onnx/onnx/blob/main/docs/Operators.md#Attention), with additional attributes and inputs for the `kPACKED_NHD` IO form.
+Custom op for attention with packed (ragged) batching support. This op mirrors TensorRT's `IAttention` API directly:
+Q, K, and V are passed to TensorRT without implicit reshaping or scaling. The caller must provide tensors in the
+shape required by the selected IO forms.
 
 **Tensor format notation:** `"padded_bhnd"` denotes 4D tensors with shape `[B, H, N, D]` and `"packed_nhd"` denotes 3D tensors with shape `[T, H, D]`, where B=batch, H=num\_heads, N=sequence\_length, D=head\_size, and T=total\_tokens (sum of all sequence lengths in the batch). This notation follows the ONNX Attention-23 spec; the TRT C++ API docs use `[b, d, s, h]` for the same layout (`d`=num\_heads, `s`=seq\_len, `h`=head\_size).
 
@@ -51,42 +63,43 @@ Custom op for attention with packed (ragged) batching support. Based on ONNX [At
 <dd>"padded_bhnd" (default) or "packed_nhd". Sets the IO form of the Q tensor and output. Controls Q independently of KV.</dd>
 <dt><tt>kv_form - STRING</tt></dt>
 <dd>"padded_bhnd" (default) or "packed_nhd". Sets the IO form of the K and V tensors. Controls KV independently of Q.</dd>
-<dt><tt>is_causal</tt></dt>
-<dt><tt>scale</tt></dt>
+<dt><tt>causal_kind - STRING</tt></dt>
+<dd>"none" (default), "upper_left", or "lower_right". Sets the implicit causal mask kind.</dd>
 <dt><tt>TRT_decomposable - INT</tt></dt>
-<dd>Default is 0.</dd>
+<dd>0 (default) or 1. When set to 1, TensorRT may decompose the attention into multiple kernels if no fused kernel is supported.</dd>
 <dt><tt>TRT_normalization_op - STRING</tt></dt>
 <dd>"softmax" (default) or "none".</dd>
 <dt><tt>nb_rank - INT</tt></dt>
-<dd>Default is 1.</dd>
+<dd>Number of ranks for multi-device attention execution. Default is 1.</dd>
 </dl>
 
 The `query_form` and `kv_form` attributes are independent: Q and KV may use different forms (e.g., packed Q with padded KV for LLM context-phase attention).
 
-### Inputs (6-8)
+### Inputs (3-6)
 
 <dl>
 <dt><tt>Q</tt> (index 0)</dt>
 <dt><tt>K</tt> (index 1)</dt>
 <dt><tt>V</tt> (index 2)</dt>
 <dt><tt>attn_mask</tt> (optional, index 3)</dt>
-<dt><tt>past_key</tt> (optional, index 4) - unsupported</dt>
-<dt><tt>past_value</tt> (optional, index 5) - unsupported</dt>
-<dt><tt>query_lengths</tt> (optional, index 6) - INT32</dt>
-<dd>1D tensor of shape [batchSize + 1] containing cumulative token counts for the query sequence.</dd>
-<dt><tt>kv_lengths</tt> (optional, index 7) - INT32</dt>
-<dd>1D tensor whose shape depends on <tt>kv_form</tt>: when <tt>"packed_nhd"</tt>, shape is [batchSize + 1] containing cumulative token counts; when <tt>"padded_bhnd"</tt>, shape is [batchSize] containing per-batch sequence lengths.</dd>
+<dd>Mask tensor with rank at most 4. A BOOL mask uses true values for positions that may attend; other mask values are added to the BMM1 output.</dd>
+<dt><tt>query_lengths</tt> (optional, index 4) - INT32</dt>
+<dd>1D tensor of shape [batchSize + 1] containing cumulative token counts for the query sequence, starting with 0, e.g. [0, len_0, len_0 + len_1, ...]. Must be provided when <tt>query_form</tt> is <tt>"packed_nhd"</tt>.</dd>
+<dt><tt>kv_lengths</tt> (optional, index 5) - INT32</dt>
+<dd>1D tensor whose shape depends on <tt>kv_form</tt>: when <tt>"packed_nhd"</tt>, shape is [batchSize + 1] containing cumulative token counts starting with 0, e.g. [0, len_0, len_0 + len_1, ...] and this input must be provided; when <tt>"padded_bhnd"</tt>, shape is [batchSize] containing per-batch sequence lengths and this input is optional, e.g. [len_0, len_1, ...].</dd>
 </dl>
 
 ### Outputs
 
 <dl>
 <dt><tt>Y</tt></dt>
+<dd>Output tensor with the same shape, IO form, and data type as <tt>Q</tt>.</dd>
 </dl>
 
 ### Restrictions
 
-- Attention mask (`attn_mask`) is not supported when `query_form` is `"packed_nhd"`.
+- `Q`, `K`, and `V` must already match the selected IO forms. Unlike ONNX `Attention`, `TRT_Attention` does not use `q_num_heads`, `kv_num_heads`, or `scale` to reshape or scale Q/K/V.
+- `attn_mask` cannot be used together with `causal_kind` values other than `"none"`.
 - When query and KV forms differ, Q and KV tensors may have different ranks. For example, with packed Q and padded KV: Q is `[T, numHeads, headSize]` while K/V are `[batchSize, numHeads, seqLen, headSize]`.
 
 ## TRT_KVCacheUpdate
