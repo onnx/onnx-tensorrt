@@ -6005,19 +6005,25 @@ DEFINE_BUILTIN_OP_IMPORTER(GridSample)
         sampleMode = nvinfer1::SampleMode::kREFLECT;
     }
 
+    // Opset 20 renamed the interpolation modes: bilinear -> linear, bicubic -> cubic.
     auto mode = attrs.get<std::string>("mode", "bilinear");
     nvinfer1::InterpolationMode interpolationMode{nvinfer1::InterpolationMode::kNEAREST};
     if (mode == "nearest")
     {
         interpolationMode = nvinfer1::InterpolationMode::kNEAREST;
     }
-    else if (mode == "bilinear")
+    else if (mode == "bilinear" || mode == "linear")
     {
         interpolationMode = nvinfer1::InterpolationMode::kLINEAR;
     }
-    else if (mode == "bicubic")
+    else if (mode == "bicubic" || mode == "cubic")
     {
         interpolationMode = nvinfer1::InterpolationMode::kCUBIC;
+    }
+    else
+    {
+        ONNXTRT_CHECK_NODE(false, "Unsupported GridSample interpolation mode: " << mode, node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE_ATTR);
     }
 
     bool const alignCorners{attrs.get<int32_t>("align_corners", 0) == 1};
