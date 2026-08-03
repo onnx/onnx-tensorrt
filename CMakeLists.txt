@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.27)
 project(onnx2trt LANGUAGES CXX C)
 
 set(ONNX2TRT_ROOT ${PROJECT_SOURCE_DIR})
 # Set C++17 as standard for the whole project, as required by ONNX 1.16
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 # Enable compiler warnings
 if (CMAKE_COMPILER_IS_GNUCC)
@@ -28,8 +28,8 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 11)
-set(ONNX2TRT_MINOR 1)
-set(ONNX2TRT_PATCH 0)
+set(ONNX2TRT_MINOR 2)
+set(ONNX2TRT_PATCH 1)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
 #--------------------------------------------------

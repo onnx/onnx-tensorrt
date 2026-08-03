@@ -21,6 +21,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <span>
 #include <sstream>
 #include <typeindex>
 #include <unordered_map>
@@ -93,11 +94,6 @@ inline bool operator==(nvinfer1::Dims const& a, nvinfer1::Dims const& b)
     return true;
 }
 
-inline bool operator!=(nvinfer1::Dims const& a, nvinfer1::Dims const& b)
-{
-    return !(a == b);
-}
-
 enum ScaleOp
 {
     kSHIFT,
@@ -157,6 +153,10 @@ bool shiftIsAllZeros(ShapedWeights const& shiftInt8);
 
 // Helper function to create zero shifts for QuantizeLinear/DequantizeLinear ops
 onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt8, int32_t type, ImporterContext* ctx);
+
+//! Backward-traverse Cast/Identity nodes to recover constant weights feeding a tensor.
+//! \return Default-constructed weights when the chain does not terminate in a Constant node.
+[[nodiscard]] ShapedWeights getWeightsFromIdentityOrConstant(ImporterContext* ctx, nvinfer1::ITensor* input);
 
 // Helper function to create a tensor of all zeros with the same shape as a data tensor
 nvinfer1::ITensor* createZeroTensor(ImporterContext* ctx, nvinfer1::ITensor* data);
@@ -321,11 +321,11 @@ nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE:
 ::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataType dt);
 
 // Helper function to import ONNX unary ops into TRT
-NodeOutputs unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs unaryHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     TensorOrWeights& input, nvinfer1::UnaryOperation op);
 
 // Helper function to unsqueeze tensors on a given set of axes
-nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes);
+nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::span<int32_t const> axes);
 
 // Helper function to calculate and return the expected output shape of a resize given the resize scale weights or scale
 // tensor.
@@ -344,31 +344,38 @@ void weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightVec
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16),
         "Found invalid weights type of: " << sWeights.type,
         ErrorCode::kINVALID_NODE);
-    weightVector->resize(sWeights.count());
+    size_t const nbWeights = sWeights.count();
+    weightVector->resize(nbWeights);
+    if (nbWeights == 0)
+    {
+        return;
+    }
+    ONNXTRT_CHECK(sWeights.values != nullptr, "Cannot convert weights with null values to a vector!",
+        ErrorCode::kINVALID_NODE);
     if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
     {
         auto array_start = static_cast<int64_t*>(sWeights.values);
-        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+        std::copy(array_start, array_start + nbWeights, weightVector->begin());
     }
     else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
     {
         auto array_start = static_cast<int32_t*>(sWeights.values);
-        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+        std::copy(array_start, array_start + nbWeights, weightVector->begin());
     }
     else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
     {
         auto array_start = static_cast<bool*>(sWeights.values);
-        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+        std::copy(array_start, array_start + nbWeights, weightVector->begin());
     }
     else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
     {
         auto array_start = static_cast<float*>(sWeights.values);
-        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+        std::copy(array_start, array_start + nbWeights, weightVector->begin());
     }
     else if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
     {
         auto array_start = static_cast<half_float::half*>(sWeights.values);
-        std::copy(array_start, array_start + sWeights.count(), weightVector->begin());
+        std::copy(array_start, array_start + nbWeights, weightVector->begin());
     }
 }
 

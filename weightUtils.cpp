@@ -157,7 +157,7 @@ std::string const& generateUniqueName(
 {
     std::string candidate = basename;
 
-    while (namesSet.find(candidate) != namesSet.end())
+    while (namesSet.contains(candidate))
     {
         candidate = basename + "_" + std::to_string(suffixCounter);
         ++suffixCounter;

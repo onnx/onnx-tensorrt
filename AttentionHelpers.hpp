@@ -32,6 +32,22 @@ nvinfer1::ITensor& convertToQTensor(
     TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
 
 //!
+//! \brief Convert the input tensor to the Q tensor accepted by TensorRT with an explicit head count.
+//!
+//! This overload is used by operators that use a different attribute name than ONNX Attention for head count, while
+//! keeping the same scale handling as \p convertToQTensor.
+//!
+//! \param qInput The input tensor to convert.
+//! \param attrs The attributes of the source node.
+//! \param ctx The importer context.
+//! \param numHeads The query head count.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
+//! \return nvinfer1::ITensor& The converted Q tensor with shape (batchSize, numHeads, sequenceLength, headSize).
+//!
+nvinfer1::ITensor& convertToQTensor(TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx,
+    int64_t numHeads, bool const needsReshape = false);
+
+//!
 //! \brief Convert the input tensor to the K (key) tensor accepted by TensorRT.
 //!
 //! This is a wrapper over \p convertToTensor with the following additional transformations:
@@ -50,6 +66,22 @@ nvinfer1::ITensor& convertToKTensor(
     TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
 
 //!
+//! \brief Convert the input tensor to the K tensor accepted by TensorRT with an explicit head count.
+//!
+//! This overload is used by operators that use a different attribute name than ONNX Attention for head count, while
+//! keeping the same scale handling as \p convertToKTensor.
+//!
+//! \param kInput The input tensor to convert.
+//! \param attrs The attributes of the source node.
+//! \param ctx The importer context.
+//! \param numHeads The key head count.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
+//! \return nvinfer1::ITensor& The converted K tensor with shape (batchSize, numHeads, sequenceLength, headSize).
+//!
+nvinfer1::ITensor& convertToKTensor(TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx,
+    int64_t numHeads, bool const needsReshape = false);
+
+//!
 //! \brief Convert the input tensor to the V (value) tensor accepted by TensorRT.
 //!
 //! This is a wrapper over \p convertToTensor with the following additional transformation:
@@ -64,6 +96,20 @@ nvinfer1::ITensor& convertToKTensor(
 //!
 nvinfer1::ITensor& convertToVTensor(
     TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape = false);
+
+//!
+//! \brief Convert the input tensor to the V tensor accepted by TensorRT with an explicit head count.
+//!
+//! This overload is used by operators that use a different attribute name than ONNX Attention for head count.
+//!
+//! \param vInput The input tensor to convert.
+//! \param ctx The importer context.
+//! \param numHeads The value head count.
+//! \param needsReshape True if the input tensor needs to be reshaped to 4D, false otherwise.
+//! \return nvinfer1::ITensor& The converted V tensor with shape (batchSize, numHeads, sequenceLength, headSize).
+//!
+nvinfer1::ITensor& convertToVTensor(
+    TensorOrWeights& vInput, ImporterContext* ctx, int64_t numHeads, bool const needsReshape = false);
 
 //!
 //! \brief Convert the input tensor to the mask tensor accepted by TensorRT.

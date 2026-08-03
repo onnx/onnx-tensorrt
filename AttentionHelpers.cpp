@@ -34,22 +34,20 @@ namespace onnx2trt
 //! \param qkvInput The input tensor. This can either be a 4D tensor (batchSize, numHeads, sequenceLength, headSize) or
 //!                 a 3D tensor (batchSize, sequenceLength, hiddenSize=numHeads*headSize). If it is a 3D tensor,
 //!                 permute and reshape to the 4D shape before returning. Otherwise, return the input tensor.
-//! \param attrs The ONNX node attributes.
 //! \param ctx The importer context.
-//! \param isQ True if the input tensor is the Q tensor, false if it is the K or V tensor.
+//! \param numHeadsValue The number of heads in the tensor.
+//! \param needsReshape True if the tensor is 3D and needs to be reshaped to 4D.
 //! \return nvinfer1::ITensor& The Q, K, or V tensor.
 //!
 nvinfer1::ITensor& reshapeQKVTensor(
-    TensorOrWeights& qkvInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const isQ, bool const needsReshape)
+    TensorOrWeights& qkvInput, ImporterContext* ctx, int64_t const numHeadsValue, bool const needsReshape)
 {
     if (needsReshape)
     {
         // qkvInput is a 3D tensor (batchSize, sequenceLength, hiddenSize=numHeads * headSize).
         // Get relevant dimensions.
-        int64_t const numHeadsValue
-            = isQ ? attrs.get<int64_t>("q_num_heads", 0) : attrs.get<int64_t>("kv_num_heads", 0);
         ONNXTRT_CHECK(numHeadsValue != 0,
-            "q_num_heads and kv_num_heads attributes are not specified, which are required for 3D Q/K/V tensors",
+            "Number of attention heads is not specified, which is required for 3D Q/K/V tensors.",
             ErrorCode::kINVALID_NODE);
         ShapeTensor numHeads = shapeVector(numHeadsValue);
 
@@ -102,7 +100,7 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
     // Use the tensor's actual rank so this works for both 4D padded BHND and 3D packed NHD tensors.
     int32_t const nbDims = qkTensor.getDimensions().nbDims;
 
-    if (attrs.count("scale"))
+    if (attrs.contains("scale"))
     {
         // Obtain the sqrt of scale as a constant (output of a constant layer).
         nvinfer1::IConstantLayer* constant = addConstantScalar(
@@ -132,19 +130,37 @@ nvinfer1::ITensor& scaleQKTensor(nvinfer1::ITensor& qkTensor, OnnxAttrs const& a
 nvinfer1::ITensor& convertToQTensor(
     TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return scaleQKTensor(reshapeQKVTensor(qInput, attrs, ctx, true /*isQ*/, needsReshape), attrs, ctx);
+    return convertToQTensor(qInput, attrs, ctx, attrs.get<int64_t>("q_num_heads", 0), needsReshape);
+}
+
+nvinfer1::ITensor& convertToQTensor(TensorOrWeights& qInput, OnnxAttrs const& attrs, ImporterContext* ctx,
+    int64_t const numHeads, bool const needsReshape)
+{
+    return scaleQKTensor(reshapeQKVTensor(qInput, ctx, numHeads, needsReshape), attrs, ctx);
 }
 
 nvinfer1::ITensor& convertToKTensor(
     TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return scaleQKTensor(reshapeQKVTensor(kInput, attrs, ctx, false /*isQ*/, needsReshape), attrs, ctx);
+    return convertToKTensor(kInput, attrs, ctx, attrs.get<int64_t>("kv_num_heads", 0), needsReshape);
+}
+
+nvinfer1::ITensor& convertToKTensor(TensorOrWeights& kInput, OnnxAttrs const& attrs, ImporterContext* ctx,
+    int64_t const numHeads, bool const needsReshape)
+{
+    return scaleQKTensor(reshapeQKVTensor(kInput, ctx, numHeads, needsReshape), attrs, ctx);
 }
 
 nvinfer1::ITensor& convertToVTensor(
     TensorOrWeights& vInput, OnnxAttrs const& attrs, ImporterContext* ctx, bool const needsReshape)
 {
-    return reshapeQKVTensor(vInput, attrs, ctx, false /*isQ*/, needsReshape);
+    return convertToVTensor(vInput, ctx, attrs.get<int64_t>("kv_num_heads", 0), needsReshape);
+}
+
+nvinfer1::ITensor& convertToVTensor(
+    TensorOrWeights& vInput, ImporterContext* ctx, int64_t const numHeads, bool const needsReshape)
+{
+    return reshapeQKVTensor(vInput, ctx, numHeads, needsReshape);
 }
 
 nvinfer1::ITensor& convertToMaskTensor(TensorOrWeights& maskInput, ImporterContext* ctx)

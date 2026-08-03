@@ -174,7 +174,7 @@ void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, Subgraph
                 {
                     continue;
                 }
-                if (tensors.count(tensor) == 0)
+                if (!tensors.contains(tensor))
                 {
                     externalInputs[l].insert(i);
                 }

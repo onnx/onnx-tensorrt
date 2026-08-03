@@ -4,6 +4,7 @@
 
 #include "ModelRefitter.hpp"
 #include "ShapedWeights.hpp"
+#include "importerUtils.hpp"
 #include "onnxProtoUtils.hpp"
 #include "toposort.hpp"
 
@@ -47,9 +48,57 @@ std::unordered_set<std::string> ModelRefitter::getRefittableWeights()
     return std::unordered_set<std::string>{weightNames.begin(), weightNames.end()};
 }
 
+void ModelRefitter::notifyObserver(char const* trtName, nvonnxparser::RefitTransformKind kind, int32_t onnxDtype,
+    nvinfer1::DataType trtDtype, int64_t count, std::span<char const* const> sources, float epsilon,
+    std::span<std::byte const> fixedData) noexcept
+{
+    if (mObserver == nullptr)
+    {
+        return;
+    }
+    nvonnxparser::RefitRecord const record{
+        .trtName = trtName,
+        .kind = kind,
+        .onnxDtype = onnxDtype,
+        .trtDtype = trtDtype,
+        .count = count,
+        .nbSources = static_cast<int32_t>(sources.size()),
+        .sourceOnnxNames = sources.data(),
+        .epsilon = epsilon,
+        .fixedData = fixedData.empty() ? nullptr : static_cast<void const*>(fixedData.data()),
+        .fixedDataSize = fixedData.size(),
+    };
+    mObserver->onRefittableWeight(record);
+}
+
+namespace
+{
+//! Resolve the nvinfer1 dtype that corresponds to an ONNX TensorProto::DataType value. Falls back
+//! to kFLOAT for any dtype the parser does not yet map -- callers can still record the onnxDtype
+//! value verbatim and decide what to do downstream.
+[[nodiscard]] nvinfer1::DataType resolveTrtDtype(int32_t onnxDtype) noexcept
+{
+    nvinfer1::DataType trtDtype{nvinfer1::DataType::kFLOAT};
+    (void) convertDtype(onnxDtype, &trtDtype);
+    return trtDtype;
+}
+
+//! Wrap an opaque pointer + byte count in a typed std::span<std::byte const> so the
+//! span-based notifyObserver signature stays unchanged at the call sites for inline-bytes kinds
+//! (kCONSTANT_NODE, kCONSTANT_OF_SHAPE).
+[[nodiscard]] std::span<std::byte const> asByteSpan(void const* data, size_t size) noexcept
+{
+    if (data == nullptr || size == 0)
+    {
+        return {};
+    }
+    return {static_cast<std::byte const*>(data), size};
+}
+} // namespace
+
 template <typename T, typename TConvertFunc>
-size_t ModelRefitter::batchnormWeightRefitter(
-    ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f)
+size_t ModelRefitter::batchnormWeightRefitter(::ONNX_NAMESPACE::NodeProto const& node,
+    std::vector<ShapedWeights>& inputs, int32_t sourceOnnxDtype, TConvertFunc&& f)
 {
     auto const& scale = inputs.at(0);
     auto const& bias = inputs.at(1);
@@ -95,16 +144,24 @@ size_t ModelRefitter::batchnormWeightRefitter(
         combinedBias.at<T>(i) = biasValues[i] - meanValues[i] * combinedScale.at<T>(i);
     }
     size_t successfullyRefittedWeights = 0;
-    if (mRefittableWeights.count(combinedScale.name))
+    char const* foldSources[4] = {inputs.at(0).name, inputs.at(1).name, inputs.at(2).name, inputs.at(3).name};
+    float const epsilonFloat = static_cast<float>(eps);
+    if (mRefittableWeights.contains(combinedScale.name))
     {
         mRefittableWeights.erase(combinedScale.name);
+        notifyObserver(combinedScale.name, nvonnxparser::RefitTransformKind::kBATCH_NORM_FOLD_SCALE, sourceOnnxDtype,
+            resolveTrtDtype(combinedScale.type), static_cast<int64_t>(combinedScale.count()),
+            std::span<char const* const>{foldSources}, epsilonFloat);
         ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedScale.name, std::move(combinedScale)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
     }
-    if (mRefittableWeights.count(combinedBias.name))
+    if (mRefittableWeights.contains(combinedBias.name))
     {
         mRefittableWeights.erase(combinedBias.name);
+        notifyObserver(combinedBias.name, nvonnxparser::RefitTransformKind::kBATCH_NORM_FOLD_BIAS, sourceOnnxDtype,
+            resolveTrtDtype(combinedBias.type), static_cast<int64_t>(combinedBias.count()),
+            std::span<char const* const>{foldSources}, epsilonFloat);
         ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedBias.name, std::move(combinedBias)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
@@ -160,6 +217,16 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
         ShapedWeights weights;
         ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(initializer, &weights, /*ownAllWeights=*/true),
             "Failed to import initializer.", ErrorCode::kUNSUPPORTED_NODE);
+        if (mObserver != nullptr)
+        {
+            char const* const sourceName = initializer.name().c_str();
+            auto const transformKind = initializer.data_type() == ::ONNX_NAMESPACE::TensorProto::DOUBLE
+                ? nvonnxparser::RefitTransformKind::kDOUBLE_TO_FLOAT
+                : nvonnxparser::RefitTransformKind::kIDENTITY;
+            notifyObserver(initializer.name().c_str(), transformKind, initializer.data_type(),
+                resolveTrtDtype(weights.type), static_cast<int64_t>(weights.count()),
+                std::span<char const* const>{&sourceName, 1});
+        }
         ONNXTRT_CHECK(mRefitter->setNamedWeights(initializer.name().c_str(), std::move(weights)),
             "Failed to set named weights", ErrorCode::kREFIT_FAILED);
         ++mSuccessfullyRefittedWeights;
@@ -220,7 +287,7 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
         nvinfer1::Dims{1, {1}}, mTempRefittableWeights, mTempRefittableWeightsSuffixCounter, /*refittable=*/true);
     std::string name = namedConstantOfShape.getName();
 
-    if (!mRefittableWeights.count(name))
+    if (!mRefittableWeights.contains(name))
     {
         return;
     }
@@ -228,7 +295,7 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
     LOG_REFITTER_VERBOSE("Refitting ConstantOfShape node: " << node.name() << ", output: " << node.output(0));
 
     mRefittableWeights.erase(name);
-    if (mRefittedWeights.count(name))
+    if (mRefittedWeights.contains(name))
     {
         LOG_REFITTER_WARNING("Duplicate weight name name ("
             << name << ") was found when processing the graph (" << graphName
@@ -240,10 +307,12 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
     }
 
     ShapedWeights weights;
+    int32_t sourceOnnxDtype{::ONNX_NAMESPACE::TensorProto::FLOAT};
     if (node.attribute().size() == 1 && node.attribute(0).name() == "value")
     {
         ::ONNX_NAMESPACE::AttributeProto const& nodeAttribute = node.attribute(0);
         ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = nodeAttribute.t();
+        sourceOnnxDtype = onnx_weights_tensor.data_type();
         ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(onnx_weights_tensor, &weights),
             "Failed to import ConstantOfShape node.", ErrorCode::kUNSUPPORTED_NODE);
     }
@@ -253,6 +322,13 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
         static_cast<float*>(weights.values)[0] = 0.f;
     }
 
+    if (mObserver != nullptr)
+    {
+        char const* const sourceName = node.output(0).c_str();
+        notifyObserver(name.c_str(), nvonnxparser::RefitTransformKind::kCONSTANT_OF_SHAPE, sourceOnnxDtype,
+            resolveTrtDtype(weights.type), static_cast<int64_t>(weights.count()),
+            std::span<char const* const>{&sourceName, 1}, 0.0F, asByteSpan(weights.values, weights.size_bytes()));
+    }
     ONNXTRT_CHECK(mRefitter->setNamedWeights(name.c_str(), std::move(weights)), "Failed to set named weights",
         ErrorCode::kREFIT_FAILED);
     ++mSuccessfullyRefittedWeights;
@@ -280,6 +356,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
         mRefittedWeights.insert(node.output(0));
     }
     ShapedWeights weights;
+    int32_t sourceOnnxDtype{::ONNX_NAMESPACE::TensorProto::UNDEFINED};
     ::ONNX_NAMESPACE::AttributeProto const& nodeAttribute = node.attribute(0);
     if (nodeAttribute.name() == "value_float")
     {
@@ -287,6 +364,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
         float value = nodeAttribute.f();
         ONNXTRT_CHECK(weights.count() == 1, "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
         std::memcpy(weights.values, &value, sizeof(float));
+        sourceOnnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
     }
     else if (nodeAttribute.name() == "value_floats")
     {
@@ -296,6 +374,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
         ONNXTRT_CHECK(
             weights.count() == values.size(), "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
         std::memcpy(weights.values, values.data(), weights.count() * sizeof(float));
+        sourceOnnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
     }
     else if (nodeAttribute.name() == "value_int")
     {
@@ -303,6 +382,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
         int64_t value = nodeAttribute.i();
         ONNXTRT_CHECK(weights.count() == 1, "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
         std::memcpy(weights.values, &value, sizeof(int64_t));
+        sourceOnnxDtype = ::ONNX_NAMESPACE::TensorProto::INT64;
     }
     else if (nodeAttribute.name() == "value_ints")
     {
@@ -312,12 +392,21 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
         ONNXTRT_CHECK(
             weights.count() == values.size(), "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
         std::memcpy(weights.values, values.data(), weights.count() * sizeof(int64_t));
+        sourceOnnxDtype = ::ONNX_NAMESPACE::TensorProto::INT64;
     }
     else
     {
         ::ONNX_NAMESPACE::TensorProto const& onnx_weights_tensor = nodeAttribute.t();
+        sourceOnnxDtype = onnx_weights_tensor.data_type();
         ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(onnx_weights_tensor, &weights),
             "Failed to import Constant node.", ErrorCode::kUNSUPPORTED_NODE);
+    }
+    if (mObserver != nullptr)
+    {
+        char const* const sourceName = node.output(0).c_str();
+        notifyObserver(node.output(0).c_str(), nvonnxparser::RefitTransformKind::kCONSTANT_NODE, sourceOnnxDtype,
+            resolveTrtDtype(weights.type), static_cast<int64_t>(weights.count()),
+            std::span<char const* const>{&sourceName, 1}, 0.0F, asByteSpan(weights.values, weights.size_bytes()));
     }
     ONNXTRT_CHECK(mRefitter->setNamedWeights(node.output(0).c_str(), std::move(weights)), "Failed to set named weights",
         ErrorCode::kREFIT_FAILED);
@@ -335,12 +424,19 @@ void ModelRefitter::refitOnnxBatchNormNode(
     // The following looping construct is due to the fact that some tensors
     // might be shared among the BatchNorm's inputs
     std::vector<std::string> const inputNames(node.input().begin() + 1, node.input().end());
+    // Captured from the first BN input initializer; reported through IRefitterObserver so the
+    // consumer sees the source ONNX dtype before convertOnnxWeights' DOUBLE-to-FLOAT promotion.
+    int32_t sourceOnnxDtype{::ONNX_NAMESPACE::TensorProto::UNDEFINED};
     for (size_t inputIdx = 0; inputIdx < inputNames.size(); ++inputIdx)
     {
         for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
         {
             if (inputNames.at(inputIdx) == initializer.name())
             {
+                if (inputIdx == 0)
+                {
+                    sourceOnnxDtype = initializer.data_type();
+                }
                 ShapedWeights weights;
                 ONNXTRT_CHECK(mWeightsContext.convertOnnxWeights(initializer, &weights),
                     "Failed to import initializer " << initializer.name(), ErrorCode::kUNSUPPORTED_NODE);
@@ -364,18 +460,19 @@ void ModelRefitter::refitOnnxBatchNormNode(
         && scaleType == batchNormInputs.at(3).type;
     if (typesEqual && scaleType == ::ONNX_NAMESPACE::TensorProto::FLOAT16)
     {
-        batchnormRefittedWeights
-            = batchnormWeightRefitter<half_float::half>(node, batchNormInputs, QuickCast<half_float::half>());
+        batchnormRefittedWeights = batchnormWeightRefitter<half_float::half>(
+            node, batchNormInputs, sourceOnnxDtype, QuickCast<half_float::half>());
     }
     else if (typesEqual && scaleType == ::ONNX_NAMESPACE::TensorProto::BFLOAT16)
     {
-        batchnormRefittedWeights = batchnormWeightRefitter<BFloat16>(node, batchNormInputs, QuickCast<BFloat16>());
+        batchnormRefittedWeights
+            = batchnormWeightRefitter<BFloat16>(node, batchNormInputs, sourceOnnxDtype, QuickCast<BFloat16>());
     }
     else
     {
         // Do calculations in FP32, possibly promoting/demoting arithmetic types of some operands.
-        batchnormRefittedWeights = batchnormWeightRefitter<float>(
-            node, batchNormInputs, [this](ShapedWeights const& w) { return mWeightsContext.getFP32Values(w); });
+        batchnormRefittedWeights = batchnormWeightRefitter<float>(node, batchNormInputs, sourceOnnxDtype,
+            [this](ShapedWeights const& w) { return mWeightsContext.getFP32Values(w); });
     }
     mSuccessfullyRefittedWeights += batchnormRefittedWeights;
 }

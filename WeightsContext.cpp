@@ -244,7 +244,7 @@ bool WeightsContext::convertOnnxWeights(
     //  1. User provided
     //  2. External weights
     //  3. Model weights
-    bool const userWeights = mExternalInits.count(initName);
+    bool const userWeights = mExternalInits.contains(initName);
 
     if (userWeights)
     {
@@ -578,7 +578,7 @@ bool WeightsContext::loadExternalInit(char const* name, void const* data, size_t
         return false;
     }
 
-    if (mExternalInits.count(name))
+    if (mExternalInits.contains(name))
     {
         LOG_WARNING("Initializer " << name << " was previously provided. Overwriting previous data.");
     }

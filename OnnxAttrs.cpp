@@ -9,7 +9,7 @@
 
 bool isExternalAttribute(std::string const& key, onnx2trt::ImporterContext* ctx)
 {
-    return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().attrs.count(key);
+    return !key.empty() && !ctx->localFunctionStack().empty() && ctx->localFunctionStack().back().attrs.contains(key);
 }
 
 template <>

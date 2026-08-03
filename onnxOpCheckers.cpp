@@ -103,7 +103,7 @@ void randomUniformCheckHelper(
     // Set datatype of output:
     //      RandomUniform: dype is required and defaults to 1
     //      RandomUniformLike: dtype is optional and defaults to the same type as the input
-    if (attrs.count("dtype"))
+    if (attrs.contains("dtype"))
     {
         auto dtype = attrs.get<int32_t>("dtype", 1);
         if (dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT && dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT16)
@@ -122,7 +122,7 @@ void randomNormalCheckHelper(
     // Set datatype of output:
     //      RandomNormal: dype is required and defaults to 1
     //      RandomNormalLike: dtype is optional and defaults to the same type as the input
-    if (attrs.count("dtype"))
+    if (attrs.contains("dtype"))
     {
         auto dtype = attrs.get<int32_t>("dtype", 1);
         if (dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT && dtype != ::ONNX_NAMESPACE::TensorProto::FLOAT16)
@@ -194,7 +194,7 @@ DEFINE_OP_CHECKER(Attention)
     STATIC_CHECK(softcap == 0.0 && "Setting softcap is not supported in TensorRT Attention.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 
-    bool const hasSoftmaxPrecision = static_cast<bool>(attrs.count("softmax_precision"));
+    bool const hasSoftmaxPrecision = static_cast<bool>(attrs.contains("softmax_precision"));
     STATIC_CHECK(!hasSoftmaxPrecision && "Setting softmax precision is not supported in TensorRT Attention.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
@@ -260,7 +260,11 @@ DEFINE_OP_CHECKER(Constant)
     // serialized iNetworkDefinition which does not have this check.
     if (attrs.get<std::vector<float>>("trt_outputs_range_min", {}).empty())
     {
-        STATIC_CHECK((!attrs.count("sparse_value")) && (!attrs.count("value_string")) && (!attrs.count("value_strings"))
+        // The next NOLINT suppresses a modernize-use-emplace warning that originates from
+        // `push_back` inside the STATIC_CHECK / ADD_STATIC_ERROR macro expansion in
+        // parsers/onnx/Status.hpp; fixing the macro is out of scope for this MR.
+        // NOLINTNEXTLINE(modernize-use-emplace)
+        STATIC_CHECK((!attrs.contains("sparse_value")) && (!attrs.contains("value_string")) && (!attrs.contains("value_strings"))
             && "This version of TensorRT does not support the sparse_value, value_string and value_strings attributes.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
@@ -347,6 +351,8 @@ DEFINE_OP_EMPTY_CHECKER(TRT_BlockQuantize)
 DEFINE_OP_EMPTY_CHECKER(TRT_BlockDequantize)
 
 DECLARE_OP_CHECKER(Mul);
+
+DEFINE_OP_EMPTY_CHECKER(DFT)
 
 DEFINE_OP_EMPTY_CHECKER(Div)
 
@@ -886,7 +892,7 @@ DEFINE_OP_CHECKER(TopK)
     if (ctx->getOpsetVersion() < 10)
     {
         STATIC_CHECK(
-            (attrs.count("k")) && "Attribute k is missing.", ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
+            (attrs.contains("k")) && "Attribute k is missing.", ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
     }
 }
 
@@ -1070,11 +1076,6 @@ DEFINE_OP_CHECKER(ConcatFromSequence)
 }
 
 DEFINE_OP_CHECKER(ConvInteger)
-{
-    STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-}
-
-DEFINE_OP_CHECKER(DFT)
 {
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }

@@ -29,9 +29,9 @@ public:
         }
     }
 
-    bool count(std::string const& key) const
+    [[nodiscard]] bool contains(std::string const& key) const
     {
-        return mAttrs.count(key);
+        return mAttrs.contains(key);
     }
 
     ::ONNX_NAMESPACE::AttributeProto const* at(std::string key) const
@@ -45,7 +45,7 @@ public:
 
     bool exists(std::string key) const
     {
-        return mAttrs.count(key) != 0;
+        return mAttrs.contains(key);
     }
 
     ::ONNX_NAMESPACE::AttributeProto::AttributeType type(std::string const& key) const

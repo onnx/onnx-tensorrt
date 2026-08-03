@@ -2,6 +2,12 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 11.2 GA Release - 2026-8-3
+For more details, see the 11.2 GA release notes.
+
+- Added `IRefitterObserver` class for better refitting of ONNX models.
+- Added support for the `DFT` operator and 5D `GridSample` operators.
+
 # TensorRT 11.1 GA Release - 2026-6-22
 For more details, see the 11.1 GA release notes.
 
