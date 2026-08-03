@@ -258,7 +258,7 @@ public:
         {
             return mOpsets.begin()->second;
         }
-        else if (mOpsets.count(domain))
+        else if (mOpsets.contains(domain))
         {
             return mOpsets.at(domain);
         }
@@ -371,7 +371,7 @@ public:
     void addLayerOutputTensors(std::string name, std::vector<TensorOrWeights> const& outputs)
     {
         static std::unordered_set<std::string> duplicateNames;
-        if (mNodeNameToTensor.find(name) != mNodeNameToTensor.end())
+        if (mNodeNameToTensor.contains(name))
         {
             // Log once (only if insertion succeeded) for each unique name.
             auto result = duplicateNames.insert(name);

@@ -250,7 +250,7 @@ void ImporterContext::registerLayer(
         layer->setName(uniqueName.c_str());
         if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
         {
-            if (basename != uniqueName && mConstantLayers.find(uniqueName) != mConstantLayers.end())
+            if (basename != uniqueName && mConstantLayers.contains(uniqueName))
             {
                 LOG_ERROR("Constant layer: " << uniqueName << " can be a duplicate of: " << basename);
                 assert(!"Internal error: duplicate constant layers for the same weights");

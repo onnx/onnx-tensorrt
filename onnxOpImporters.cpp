@@ -30,10 +30,15 @@
 #include <iterator>
 #include <limits> // For std::numeric_limits
 #include <numeric> // For std::iota
+#include <span>
 #include <sstream>
 #include <string_view>
 #include <tuple>
 #include <unordered_set>
+
+#ifdef __cpp_lib_math_constants
+#include <numbers>
+#endif // __cpp_lib_math_constants
 
 namespace onnx2trt
 {
@@ -230,6 +235,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Attention)
 
     return {{&reshapeOutputTensor(*attention->getOutput(0), ctx, needsReshape)}};
 }
+
 
 DEFINE_BUILTIN_OP_IMPORTER(TRT_QuantizedAttention)
 {
@@ -832,16 +838,85 @@ NodeOutputs elementwiseClipHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePr
     return {{upperClip}};
 }
 
+// If `bound` is a single-element float/fp16/bf16 constant, write its value to `value` and return
+// true; otherwise (a tensor, null, non-float, or non-scalar bound) return false. Clip min/max
+// bounds are scalars, so the other forms are simply not the constant-bound case handled here.
+[[nodiscard]] bool tryGetScalarFloatConstantBound(TensorOrWeights const& bound, float& value)
+{
+    if (!bound.is_weights() || bound.isNullTensor())
+    {
+        return false;
+    }
+    auto const& weights = bound.weights();
+    bool const isFloatType = weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT
+        || weights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16
+        || weights.type == ::ONNX_NAMESPACE::TensorProto::BFLOAT16;
+    if (!isFloatType || weights.count() != 1)
+    {
+        return false;
+    }
+    value = getSingleValueAsFloat(weights);
+    return true;
+}
+
+// A scalar bound that is an open-direction infinity (min == -inf or max == +inf) cannot use the
+// kCLIP activation path (setAlpha/setBeta reject non-finite values). Such a bound means "no bound on
+// that side", so it forces the elementwise kMIN/kMAX path, which clamps against the real value and
+// handles the infinity correctly. A wrong-direction infinity (min == +inf or max == -inf) would
+// clamp every element to a single value; like NaN it is treated as malformed and left for the
+// activation path's setAlpha/setBeta to reject, matching the pre-opset-11 attribute handling below.
+[[nodiscard]] bool isOpenInfiniteScalarBound(TensorOrWeights const& bound, bool isLowerBound)
+{
+    float value{};
+    if (!tryGetScalarFloatConstantBound(bound, value))
+    {
+        return false;
+    }
+    // Open direction: -inf for the lower bound, +inf for the upper bound.
+    return std::isinf(value) && std::signbit(value) == isLowerBound;
+}
+
+// A scalar NaN constant bound is malformed, not an open bound. It must reach the kCLIP activation
+// path so setAlpha/setBeta reject it; it must not be dragged onto the elementwise path by a sibling
+// open-direction infinity, which would silently accept the malformed model.
+[[nodiscard]] bool isNaNScalarBound(TensorOrWeights const& bound)
+{
+    float value{};
+    return tryGetScalarFloatConstantBound(bound, value) && std::isnan(value);
+}
+
+// Map an open-bound infinity to the dtype limit so the kCLIP activation path applies: min == -inf
+// becomes lowest(), max == +inf becomes max(). Any other value -- finite, or a wrong-direction
+// infinity such as min == +inf -- is returned unchanged for setAlpha/setBeta to handle.
+[[nodiscard]] float openInfinityToLimit(float value, bool isLowerBound)
+{
+    if (std::isinf(value) && std::signbit(value) == isLowerBound)
+    {
+        return isLowerBound ? std::numeric_limits<float>::lowest() : std::numeric_limits<float>::max();
+    }
+    return value;
+}
+
 DEFINE_BUILTIN_OP_IMPORTER(Clip)
 {
     checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
     // For INT32 and multi-input clips, use elementwise operators instead.
-    size_t numInputs = inputs.size();
-    bool elementwiseClip = inputs.at(0).isInt32() || inputs.at(0).isInt64();
-    for (size_t i = 1; i < numInputs; i++)
-    {
-        elementwiseClip |= inputs.at(i).is_tensor();
-    }
+    size_t const numInputs = inputs.size();
+    // The bounds are inputs [1, numInputs): input 1 is "min" (open at -inf), input 2 is "max"
+    // (open at +inf).
+    auto const bounds = std::span(inputs).subspan(1);
+    // A tensor bound (runtime -- no activation path) or an INT input forces the elementwise
+    // kMIN/kMAX path. An open-direction constant infinity (e.g. clip(x, eps, +inf) ahead of a log)
+    // also forces it -- unless a sibling bound is a NaN constant, which is malformed and must reach
+    // the activation path to be rejected rather than silently accepted, so the NaN vetoes the
+    // open-infinity routing. See isOpenInfiniteScalarBound / isNaNScalarBound.
+    bool const hasNaNConstantBound = std::ranges::any_of(bounds, isNaNScalarBound);
+    bool const hasOpenInfiniteBound
+        = (numInputs > 1 && isOpenInfiniteScalarBound(inputs.at(1), /*isLowerBound=*/true))
+        || (numInputs > 2 && isOpenInfiniteScalarBound(inputs.at(2), /*isLowerBound=*/false));
+    bool const elementwiseClip = inputs.at(0).isInt32() || inputs.at(0).isInt64()
+        || std::ranges::any_of(bounds, &TensorOrWeights::is_tensor)
+        || (hasOpenInfiniteBound && !hasNaNConstantBound);
     if (elementwiseClip)
     {
         auto type = convertToTensor(inputs.at(0), ctx).getType();
@@ -851,25 +926,23 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
             "type is "
                 + getTrtDtypeName(type) + ".",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-        if (type == DataType::kHALF)
+        //! Call elementwiseClipHelper<T> with the given \p onnxType.
+        auto eltwiseClipHelper = [&]<typename T>(std::type_identity<T>, int32_t onnxType) -> decltype(auto) {
+            return elementwiseClipHelper<T>(ctx, node, inputs, numInputs, onnxType);
+        };
+        switch (type)
         {
-            return elementwiseClipHelper<half_float::half>(
-                ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::FLOAT16);
+        case DataType::kHALF:
+            return eltwiseClipHelper(std::type_identity<half_float::half>{}, ::ONNX_NAMESPACE::TensorProto::FLOAT16);
+        case DataType::kBF16:
+            return eltwiseClipHelper(std::type_identity<BFloat16>{}, ::ONNX_NAMESPACE::TensorProto::BFLOAT16);
+        case DataType::kFLOAT:
+            return eltwiseClipHelper(std::type_identity<float>{}, ::ONNX_NAMESPACE::TensorProto::FLOAT);
+        case DataType::kINT64:
+            return eltwiseClipHelper(std::type_identity<int64_t>{}, ::ONNX_NAMESPACE::TensorProto::INT64);
+        default:
+            return eltwiseClipHelper(std::type_identity<int32_t>{}, ::ONNX_NAMESPACE::TensorProto::INT32);
         }
-        if (type == DataType::kBF16)
-        {
-            return elementwiseClipHelper<BFloat16>(
-                ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::BFLOAT16);
-        }
-        if (type == DataType::kFLOAT)
-        {
-            return elementwiseClipHelper<float>(ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::FLOAT);
-        }
-        if (type == DataType::kINT64)
-        {
-            return elementwiseClipHelper<int64_t>(ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::INT64);
-        }
-        return elementwiseClipHelper<int32_t>(ctx, node, inputs, numInputs, ::ONNX_NAMESPACE::TensorProto::INT32);
     }
 
     // Activation path only supports float/half initializers
@@ -911,8 +984,10 @@ DEFINE_BUILTIN_OP_IMPORTER(Clip)
     }
     else
     {
-        alpha = attrs.get("min", std::numeric_limits<float>::lowest());
-        beta = attrs.get("max", std::numeric_limits<float>::max());
+        // openInfinityToLimit maps the open-bound infinities (min == -inf, max == +inf) to the dtype
+        // limit so the activation path applies; wrong-direction infinities are left to be rejected.
+        alpha = openInfinityToLimit(attrs.get("min", std::numeric_limits<float>::lowest()), /*isLowerBound=*/true);
+        beta = openInfinityToLimit(attrs.get("max", std::numeric_limits<float>::max()), /*isLowerBound=*/false);
     }
 
     return activationHelper(ctx, node, nodeIdx, inputs, nvinfer1::ActivationType::kCLIP, &alpha, &beta);
@@ -955,7 +1030,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Constant)
 
     if (ctx->getOpsetVersion() >= 12)
     {
-        if (attrs.count("value_float"))
+        if (attrs.contains("value_float"))
         {
             ShapedWeights convertedWeights = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, {0, {}});
             float value = attrs.get<float>("value_float");
@@ -963,7 +1038,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Constant)
             return {{convertedWeights}};
         }
 
-        if (attrs.count("value_floats"))
+        if (attrs.contains("value_floats"))
         {
             std::vector<float> values = attrs.get<std::vector<float>>("value_floats");
             int32_t valueSize = values.size();
@@ -972,7 +1047,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Constant)
             std::memcpy(convertedWeights.values, values.data(), convertedWeights.count() * sizeof(float));
             return {{convertedWeights}};
         }
-        if (attrs.count("value_int"))
+        if (attrs.contains("value_int"))
         {
             ShapedWeights convertedWeights = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, {0, {}});
             int64_t value = attrs.get<int64_t>("value_int");
@@ -980,7 +1055,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Constant)
             return {{convertedWeights}};
         }
 
-        if (attrs.count("value_ints"))
+        if (attrs.contains("value_ints"))
         {
             std::vector<int64_t> values = attrs.get<std::vector<int64_t>>("value_ints");
             int32_t valueSize = values.size();
@@ -1253,7 +1328,7 @@ DEFINE_BUILTIN_OP_IMPORTER(ConvTranspose)
     // 3. Use specified "pads" values from the node. Pad the resulting output vector with values from output_padding.
 
     auto autoPadMode = attrs.get("auto_pad", std::string("NOTSET"));
-    if (attrs.count("output_shape") && autoPadMode == std::string("NOTSET"))
+    if (attrs.contains("output_shape") && autoPadMode == std::string("NOTSET"))
     {
         outputShape = attrs.get<nvinfer1::Dims>("output_shape");
 
@@ -1554,49 +1629,6 @@ DEFINE_BUILTIN_OP_IMPORTER(DistCollective)
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
 
-// Backward traverse the graph to retrieve the input weights from the constant node. We allow skipping all cast/identity
-// nodes until reaching the constant node.
-ShapedWeights getWeightsFromIdentityOrConstant(nvinfer1::INetworkDefinition& network, nvinfer1::ITensor* input)
-{
-    // Const node output -> const node mapping.
-    std::unordered_map<nvinfer1::ITensor*, nvinfer1::IConstantLayer*> constNodeToOutputMap;
-    // Identity node output -> identity/cast node mapping.
-    std::unordered_map<nvinfer1::ITensor*, nvinfer1::ILayer*> identityCastNodeToOutputMap;
-
-    // Collect all the constant, identity nodes from network.
-    int32_t nbLayers = network.getNbLayers();
-    for (int32_t i = 0; i < nbLayers; ++i)
-    {
-        nvinfer1::ILayer* layer = N_CHECK(network.getLayer(i));
-        if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
-        {
-            constNodeToOutputMap[layer->getOutput(0)] = static_cast<nvinfer1::IConstantLayer*>(layer);
-        }
-        else if ((layer->getType() == nvinfer1::LayerType::kIDENTITY)
-            || (layer->getType() == nvinfer1::LayerType::kCAST))
-        {
-            identityCastNodeToOutputMap[layer->getOutput(0)] = layer;
-        }
-    }
-    // Skip all the cast/identity nodes before current node.
-    auto findIdenityIter = identityCastNodeToOutputMap.find(input);
-    while (findIdenityIter != identityCastNodeToOutputMap.end())
-    {
-        input = findIdenityIter->second->getInput(0);
-        findIdenityIter = identityCastNodeToOutputMap.find(input);
-    }
-    // Find out the weights from constant node.
-    auto findConstIter = constNodeToOutputMap.find(input);
-    if (findConstIter != constNodeToOutputMap.end())
-    {
-        auto weights = findConstIter->second->getWeights();
-        return ShapedWeights(
-            trtDataTypeToONNX(weights.type), const_cast<void*>(weights.values), findConstIter->second->getDimensions());
-    }
-    // Return empty weights when not found.
-    return ShapedWeights{};
-}
-
 // This is a helper function for QuantizeLinear/DequantizeLinear
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t nodeIdx,
@@ -1791,7 +1823,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
             if (zeroPtInput.is_tensor())
             {
                 // Look backward to find out the original weights in "Constant" node.
-                zeroPoint = getWeightsFromIdentityOrConstant(*ctx->network(), &zeroPtInput.tensor());
+                zeroPoint = getWeightsFromIdentityOrConstant(ctx, &zeroPtInput.tensor());
             }
             else
             {
@@ -1852,7 +1884,7 @@ NodeOutputs QuantDequantLinearHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
     int32_t axis = attrs.get<int32_t>("axis", 1);
 
     // Axis attribute was first introduced in opset 13. Use a default of 0 for older models.
-    if (ctx->getOpsetVersion() < 13 && !attrs.count("axis"))
+    if (ctx->getOpsetVersion() < 13 && !attrs.contains("axis"))
     {
         axis = 0;
     }
@@ -2402,7 +2434,7 @@ DEFINE_BUILTIN_OP_IMPORTER(EyeLike)
 
     // The data type can be specified by the 'dtype' argument
     DataType dtype = tensor.getType();
-    if (attrs.count("dtype"))
+    if (attrs.contains("dtype"))
     {
         auto onnxType = attrs.get<int32_t>("dtype");
         ONNXTRT_CHECK_NODE(
@@ -4819,7 +4851,7 @@ NodeOutputs randomHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
     // Set datatype of output:
     //      RandomUniform / RandomNormal: dtype is required and defaults to 1
     //      RandomUniformLike / RandomNormalLike: dtype is optional and defaults to the same type as the input
-    if (attrs.count("dtype"))
+    if (attrs.contains("dtype"))
     {
         auto dtype = attrs.get<int32_t>("dtype", 1);
         switch (dtype)
@@ -4843,7 +4875,7 @@ NodeOutputs randomHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
     fillLayer->setBeta(beta);
 
     // TensorRT does not support "seed" field now. The support will be added in future versions.
-    if (attrs.count("seed"))
+    if (attrs.contains("seed"))
     {
         LOG_WARNING(
             "TensorRT currently ignores the \"seed\" field in RandomUniform or RandomNormal op. Random seeds will be "
@@ -5471,7 +5503,8 @@ DEFINE_BUILTIN_OP_IMPORTER(RotaryEmbedding)
 
     if (inputIs3D) // (batchSize, sequenceLength, hiddenSize=numHeads * headSize)
     {
-        ONNXTRT_CHECK_NODE(attrs.count("num_heads"), "num_heads attribute is required for 3D input tensors.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+        ONNXTRT_CHECK_NODE(attrs.contains("num_heads"), "num_heads attribute is required for 3D input tensors.", node,
+            nodeIdx, ErrorCode::kINVALID_NODE);
         int32_t const numHeads = attrs.get<int32_t>("num_heads");
         int32_t const hiddenSize = input->getDimensions().d[2];
         ONNXTRT_CHECK_NODE(hiddenSize % numHeads == 0, "hiddenSize must be divisible by num_heads.", node, nodeIdx,
@@ -5527,7 +5560,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Reshape)
     if (ctx->getOpsetVersion() >= 5)
     {
         OnnxAttrs attrs{node, ctx};
-        if (attrs.count("allowzero"))
+        if (attrs.contains("allowzero"))
         {
             allowZero = attrs.get<int32_t>("allowzero");
             if (ctx->getOpsetVersion() < 14)
@@ -6005,19 +6038,24 @@ DEFINE_BUILTIN_OP_IMPORTER(GridSample)
         sampleMode = nvinfer1::SampleMode::kREFLECT;
     }
 
-    auto mode = attrs.get<std::string>("mode", "bilinear");
+    auto mode = attrs.get<std::string>("mode", "linear");
     nvinfer1::InterpolationMode interpolationMode{nvinfer1::InterpolationMode::kNEAREST};
     if (mode == "nearest")
     {
         interpolationMode = nvinfer1::InterpolationMode::kNEAREST;
     }
-    else if (mode == "bilinear")
+    else if (mode == "linear" || mode == "bilinear")
     {
         interpolationMode = nvinfer1::InterpolationMode::kLINEAR;
     }
-    else if (mode == "bicubic")
+    else if (mode == "cubic" || mode == "bicubic")
     {
         interpolationMode = nvinfer1::InterpolationMode::kCUBIC;
+    }
+    else
+    {
+        ONNXTRT_CHECK_NODE(
+            false, "Unsupported interpolation mode: " << mode, node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_ATTR);
     }
 
     bool const alignCorners{attrs.get<int32_t>("align_corners", 0) == 1};
@@ -6069,6 +6107,174 @@ NodeOutputs scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     auto* layer = N_CHECK(ctx->network()->addPluginV3(pluginInputs.data(), pluginInputs.size(), nullptr, 0, *plugin));
     ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
+}
+
+// ONNX defines the inverse DFT to output with a 1/N factor, but cuFFT's inverse is unnormalized,
+// and returns N * result. This scales the output by 1/N.
+// For C2R, N is at output axis -1.
+// For C2C, N is at output axis -2. See the table in the DFT importer.
+nvinfer1::ITensor* dftNormalizeInverse(ImporterContext* ctx, nvinfer1::ITensor* out, bool isC2R)
+{
+    int32_t const outRank = out->getDimensions().nbDims;
+    int32_t const nAxis = isC2R ? outRank - 1 : outRank - 2;
+    nvinfer1::Dims scaleShape{};
+    scaleShape.nbDims = outRank;
+    for (int32_t i = 0; i < outRank; ++i)
+    {
+        scaleShape.d[i] = 1;
+    }
+    nvinfer1::ITensor* nLength
+        = castHelper(ctx, getAxisLength(ctx, out, nAxis, scaleShape), nvinfer1::DataType::kFLOAT);
+    nvinfer1::ITensor* one
+        = N_CHECK(addConstantScalar(ctx, 1.0F, ::ONNX_NAMESPACE::TensorProto::FLOAT, outRank)->getOutput(0));
+    nvinfer1::ITensor* scale = getElementWiseResult(ctx, *one, *nLength, nvinfer1::ElementWiseOperation::kDIV);
+    scale = castHelper(ctx, scale, out->getType());
+    return getElementWiseResult(ctx, *out, *scale, nvinfer1::ElementWiseOperation::kPROD);
+}
+
+// DFT maps to one of three cuFFT modes, set by `inverse`, `onesided`, and whether the input
+// is real (innermost axis -1 has size 1) or complex (size 2). Complex uses the interleaved
+// [..., 2] real/imag layout. N is the transformed length, along axis -2.
+//
+//   | inverse | onesided | input                   | mode        | output          |
+//   |---------|----------|-------------------------|-------------|-----------------|
+//   |    0    |    0     | complex [..., N, 2]     | C2C forward | [..., N, 2]     |
+//   |    1    |    0     | complex [..., N, 2]     | C2C inverse | [..., N, 2]     |
+//   |    0    |    1     | real    [..., N, 1]     | R2C         | [..., N/2+1, 2] |
+//   |    1    |    1     | complex [..., N/2+1, 2] | C2R         | [..., N, 1]     |
+//
+// onesided picks C2C versus the real half-spectrum transforms, and inverse picks the
+// direction. The inverse is 1/N normalized in ONNX. cuFFT is unnormalized, so
+// dftNormalizeInverse applies the 1/N scaling. There is no R2R mode: a real signal's
+// Fourier transform is complex.
+DEFINE_BUILTIN_OP_IMPORTER(DFT)
+{
+    OnnxAttrs attrs(node, ctx);
+    int32_t const inverse = attrs.get<int32_t>("inverse", 0);
+    int32_t const onesided = attrs.get<int32_t>("onesided", 0);
+    ONNXTRT_CHECK_NODE(inverse == 0 || inverse == 1, "DFT 'inverse' must be 0 or 1, got " << inverse << ".", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    ONNXTRT_CHECK_NODE(onesided == 0 || onesided == 1, "DFT 'onesided' must be 0 or 1, got " << onesided << ".", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+    nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
+    int32_t const rank = input->getDimensions().nbDims;
+    ONNXTRT_CHECK_NODE(
+        rank >= 2, "DFT input must have rank >= 2, got " << rank << ".", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+
+    // The innermost axis (-1) flags real (1) or complex (2) and must be static.
+    int64_t const lastDim = input->getDimensions().d[rank - 1];
+    ONNXTRT_CHECK_NODE(lastDim == 1 || lastDim == 2,
+        "DFT requires a static innermost axis (-1) of size 1 (real) or 2 (complex), got " << lastDim << ".", node,
+        nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+    bool const realInput = lastDim == 1;
+    bool const hasDftLength = inputs.size() > 1 && !inputs.at(1).isNullTensor();
+    bool const isC2R = inverse != 0 && onesided != 0;
+
+    // The transform axis was an attribute before opset 20, and an optional input in opset 20+.
+    // It must be axis -2, the signal axis just inside the -1 real/imag dim. FFTPlugin maps to
+    // cuFFT, which transforms only innermost axes. An interior axis could be supported in the
+    // future by transposing it to the end, transforming, then transposing back.
+    // See also https://jirasw.nvidia.com/browse/TRT-28174.
+    int32_t axis = -2;
+    if (ctx->getOpsetVersion() >= 20)
+    {
+        if (inputs.size() > 2 && !inputs.at(2).isNullTensor())
+        {
+            ONNXTRT_CHECK_NODE(inputs.at(2).is_weights(),
+                "FFTPlugin requires the DFT 'axis' input to be a build-time constant.", node, nodeIdx,
+                ErrorCode::kUNSUPPORTED_NODE);
+            auto const axisWeights = inputs.at(2).weights();
+            ONNXTRT_CHECK_NODE(
+                axisWeights.count() == 1, "DFT 'axis' must be a scalar.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+            axis = axisWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64
+                ? static_cast<int32_t>(static_cast<int64_t const*>(axisWeights.values)[0])
+                : static_cast<int32_t const*>(axisWeights.values)[0];
+        }
+    }
+    else
+    {
+        axis = attrs.get<int32_t>("axis", 1);
+    }
+    int32_t const normAxis = axis < 0 ? axis + rank : axis;
+    ONNXTRT_CHECK_NODE(normAxis == rank - 2,
+        "FFTPlugin supports DFT only on axis -2, got axis " << axis << " for rank " << rank << ".", node, nodeIdx,
+        ErrorCode::kUNSUPPORTED_NODE);
+
+    // Reject any config outside the four modes in the table above.
+    if (inverse == 0)
+    {
+        if (realInput)
+        {
+            ONNXTRT_CHECK_NODE(onesided != 0, "FFTPlugin supports real-input forward DFT only with onesided=1 (R2C).",
+                node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        }
+        else
+        {
+            ONNXTRT_CHECK_NODE(onesided == 0,
+                "FFTPlugin supports complex-input forward DFT only with onesided=0 (C2C).", node, nodeIdx,
+                ErrorCode::kUNSUPPORTED_NODE);
+        }
+        ONNXTRT_CHECK_NODE(!hasDftLength, "FFTPlugin does not support dft_length for the forward DFT.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+    else
+    {
+        ONNXTRT_CHECK_NODE(
+            !realInput, "Inverse DFT requires complex input ([..., 2]).", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK_NODE(isC2R || !hasDftLength,
+            "FFTPlugin does not support dft_length (padding/truncation) for the inverse C2C DFT.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+        ONNXTRT_CHECK_NODE(!isC2R || hasDftLength,
+            "C2R requires explicit dft_length to differentiate even vs odd output length.", node, nodeIdx,
+            ErrorCode::kUNSUPPORTED_NODE);
+    }
+
+    // R2C: drop the -1 real/imag dim ([...,N,1] -> [...,N]) for cuFFT.
+    if (realInput)
+    {
+        input = squeezeTensor(ctx, *input, std::vector<int32_t>{rank - 1});
+    }
+
+    int32_t const ndims = 1;
+    std::vector<nvinfer1::PluginField> fields;
+    fields.emplace_back("inverse", &inverse, nvinfer1::PluginFieldType::kINT32, 1);
+    fields.emplace_back("onesided", &onesided, nvinfer1::PluginFieldType::kINT32, 1);
+    fields.emplace_back("ndims", &ndims, nvinfer1::PluginFieldType::kINT32, 1);
+    auto const plugin = createPlugin(ctx, node, getNodeName(node), kTRT_STD_PLUGIN_NAMESPACE,
+        static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, "FFTPlugin", "1")), fields);
+    ONNXTRT_CHECK_NODE(plugin != nullptr, "FFTPlugin was not found in the plugin registry!", node, nodeIdx,
+        ErrorCode::kUNSUPPORTED_NODE);
+
+    std::vector<nvinfer1::ITensor*> pluginInputs{input};
+    std::vector<nvinfer1::ITensor*> shapeInputs;
+    if (isC2R && hasDftLength)
+    {
+        // Reshape the dft_length from scalar to [1]
+        nvinfer1::ITensor* length = &convertToTensor(inputs.at(1), ctx);
+        if (length->getDimensions().nbDims == 0)
+        {
+            length = unsqueezeTensor(ctx, *length, std::array{int32_t{0}});
+        }
+        shapeInputs.push_back(castHelper(ctx, length, nvinfer1::DataType::kINT64));
+    }
+
+    auto* layer = N_CHECK(ctx->network()->addPluginV3(pluginInputs.data(), pluginInputs.size(), shapeInputs.data(),
+        static_cast<int32_t>(shapeInputs.size()), *plugin));
+    ctx->registerLayer(layer, node);
+    nvinfer1::ITensor* out = N_CHECK(layer->getOutput(0));
+
+    if (inverse != 0)
+    {
+        out = dftNormalizeInverse(ctx, out, isC2R);
+    }
+    // C2R: restore the ONNX -1 real/imag dim ([...,N] -> [...,N,1]).
+    if (isC2R)
+    {
+        out = unsqueezeTensor(ctx, *out, std::vector<int32_t>{out->getDimensions().nbDims});
+    }
+
+    return {{out}};
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(ScatterElements)
@@ -6224,8 +6430,8 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         starts = ShapeTensor(1, attrs.get<std::vector<int64_t>>("starts"));
         ends = ShapeTensor(1, attrs.get<std::vector<int64_t>>("ends"));
         // "It's optional. If not present, will be treated as [0, 1, ..., len(starts) - 1]."
-        axes = attrs.count("axes") ? ShapeTensor(1, attrs.get<std::vector<int64_t>>("axes"))
-                                   : iotaShapeVector(starts.size());
+        axes = attrs.contains("axes") ? ShapeTensor(1, attrs.get<std::vector<int64_t>>("axes"))
+                                      : iotaShapeVector(starts.size());
         steps = similar(ctx, starts, 1);
     }
 
@@ -6362,7 +6568,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
     ShapeTensor sizeSliceAxis;
     ShapeTensor sizeSliceAxisLastOne;
     ShapeTensor splitSizesTensor;
-    bool const hasSplitList = (ctx->getOpsetVersion() >= 13) ? (inputs.size() == 2) : attrs.count("split");
+    bool const hasSplitList = (ctx->getOpsetVersion() >= 13) ? (inputs.size() == 2) : attrs.contains("split");
     if (hasSplitList)
     {
         // "Lengths of the parts can be specified using argument split."
@@ -6386,7 +6592,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
             // "Either input 'split' or the attribute 'num_outputs' should be specified, but not both."
             if (ctx->getOpsetVersion() >= 18)
             {
-                ONNXTRT_CHECK_NODE(!attrs.count("num_outputs"),
+                ONNXTRT_CHECK_NODE(!attrs.contains("num_outputs"),
                     "Either 'split' should be provided as an input or 'num_outputs' should be provided as an "
                     "attribute. But not both.",
                     node, nodeIdx, ErrorCode::kINVALID_NODE);
@@ -6405,7 +6611,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
     else
     {
         // In opset >= 18, a new attribute 'num_outputs' has been added.
-        if (ctx->getOpsetVersion() >= 18 && attrs.count("num_outputs"))
+        if (ctx->getOpsetVersion() >= 18 && attrs.contains("num_outputs"))
         {
             ONNXTRT_CHECK_NODE(attrs.get<int32_t>("num_outputs") == static_cast<int32_t>(numOutputs),
                 "The number of node outputs is not the same as the value of 'num_outputs' attribute. num_outputs "
@@ -6491,7 +6697,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
     else
     {
         OnnxAttrs attrs(node, ctx);
-        if (attrs.count("axes"))
+        if (attrs.contains("axes"))
         {
             std::vector<int64_t> axes = attrs.get<std::vector<int64_t>>("axes");
             axesTensor = N_CHECK(
@@ -6532,6 +6738,35 @@ DEFINE_BUILTIN_OP_IMPORTER(Squeeze)
     auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(data, *axesTensor));
     ctx->registerLayer(squeezeLayer, node);
     RETURN_FIRST_OUTPUT(squeezeLayer, node, nodeIdx);
+}
+
+// MSVC trips on the variable template std::numbers::pi_v<float> inside a function template
+// (C7510), so bind it to a non-template constant here.
+#ifdef __cpp_lib_math_constants
+constexpr float kSTFT_PI = std::numbers::pi_v<float>;
+#else
+constexpr float kSTFT_PI = static_cast<float>(M_PI);
+#endif // __cpp_lib_math_constants
+
+//! Fill the real/imaginary DFT convolution weights for STFT in the requested storage type \p T.
+//! Coefficients are computed in float and cast to \p T (float, half_float::half, or BFloat16) so the
+//! convolution runs in the input precision in strongly typed networks.
+template <typename T>
+void fillStftDftWeights(ShapedWeights& realWeights, ShapedWeights& imaginaryWeights, float const* window,
+    int64_t dftUniqueBins, int64_t frameLength)
+{
+    for (int64_t w = 0; w < dftUniqueBins; ++w)
+    {
+        for (int64_t k = 0; k < frameLength; ++k)
+        {
+            int64_t const weightIndex = w * frameLength + k;
+
+            auto const angle = -2.0F * kSTFT_PI * w * k / frameLength;
+
+            realWeights.at<T>(weightIndex) = static_cast<T>(std::cos(angle) * window[k]);
+            imaginaryWeights.at<T>(weightIndex) = static_cast<T>(std::sin(angle) * window[k]);
+        }
+    }
 }
 
 DEFINE_BUILTIN_OP_IMPORTER(STFT)
@@ -6581,10 +6816,17 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
         input = squeezeTensor(ctx, *input, axes);
     }
 
-    // Float only support.
-    ONNXTRT_CHECK_NODE(input->getType() == nvinfer1::DataType::kFLOAT,
-        "Input to STFT must be Float32. Received type: " << input->getType(), node, nodeIdx,
+    // STFT now supports FP32, FP16, and BF16.
+    // The convolution decomposition runs in the input precision.
+    auto const inputType = input->getType();
+    ONNXTRT_CHECK_NODE(inputType == nvinfer1::DataType::kFLOAT || inputType == nvinfer1::DataType::kHALF
+            || inputType == nvinfer1::DataType::kBF16,
+        "Input to STFT must be FP32, FP16, or BF16. Received type: " << inputType, node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
+    auto const onnxWeightType = (inputType == nvinfer1::DataType::kHALF)
+        ? ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16
+        : (inputType == nvinfer1::DataType::kBF16 ? ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16
+                                                  : ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
 
     int64_t frameStep{0};
     ShapedWeights windowWeights = ShapedWeights::empty(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT);
@@ -6630,6 +6872,13 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
         }
     }
 
+    ONNXTRT_CHECK_NODE(
+        windowWeights.shape.nbDims == 1, "window must be 1D for STFT.", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK_NODE(windowWeights.shape.d[0] == frameLength,
+        "window length must match frame_length. window length = " << windowWeights.shape.d[0]
+                                                                  << ", frame_length = " << frameLength << ".",
+        node, nodeIdx, ErrorCode::kINVALID_NODE);
+
     // Calculate dftUniqueBins depending on the onesided attribute.
     int64_t dftUniqueBins = onesided == 1 ? ((frameLength >> 1) + 1) : frameLength;
 
@@ -6650,26 +6899,39 @@ DEFINE_BUILTIN_OP_IMPORTER(STFT)
                 imagWeights[w, 1, 1, k] = sin(-2 * pi * k * w / n) * window[k]
     */
 
-    auto realWeights = ctx->createNamedTempWeights(
-        ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, {4, {dftUniqueBins, 1, 1, frameLength}});
-    auto imaginaryWeights = ctx->createNamedTempWeights(
-        ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, {4, {dftUniqueBins, 1, 1, frameLength}});
+    auto realWeights = ctx->createNamedTempWeights(onnxWeightType, {4, {dftUniqueBins, 1, 1, frameLength}});
+    auto imaginaryWeights = ctx->createNamedTempWeights(onnxWeightType, {4, {dftUniqueBins, 1, 1, frameLength}});
 
-    for (int64_t w = 0; w < static_cast<int64_t>(dftUniqueBins); w++)
+    // Read the window in FP32 regardless of its storage type so FP16/BF16 window initializers decode correctly.
+    float const* window = ctx->getWeightsContext().getFP32Values(windowWeights);
+
+    if (!window)
     {
-        for (int64_t k = 0; k < static_cast<int64_t>(frameLength); k++)
-        {
-            int64_t weightIndex = w * frameLength + k;
-            auto angle = -2.F * M_PI * w * k / frameLength;
-            static_cast<float*>(realWeights.values)[weightIndex]
-                = static_cast<float>(cos(angle)) * static_cast<float*>(windowWeights.values)[k];
-            static_cast<float*>(imaginaryWeights.values)[weightIndex]
-                = static_cast<float>(sin(angle)) * static_cast<float*>(windowWeights.values)[k];
-        }
+        ONNXTRT_CHECK_NODE(false, "Failed to get window weights!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+    }
+
+    // Fill the weights for the convolutions, of shape (dftUniqueBins, 1, 1, frameLength).
+    switch (inputType)
+    {
+    case nvinfer1::DataType::kHALF:
+    {
+        fillStftDftWeights<half_float::half>(realWeights, imaginaryWeights, window, dftUniqueBins, frameLength);
+        break;
+    }
+    case nvinfer1::DataType::kBF16:
+    {
+        fillStftDftWeights<BFloat16>(realWeights, imaginaryWeights, window, dftUniqueBins, frameLength);
+        break;
+    }
+    default:
+    {
+        fillStftDftWeights<float>(realWeights, imaginaryWeights, window, dftUniqueBins, frameLength);
+        break;
+    }
     }
 
     // Unsqueeze input to [batch, 1, 1, numFrames]
-    auto signalReshaped = unsqueezeTensor(ctx, *input, {1, 2});
+    auto signalReshaped = unsqueezeTensor(ctx, *input, std::array{int32_t{1}, int32_t{2}});
 
     // 1D Convolution to calculate the real part of the signal.
     auto convReal = N_CHECK(
@@ -7211,7 +7473,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Upsample)
     {
         // TRT-15340: Adapt to use resizeShapeTensor instead when safety support nbDims == 1.
         ONNXTRT_CHECK_NODE(
-            attrs.count("scales"), "Attribute scales is missing.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_ATTR);
+            attrs.contains("scales"), "Attribute scales is missing.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_ATTR);
         // Get scale factors from OnnxAttrs.
         auto scales = attrs.get<std::vector<float>>("scales");
         // Scale factors has batch dimension.
@@ -7332,7 +7594,7 @@ std::vector<nvinfer1::PluginField> loadFields(StringMap<std::vector<uint8_t>>& f
     for (int32_t i = 0; i < fieldNames->nbFields; ++i)
     {
         // Some plugins may have default values for fields that map to optional attributes in an ONNX graph.
-        if (!attrs.count(fieldNames->fields[i].name))
+        if (!attrs.contains(fieldNames->fields[i].name))
         {
             LOG_WARNING("Attribute " << fieldNames->fields[i].name
                                      << " not found in plugin node! Ensure that the plugin creator has a default value "
@@ -7462,7 +7724,7 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
     std::unordered_set<int32_t> shapeInputIdxsSet{};
     auto const nbInputs{static_cast<int32_t>(inputs.size())};
 
-    if (attrs.count("tensorrt_plugin_shape_input_indices"))
+    if (attrs.contains("tensorrt_plugin_shape_input_indices"))
     {
         if (creator->getInterfaceInfo().kind != "PLUGIN CREATOR_V1"sv)
         {
@@ -7510,7 +7772,7 @@ NodeOutputs addPluginWithCreator(ImporterContext* ctx, ::ONNX_NAMESPACE::NodePro
     {
         auto input = inputs[idx];
         auto pluginInputVec
-            = shapeInputIdxsSet.find(idx) != shapeInputIdxsSet.end() ? &pluginShapeInputs : &pluginInputs;
+            = shapeInputIdxsSet.contains(idx) ? &pluginShapeInputs : &pluginInputs;
         if (input.isNullTensor())
         {
             LOG_VERBOSE("Found unset input for " << pluginName << ".");
@@ -7923,7 +8185,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_Shuffle)
 
     if (inputs.size() == 1)
     {
-        if (attrs.count("reshape_dims"))
+        if (attrs.contains("reshape_dims"))
         {
             nvinfer1::Dims reshapeDims = attrs.get<nvinfer1::Dims>("reshape_dims");
             layer->setReshapeDimensions(reshapeDims);
@@ -8207,7 +8469,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_MoE)
     //   8: fcDownBiases (optional, null if not provided)
     //   9: fcDownActivationScale (optional, for quantization)
     // Attributes:
-    //   activation_type: int32_t (0 = kNONE, 1 = kSILU) [default: 1]
+    //   activation_type: int32_t (0 = kNONE, 1 = kSILU) [default: 0]
     //   quantization_mode: int32_t (0 = none, 1 = static, 2 = dynamic_dblq) [default: 0]
     //   quantization_dtype: int32_t (DataType value for quantization, e.g., kFP8, kFP4) [default: kFP8]
     //   quantization_block_shape: int32_t array [4] (block shape for quantization) [default: [1,1,-1,-1]]
@@ -8235,7 +8497,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_MoE)
 
     // Get activation type attribute
     OnnxAttrs attrs(node, ctx);
-    int32_t activationTypeInt = attrs.get<int32_t>("activation_type", 0); // Default to kSILU
+    int32_t activationTypeInt = attrs.get<int32_t>("activation_type", 0); // Default to kNONE
 
     // Validate activation type
     ONNXTRT_CHECK_NODE((activationTypeInt == 0 || activationTypeInt == 1),
@@ -8315,7 +8577,7 @@ DEFINE_BUILTIN_OP_IMPORTER(TRT_MoE)
     }
 
     // Handle SwiGLU parameters
-    if (attrs.count("swiglu_limit") || attrs.count("swiglu_alpha") || attrs.count("swiglu_beta"))
+    if (attrs.contains("swiglu_limit") || attrs.contains("swiglu_alpha") || attrs.contains("swiglu_beta"))
     {
         float swigluLimit = attrs.get<float>("swiglu_limit", std::numeric_limits<float>::infinity());
         float swigluAlpha = attrs.get<float>("swiglu_alpha", 1.0F);

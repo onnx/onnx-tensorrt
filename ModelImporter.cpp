@@ -72,7 +72,7 @@ void setStringMap(
     {
         std::string name = tensors.at(i);
         T dataName = data.at(i);
-        if (map.count(name) > 0)
+        if (map.contains(name))
         {
             ONNXTRT_CHECK(map[name] == dataName,
                 "The order of tensorRangeMin/Max in context misaligns with the order of the attribute "
@@ -218,7 +218,7 @@ void ModelImporter::reportSubgraphs()
         //     1. It is not directly connected to an unsupported input
         //     2. An error was not reported when attempting to parse the node.
         bool unsupportedInput = checkForInput(node);
-        bool unsuccessfulParse = errorNodes.count(nodeIdx);
+        bool unsuccessfulParse = errorNodes.contains(nodeIdx);
         if (!unsupportedInput && !unsuccessfulParse)
         {
             if (newSubGraph)
@@ -264,7 +264,7 @@ bool shouldImportAsPlugin(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
     bool const pluginOverriding
         = ctx->getFlags() & (1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_PLUGIN_OVERRIDE));
     OnnxAttrs attrs(node, ctx);
-    bool const isPluginNode = attrs.count("plugin_namespace");
+    bool const isPluginNode = attrs.contains("plugin_namespace");
     return (pluginOverriding || isPluginNode) && isNodeInPluginRegistry(ctx, node);
 }
 } // anonymous namespace
@@ -292,7 +292,7 @@ void parseNodeStaticCheck(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
         {
             checkerFunc = &it->second;
         }
-        else if (opImporters.count(nodeType))
+        else if (opImporters.contains(nodeType))
         {
             // Internal error: op has an importer but no checker
             std::string errorMsg = "No static checker was found for " + nodeType;
@@ -407,7 +407,7 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
 
     if (!importFunc)
     {
-        if (opImporters.count(nodeType))
+        if (opImporters.contains(nodeType))
         {
             importFunc = &opImporters.at(nodeType);
         }
@@ -477,7 +477,7 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
         auto outputsRangeMax = attrs.get<std::vector<float>>("trt_outputs_range_max", {});
         setStringMap<float>(ctx, outputsVec, outputsRangeMax, ctx->tensorRangeMaxes());
 
-        if (attrs.count("trt_layer_precision"))
+        if (attrs.contains("trt_layer_precision"))
         {
             std::vector<nvinfer1::DataType> layerPrecision{attrs.get<nvinfer1::DataType>("trt_layer_precision")};
             setStringMap<nvinfer1::DataType>(ctx, layerName, layerPrecision, ctx->layerPrecisions());
@@ -568,7 +568,7 @@ void collectSubgraphOuterScopeRefs(
     {
         for (auto const& input : node.input())
         {
-            if (!input.empty() && !localTensors.count(input))
+            if (!input.empty() && !localTensors.contains(input))
             {
                 outerRefs.insert(input);
             }
@@ -849,7 +849,7 @@ bool ModelImporter::supportsOperator(char const* op_name) const noexcept
 {
     ONNXTRT_TRY
     {
-        return _op_importers.count(op_name);
+        return _op_importers.contains(op_name);
     }
     ONNXTRT_CATCH_RECORD
 
@@ -1034,7 +1034,7 @@ void ModelImporter::importModel()
         // Set locations for all tensors
         for (auto const& tensor : ctx->tensorLocations())
         {
-            ONNXTRT_CHECK((tensors.count(tensor.first) > 0), "The tensor does not have an assigned location.",
+            ONNXTRT_CHECK((tensors.contains(tensor.first)), "The tensor does not have an assigned location.",
                 nvonnxparser::ErrorCode::kINVALID_GRAPH);
             tensors.at(tensor.first)->setLocation(tensor.second);
         }

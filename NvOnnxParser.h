@@ -16,7 +16,7 @@
 //!
 
 #define NV_ONNX_PARSER_MAJOR 0
-#define NV_ONNX_PARSER_MINOR 1
+#define NV_ONNX_PARSER_MINOR 2
 #define NV_ONNX_PARSER_PATCH 0
 
 static constexpr int32_t NV_ONNX_PARSER_VERSION
@@ -428,6 +428,126 @@ public:
 };
 
 //!
+//! \enum RefitTransformKind
+//!
+//! \brief Identifies how a refittable engine weight is produced from one or more ONNX initializers
+//!        or node attributes.
+//!
+//! Emitted by IParserRefitter through IRefitterObserver to describe how each refittable engine
+//! weight is sourced. A consumer can record these descriptions at build time and replay them at
+//! engine-load time to refit directly via nvinfer1::IRefitter::setNamedWeights, without invoking
+//! the ONNX parser again.
+//!
+enum class RefitTransformKind : int32_t
+{
+    //! Source is one ONNX initializer; refit data equals the initializer data verbatim.
+    kIDENTITY = 0,
+
+    //! Source is one ONNX initializer of DOUBLE type; refit data is the FLOAT cast.
+    kDOUBLE_TO_FLOAT = 1,
+
+    //! Source is the four scale/bias/mean/variance initializers of a BatchNormalization node.
+    //! Refit data is combinedScale[i] = scale[i] / sqrt(variance[i] + epsilon).
+    kBATCH_NORM_FOLD_SCALE = 2,
+
+    //! Source is the four scale/bias/mean/variance initializers of a BatchNormalization node.
+    //! Refit data is combinedBias[i] = bias[i] - mean[i] * combinedScale[i].
+    kBATCH_NORM_FOLD_BIAS = 3,
+
+    //! Source is the value attribute of a Constant node. The bytes are carried in
+    //! RefitRecord::fixedData since they are not available as a separate ONNX initializer.
+    kCONSTANT_NODE = 4,
+
+    //! Source is the value attribute of a ConstantOfShape node (defaulting to 0.0 if absent).
+    //! The bytes are carried in RefitRecord::fixedData.
+    kCONSTANT_OF_SHAPE = 5,
+};
+
+//! Specialization. See `nvonnxparser::EnumMax()` for details.
+template <>
+constexpr int32_t EnumMax<RefitTransformKind>() noexcept
+{
+    return 5;
+}
+
+//!
+//! \struct RefitRecord
+//!
+//! \brief One refittable-weight description emitted by IRefitterObserver.
+//!
+//! All pointers in this struct are owned by the parser and are valid only for the duration of the
+//! IRefitterObserver::onRefittableWeight() call. Implementations that need to retain string or
+//! buffer contents beyond the call must copy them.
+//!
+struct RefitRecord
+{
+    //! Name to pass to nvinfer1::IRefitter::setNamedWeights for this weight. Always non-null.
+    char const* trtName;
+
+    //! What transformation produces the refit data from the sources.
+    RefitTransformKind kind;
+
+    //! ONNX TensorProto::DataType of the source data **before** any transformation. For kIDENTITY
+    //! this matches the parser-produced weight's ONNX type. For kDOUBLE_TO_FLOAT this is DOUBLE
+    //! (the post-cast result type is given by \p trtDtype). For kBATCH_NORM_FOLD_* and the
+    //! kCONSTANT* kinds the source and result ONNX types coincide.
+    int32_t onnxDtype;
+
+    //! TensorRT data type of the post-transform refit data. Provided so consumers can call
+    //! nvinfer1::IRefitter::setNamedWeights directly without re-implementing the
+    //! ONNX-to-TRT dtype mapping.
+    nvinfer1::DataType trtDtype;
+
+    //! Element count of the refit data.
+    int64_t count;
+
+    //! Number of source ONNX names supplied below. At most 4.
+    int32_t nbSources;
+
+    //! Names of the source ONNX initializers (or output tensor names for Constant nodes).
+    //! Array of length nbSources; each entry is null-terminated. Owned by the parser.
+    char const* const* sourceOnnxNames;
+
+    //! For kBATCH_NORM_FOLD_SCALE / kBATCH_NORM_FOLD_BIAS: the epsilon used in the fold formula.
+    //! For other kinds: unspecified, do not consume.
+    float epsilon;
+
+    //! For kCONSTANT_NODE and kCONSTANT_OF_SHAPE: pointer to the build-time-resolved weight
+    //! bytes the parser would write into the engine. The data has element type \p onnxDtype and
+    //! \p count elements; total length is \p fixedDataSize bytes. The consumer should copy this
+    //! data so it can be replayed at refit time. For other kinds: nullptr.
+    void const* fixedData;
+
+    //! Length of \p fixedData in bytes, or 0 when \p fixedData is null.
+    size_t fixedDataSize;
+};
+
+//!
+//! \class IRefitterObserver
+//!
+//! \brief Observer interface invoked by IParserRefitter once per refittable engine weight.
+//!
+//! Attach via IParserRefitter::setRefitObserver. The intended use is to build a self-describing
+//! refit table at build time that can drive nvinfer1::IRefitter::setNamedWeights directly at
+//! engine-load time, eliminating the runtime dependency on the original ONNX model structure.
+//!
+class IRefitterObserver
+{
+public:
+    virtual ~IRefitterObserver() noexcept = default;
+
+    //!
+    //! \brief Called once per refittable engine weight as the parser identifies it.
+    //!
+    //! Invoked during IParserRefitter::refitModelProto, refitFromBytes, or refitFromFile, in the
+    //! parser's natural traversal order over the ONNX graph. Implementations must not call back
+    //! into the parser or refitter from this method, and must not retain pointers from \p record
+    //! beyond the call.
+    //!
+    virtual void onRefittableWeight(RefitRecord const& record) noexcept = 0;
+};
+
+//!
 //! \class IParserRefitter
 //!
 //! \brief An interface designed to refit weights from an ONNX model.
@@ -535,6 +655,17 @@ public:
     //! \see getNbErrors() getError() loadModelProto()
     //!
     virtual bool refitModelProto() noexcept = 0;
+
+    //!
+    //! \brief Attach an observer that receives one callback per refittable engine weight.
+    //!
+    //! May be called any time before refitModelProto / refitFromBytes / refitFromFile. Pass
+    //! nullptr to detach. The observer must outlive the refit call, or be detached before
+    //! destruction.
+    //!
+    //! \see IRefitterObserver
+    //!
+    virtual void setRefitObserver(IRefitterObserver* observer) noexcept = 0;
 };
 
 } // namespace nvonnxparser

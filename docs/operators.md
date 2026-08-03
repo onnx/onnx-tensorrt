@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 11.1 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 11.2 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
@@ -56,7 +56,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Cos                       | Y          | FP32, FP16, BF16 |
 | Cosh                      | Y          | FP32, FP16, BF16 |
 | CumSum                    | Y          | FP32, FP16, BF16 | `axis` must be a build-time constant                                                                                                     |
-| DFT                       | N          |
+| DFT                       | Y          | FP32, FP16, BF16 | Runs on a cuFFT-backed plugin so cuFFT must be available at runtime. Complex tensors use the packed-real `[..., 2]` layout, and the innermost dimension must be a static 1 (real) or 2 (complex). The transform axis must be `-2`. The opset 20 `axis` input must be a build-time constant scalar. `dft_length` is required for the onesided inverse (C2R) and unsupported otherwise. FP16 and BF16 require power-of-two signal lengths. |
 | DeformConv                | Y          | FP32, FP16 | `input` must have 1D or 2D spatial dimensions. `pads` for the beginning and end along each spatial axis must be the same
 | DepthToSpace              | Y          | FP32, FP16, BF16, INT32, INT64 |
 | DequantizeLinear          | Y          | INT8, FP8, FP4, INT4 | `x_zero_point` must be zero                                                                                    |
@@ -83,7 +83,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | GlobalMaxPool             | Y          | FP32, FP16, BF16 |
 | Greater                   | Y          | FP32, FP16, BF16, INT32, INT64 |
 | GreaterOrEqual            | Y          | FP32, FP16, BF16, INT32, INT64 |
-| GridSample                | Y          | FP32, FP16 | Input must be 4D input.
+| GridSample                | Y          | FP32, FP16, BF16 | Input must be 4D or 5D.
 | GroupNormalization        | Y          | FP32, FP16, BF16 |
 | GRU                       | Y          | FP32, FP16, BF16 | For bidirectional GRUs, activation functions must be the same for both the forward and reverse pass
 | HammingWindow             | Y          | FP32, FP16 |
@@ -166,7 +166,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | RoiAlign                  | Y          | FP32, FP16 |
 | RotaryEmbedding           | Y          | FP32, FP16, BF16 | `position_ids` must be INT64 |
 | Round                     | Y          | FP32, FP16, BF16 |
-| STFT                      | Y          | FP32 | `frame_step` and `window` must be an initializer. Input must be real-valued.
+| STFT                      | Y          | FP32, FP16, BF16 | `frame_step` and `window` must be an initializer. Input must be real-valued. |
 | ScaledTanh                | Y          | FP32, FP16, BF16 |
 | Scan                      | Y          | FP32, FP16, BF16|
 | Scatter                   | Y          | FP32, FP16, BF16, INT32, INT64 |

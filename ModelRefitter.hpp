@@ -9,7 +9,9 @@
 #include "WeightsContext.hpp"
 #include "errorHelpers.hpp"
 #include <onnx/onnx-ml.pb.h>
+#include <cstddef>
 #include <set>
+#include <span>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -59,16 +61,38 @@ private:
     std::unordered_set<std::string> mRefittableWeights;
     std::unordered_set<std::string> mRefittedWeights;
 
+    //! Optional observer receiving one callback per refittable weight during refit. Owned externally.
+    nvonnxparser::IRefitterObserver* mObserver{nullptr};
+
     mutable std::vector<Status> mErrors;
 
     std::unordered_set<std::string> getRefittableWeights();
 
+    //! Emit one record to the attached observer, if any. No-op when no observer is set.
+    //! \param trtName Name of the TensorRT refittable engine weight.
+    //! \param kind Transform that produces the refit data from the sources.
+    //! \param onnxDtype ONNX TensorProto::DataType of the source data before any transformation
+    //!   (e.g. DOUBLE for a kDOUBLE_TO_FLOAT initializer).
+    //! \param trtDtype TensorRT data type of the post-transform refit data passed to the
+    //!   refitter.
+    //! \param count Element count of the emitted refit data.
+    //! \param sources Parser-owned ONNX source names. Valid only during the callback.
+    //! \param epsilon Epsilon used by kBATCH_NORM_FOLD_* transforms; ignored otherwise.
+    //! \param fixedData Parser-owned attribute payload for kCONSTANT_NODE / kCONSTANT_OF_SHAPE.
+    //!   Empty span for the other kinds. Valid only during the callback.
+    void notifyObserver(char const* trtName, nvonnxparser::RefitTransformKind kind, int32_t onnxDtype,
+        nvinfer1::DataType trtDtype, int64_t count, std::span<char const* const> sources,
+        float epsilon = 0.0F, std::span<std::byte const> fixedData = {}) noexcept;
+
     //! T is the working type.
     //! TConvertFunc is a functor for converting ShapedWeights to an array of type T.
     //! It should return a T*.
+    //! \p sourceOnnxDtype is the original ONNX TensorProto::DataType of the BN input initializers
+    //! (before any DOUBLE-to-FLOAT promotion), reported verbatim through IRefitterObserver so a
+    //! consumer can replay the fold from the source-dtype bytes.
     template <typename T, typename TConvertFunc>
-    size_t batchnormWeightRefitter(
-        ::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs, TConvertFunc&& f);
+    size_t batchnormWeightRefitter(::ONNX_NAMESPACE::NodeProto const& node, std::vector<ShapedWeights>& inputs,
+        int32_t sourceOnnxDtype, TConvertFunc&& f);
 
     void refitOnnxWeights();
     void refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph);
@@ -118,6 +142,12 @@ public:
     bool loadInitializer(char const* name, void const* data, size_t size) noexcept override;
 
     bool refitModelProto() noexcept override;
+
+    //! Set or clear the optional refit observer. Ownership remains with the caller.
+    void setRefitObserver(nvonnxparser::IRefitterObserver* observer) noexcept override
+    {
+        mObserver = observer;
+    }
 };
 
 } // namespace onnx2trt

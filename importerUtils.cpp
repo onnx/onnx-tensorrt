@@ -7,10 +7,17 @@
 #include "Status.hpp"
 #include "bfloat16.hpp"
 #include "errorHelpers.hpp"
-#include <ctype.h>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cctype>
 #include <ostream>
+#include <ranges>
 #include <regex>
 #include <set>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
 namespace onnx2trt
 {
 
@@ -762,29 +769,29 @@ void getKernelParams(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
 {
     int32_t const nbSpatialDims = kernelSize->nbDims;
     OnnxAttrs attrs(node, ctx);
-    if (attrs.count("kernel_shape"))
+    if (attrs.contains("kernel_shape"))
     {
         auto const* onnxKernelSize = attrs.at("kernel_shape");
         setAttr(kernelSize, onnxKernelSize, nbSpatialDims, 1);
     }
-    if (attrs.count("strides"))
+    if (attrs.contains("strides"))
     {
         auto const* onnxStrides = attrs.at("strides");
         setAttr(strides, onnxStrides, nbSpatialDims, 1);
     }
-    if (dilations && attrs.count("dilations"))
+    if (dilations && attrs.contains("dilations"))
     {
         auto const* onnxDilations = attrs.at("dilations");
         setAttr(dilations, onnxDilations, nbSpatialDims, 1);
     }
-    if (attrs.count("count_include_pad"))
+    if (attrs.contains("count_include_pad"))
     {
         auto const* includePad = attrs.at("count_include_pad");
         int32_t val = includePad->i();
         val == 1 ? countExcludePadding = false : countExcludePadding = true;
     }
     // For ConvTranspose Layer
-    if (attrs.count("output_padding"))
+    if (attrs.contains("output_padding"))
     {
         auto const* onnxOutputPadding = attrs.at("output_padding");
         setAttr(outputPadding, onnxOutputPadding, nbSpatialDims, 0);
@@ -795,7 +802,7 @@ void getKernelParams(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     auto onnxAutoPad = attrs.get("auto_pad", std::string("NOTSET"));
     if (onnxAutoPad != "SAME_LOWER" && onnxAutoPad != "SAME_UPPER")
     {
-        if (attrs.count("pads"))
+        if (attrs.contains("pads"))
         {
             auto onnxPadding = attrs.get<std::vector<int32_t>>("pads");
             int32_t ndim = onnxPadding.size() / 2;
@@ -822,7 +829,7 @@ void getKernelParams(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     {
         // If auto_pad is SAME_LOWER or SAME_UPPER, input padding should be calculated
         // "pads" attribute should not be specified
-        ONNXTRT_CHECK(!attrs.count("pads"),
+        ONNXTRT_CHECK(!attrs.contains("pads"),
             "Pads attribute should not be specified with SAME_LOWER or SAME_UPPER auto padding!",
             ErrorCode::kINVALID_NODE);
         // Note: ONNX is always NCHW ordering
@@ -884,7 +891,6 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
 {
     nvinfer1::IPluginCreatorInterface* creator = nullptr;
 
-    int32_t numCreators = 0;
     std::vector<nvinfer1::IPluginCreatorInterface*> creators;
 
     int32_t numStdCreators = 0;
@@ -895,60 +901,41 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
         creators.insert(creators.end(), stdCreators, stdCreators + numStdCreators);
     }
 
-    numCreators = creators.size();
     // Helper function to check if a plugin creator matches the requested plugin parameters
     auto matchesPlugin = [&](char const* name, char const* version, char const* ns) -> bool {
-        return std::string(name) == pluginName && std::string(version) == pluginVersion
-            && std::string(ns) == pluginNamespace;
+        return pluginName == name && pluginVersion == version && pluginNamespace == ns;
+    };
+    auto matchesPluginCreator = [&](auto const& pluginCreator) {
+        return matchesPlugin(
+            pluginCreator.getPluginName(), pluginCreator.getPluginVersion(), pluginCreator.getPluginNamespace());
     };
 
     // Search for a creator that matches the requested plugin
     // the creators are guaranteed to be unique
-    for (int32_t i = 0; i < numCreators; i++)
-    {
-        auto currentCreator = creators[i];
+    auto const it = std::find_if(creators.begin(), creators.end(), [&](auto* const currentCreator) -> bool {
         if (!currentCreator)
         {
-            continue;
+            return false;
         }
 
         // Get the creator version to determine the appropriate type
-        auto const creatorVersion = getPluginCreatorVersion(currentCreator);
-        bool matches = false;
-
-        switch (creatorVersion)
+        switch (getPluginCreatorVersion(currentCreator))
         {
         case CreatorVersion::kV1:
-        {
-            auto const v1Creator = static_cast<nvinfer1::IPluginCreator const*>(currentCreator);
-            matches = matchesPlugin(
-                v1Creator->getPluginName(), v1Creator->getPluginVersion(), v1Creator->getPluginNamespace());
-            break;
-        }
+            return matchesPluginCreator(static_cast<nvinfer1::IPluginCreator const&>(*currentCreator));
         case CreatorVersion::kV3ONE:
-        {
-            auto const v3Creator = static_cast<nvinfer1::IPluginCreatorV3One const*>(currentCreator);
-            matches = matchesPlugin(
-                v3Creator->getPluginName(), v3Creator->getPluginVersion(), v3Creator->getPluginNamespace());
-            break;
-        }
+            return matchesPluginCreator(static_cast<nvinfer1::IPluginCreatorV3One const&>(*currentCreator));
         case CreatorVersion::kV3QUICK:
-        {
-            auto const v3QuickCreator = static_cast<nvinfer1::IPluginCreatorV3Quick const*>(currentCreator);
-            matches = matchesPlugin(v3QuickCreator->getPluginName(), v3QuickCreator->getPluginVersion(),
-                v3QuickCreator->getPluginNamespace());
-            break;
-        }
+            return matchesPluginCreator(static_cast<nvinfer1::IPluginCreatorV3Quick const&>(*currentCreator));
        // No default case as the creatorVersion is guaranteed to be one of the above as per
        // `getPluginCreatorVersion()`. For any future plugin creator versions added, this switch statement will
        // need to be updated along with `getPluginCreatorVersion()`.
         }
-
-        if (matches)
-        {
-            creator = currentCreator;
-            break;
-        }
+        return false;
+    });
+    if (it != creators.end())
+    {
+        creator = *it;
     }
 
 
@@ -1040,7 +1027,7 @@ std::unique_ptr<nvinfer1::IPluginV3> createPlugin(ImporterContext* ctx, ::ONNX_N
         nvinfer1::QuickPluginCreationRequest request;
 
         // Node-level specifications override network-level preferences
-        if (attrs.count("aot"))
+        if (attrs.contains("aot"))
         {
             auto const aotOrJit = static_cast<bool>(attrs.get<int>("aot", 0));
             if (aotOrJit)
@@ -1186,7 +1173,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     // Parse attributes
     OnnxAttrs attrs(node, ctx);
     int32_t nbSpatialDims = nbDims - 2;
-    if (attrs.count("kernel_shape"))
+    if (attrs.contains("kernel_shape"))
     {
         ONNXTRT_CHECK(nbSpatialDims == attrs.at("kernel_shape")->ints().size(),
             "The attribute kernel_shape misaligns with the shape of the weight tensor.", ErrorCode::kUNSUPPORTED_NODE);
@@ -1196,14 +1183,14 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     }
 
     nvinfer1::Dims dilations = makeDims(nbSpatialDims, /*Default value of dilations*/ 1);
-    if (attrs.count("dilations"))
+    if (attrs.contains("dilations"))
     {
         auto const* onnxDilations = attrs.at("dilations");
         setAttr(&dilations, onnxDilations, nbSpatialDims, 1);
     }
 
     nvinfer1::Dims kernelShape = makeDims(nbSpatialDims, 0);
-    if (attrs.count("kernel_shape"))
+    if (attrs.contains("kernel_shape"))
     {
         auto const* onnxKernelShape = attrs.at("kernel_shape");
         setAttr(&kernelShape, onnxKernelShape, nbSpatialDims, 0);
@@ -1220,7 +1207,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
     nvinfer1::Dims begPadding = makeDims(nbSpatialDims, /*Default value of pads*/ 0);
     nvinfer1::Dims endPadding = makeDims(nbSpatialDims, /*Default value of pads*/ 0);
 
-    if (attrs.count("pads"))
+    if (attrs.contains("pads"))
     {
         auto onnxPadding = attrs.get<std::vector<int32_t>>("pads");
         int32_t ndim = onnxPadding.size() / 2;
@@ -1240,7 +1227,7 @@ NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAM
         ErrorCode::kUNSUPPORTED_NODE);
 
     nvinfer1::Dims strides = makeDims(nbSpatialDims, /*Default value of strides*/ 1);
-    if (attrs.count("strides"))
+    if (attrs.contains("strides"))
     {
         auto const* onnxStrides = attrs.at("strides");
         setAttr(&strides, onnxStrides, nbSpatialDims, 1);
@@ -1627,7 +1614,214 @@ bool IsReduceNoOp(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights> const& inputs)
 {
     OnnxAttrs attrs(node, ctx);
-    return (attrs.get("noop_with_empty_axes", 0) == 1) && (!attrs.count("axes")) && (inputs.size() == 1);
+    return (attrs.get("noop_with_empty_axes", 0) == 1) && (!attrs.contains("axes")) && (inputs.size() == 1);
+}
+
+namespace
+{
+
+//! \return true if weights were recovered from a Constant node. A scalar constant (nbDims == 0)
+//! is accepted; only the default-constructed sentinel (nbDims == -1) is unresolved.
+[[nodiscard]] bool resolvedWeights(ShapedWeights const& weights)
+{
+    return weights.shape.nbDims >= 0;
+}
+
+template <typename TargetType, typename SourceType>
+[[nodiscard]] bool valueFitsCast(SourceType value)
+{
+    if constexpr (std::is_same_v<TargetType, bool> || !std::is_integral_v<TargetType>)
+    {
+        return true;
+    }
+    else
+    {
+        auto const valueAsLongDouble = static_cast<long double>(value);
+        return std::isfinite(valueAsLongDouble)
+            && valueAsLongDouble >= static_cast<long double>(std::numeric_limits<TargetType>::lowest())
+            && valueAsLongDouble <= static_cast<long double>(std::numeric_limits<TargetType>::max());
+    }
+}
+
+template <typename TargetType, typename SourceType>
+[[nodiscard]] bool castWeightValues(ShapedWeights const& sourceWeights, ShapedWeights& targetWeights)
+{
+    size_t const count = sourceWeights.count();
+    if (count == 0)
+    {
+        return true;
+    }
+    if (sourceWeights.values == nullptr || targetWeights.values == nullptr)
+    {
+        return false;
+    }
+
+    auto const* sourceValues = static_cast<SourceType const*>(sourceWeights.values);
+    auto* targetValues = static_cast<TargetType*>(targetWeights.values);
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (!valueFitsCast<TargetType>(sourceValues[i]))
+        {
+            return false;
+        }
+        targetValues[i] = static_cast<TargetType>(sourceValues[i]);
+    }
+    return true;
+}
+
+//! Cast weights element-wise to TargetType. Source-type coverage is intentionally limited to
+//! the types a constant axes chain can carry (BOOL, INT8, UINT8, INT32, INT64, FLOAT).
+//! \return false for unsupported source types; callers must treat that as "do not fold".
+template <typename TargetType>
+[[nodiscard]] bool castWeightsToType(ShapedWeights const& sourceWeights, ShapedWeights& targetWeights)
+{
+    switch (sourceWeights.type)
+    {
+    case ::ONNX_NAMESPACE::TensorProto::BOOL: return castWeightValues<TargetType, bool>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::INT8: return castWeightValues<TargetType, int8_t>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::UINT8:
+        return castWeightValues<TargetType, uint8_t>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::INT32:
+        return castWeightValues<TargetType, int32_t>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::INT64:
+        return castWeightValues<TargetType, int64_t>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT:
+        return castWeightValues<TargetType, float>(sourceWeights, targetWeights);
+    default: return false;
+    }
+}
+
+[[nodiscard]] ShapedWeights castConstantWeights(
+    ImporterContext* ctx, ShapedWeights const& sourceWeights, nvinfer1::DataType const targetType)
+{
+    ShapedWeights::DataType targetOnnxType{};
+    bool success{false};
+    switch (targetType)
+    {
+    case nvinfer1::DataType::kBOOL:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::BOOL;
+        break;
+    case nvinfer1::DataType::kINT8:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT8;
+        break;
+    case nvinfer1::DataType::kUINT8:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::UINT8;
+        break;
+    case nvinfer1::DataType::kINT32:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT32;
+        break;
+    case nvinfer1::DataType::kINT64:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT64;
+        break;
+    case nvinfer1::DataType::kFLOAT:
+        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::FLOAT;
+        break;
+    default: return ShapedWeights{};
+    }
+
+    ShapedWeights targetWeights = ctx->getWeightsContext().createTempWeights(targetOnnxType, sourceWeights.shape);
+    switch (targetOnnxType)
+    {
+    case ::ONNX_NAMESPACE::TensorProto::BOOL:
+        success = castWeightsToType<bool>(sourceWeights, targetWeights);
+        break;
+    case ::ONNX_NAMESPACE::TensorProto::INT8:
+        success = castWeightsToType<int8_t>(sourceWeights, targetWeights);
+        break;
+    case ::ONNX_NAMESPACE::TensorProto::UINT8:
+        success = castWeightsToType<uint8_t>(sourceWeights, targetWeights);
+        break;
+    case ::ONNX_NAMESPACE::TensorProto::INT32:
+        success = castWeightsToType<int32_t>(sourceWeights, targetWeights);
+        break;
+    case ::ONNX_NAMESPACE::TensorProto::INT64:
+        success = castWeightsToType<int64_t>(sourceWeights, targetWeights);
+        break;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT:
+        success = castWeightsToType<float>(sourceWeights, targetWeights);
+        break;
+    default: break;
+    }
+    return success ? targetWeights : ShapedWeights{};
+}
+
+void weightsToAxesVector(TensorOrWeights weights, std::vector<int32_t>* axes, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx)
+{
+    ShapedWeights const axesWeights = weights.weights();
+    ONNXTRT_CHECK_NODE((axesWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
+            || (axesWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64),
+        "Axis input must resolve to INT32 or INT64 weights!", node, nodeIdx, ErrorCode::kINVALID_NODE);
+
+    std::vector<int64_t> axes64;
+    weightsToVector<int64_t>(weights, &axes64);
+    axes->reserve(axes64.size());
+    for (int64_t const axis : axes64)
+    {
+        ONNXTRT_CHECK_NODE(axis >= std::numeric_limits<int32_t>::lowest()
+                && axis <= std::numeric_limits<int32_t>::max(),
+            "Axis input contains a value outside INT32 range: " << axis, node, nodeIdx, ErrorCode::kINVALID_NODE);
+        axes->push_back(static_cast<int32_t>(axis));
+    }
+}
+
+} // namespace
+
+// Backward traverse the graph to retrieve input weights from a Constant node, applying any Cast layers on the path.
+ShapedWeights getWeightsFromIdentityOrConstant(ImporterContext* ctx, nvinfer1::ITensor* input)
+{
+    auto& network = *ctx->network();
+    // Const node output -> const node mapping.
+    std::unordered_map<nvinfer1::ITensor*, nvinfer1::IConstantLayer*> constNodeToOutputMap;
+    // Identity node output -> identity/cast node mapping.
+    std::unordered_map<nvinfer1::ITensor*, nvinfer1::ILayer*> identityCastNodeToOutputMap;
+    std::vector<nvinfer1::DataType> castTargetTypes;
+
+    // Collect all the constant, identity nodes from network.
+    int32_t nbLayers = network.getNbLayers();
+    for (int32_t i = 0; i < nbLayers; ++i)
+    {
+        nvinfer1::ILayer* layer = N_CHECK(network.getLayer(i));
+        if (layer->getType() == nvinfer1::LayerType::kCONSTANT)
+        {
+            constNodeToOutputMap[layer->getOutput(0)] = static_cast<nvinfer1::IConstantLayer*>(layer);
+        }
+        else if ((layer->getType() == nvinfer1::LayerType::kIDENTITY)
+            || (layer->getType() == nvinfer1::LayerType::kCAST))
+        {
+            identityCastNodeToOutputMap[layer->getOutput(0)] = layer;
+        }
+    }
+    // Follow cast/identity nodes before current node.
+    auto findIdenityIter = identityCastNodeToOutputMap.find(input);
+    while (findIdenityIter != identityCastNodeToOutputMap.end())
+    {
+        auto* const layer = findIdenityIter->second;
+        if (layer->getType() == nvinfer1::LayerType::kCAST)
+        {
+            castTargetTypes.push_back(static_cast<nvinfer1::ICastLayer*>(layer)->getToType());
+        }
+        input = layer->getInput(0);
+        findIdenityIter = identityCastNodeToOutputMap.find(input);
+    }
+    // Find out the weights from constant node.
+    auto findConstIter = constNodeToOutputMap.find(input);
+    if (findConstIter != constNodeToOutputMap.end())
+    {
+        auto weights = findConstIter->second->getWeights();
+        ShapedWeights foldedWeights{
+            trtDataTypeToONNX(weights.type), const_cast<void*>(weights.values), findConstIter->second->getDimensions()};
+        for (auto const castTargetType : std::ranges::reverse_view(castTargetTypes))
+        {
+            foldedWeights = castConstantWeights(ctx, foldedWeights, castTargetType);
+            if (!resolvedWeights(foldedWeights))
+            {
+                return ShapedWeights{};
+            }
+        }
+        return foldedWeights;
+    }
+    return ShapedWeights{};
 }
 
 NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
@@ -1641,15 +1835,27 @@ NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
     bool keepdims = attrs.get("keepdims", 1);
     int32_t ndim = tensor.getDimensions().nbDims;
     std::vector<int32_t> axes;
-    if (attrs.count("axes"))
+    if (attrs.contains("axes"))
     {
         axes = attrs.get<std::vector<int32_t>>("axes");
     }
     else if (!inputAxes.isNullTensor())
     {
-        ONNXTRT_CHECK_NODE(
-            inputAxes.is_weights(), "Axis input must be an initializer!", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
-        weightsToVector<int32_t>(inputAxes.weights(), &axes);
+        // Opset 18 turns axes into an input. IReduceLayer needs the axes at build time, so a
+        // Constant->Cast/Identity axes chain (a common export pattern, e.g. Constant->Cast(int64))
+        // is folded back to its constant weights rather than rejected outright.
+        if (inputAxes.is_weights())
+        {
+            weightsToAxesVector(inputAxes.weights(), &axes, node, nodeIdx);
+        }
+        else
+        {
+            ShapedWeights const axesWeights = getWeightsFromIdentityOrConstant(ctx, &inputAxes.tensor());
+            ONNXTRT_CHECK_NODE(resolvedWeights(axesWeights),
+                "Axis input must resolve to a build-time constant (an initializer or a constant-foldable subgraph)!",
+                node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+            weightsToAxesVector(axesWeights, &axes, node, nodeIdx);
+        }
     }
     // It's possible that the axes tensor, axes initializer, or axes attribute was empty. Handle such cases here.
     if (axes.empty())
@@ -2056,11 +2262,12 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
     return {{outputTensor}};
 }
 
-nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes)
+nvinfer1::ITensor* unsqueezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::span<int32_t const> axes)
 {
-    auto* axesTensor
-        = N_CHECK(addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axes.size())}})
-                      ->getOutput(0));
+    std::vector<int32_t> const axesVec(axes.begin(), axes.end());
+    auto* axesTensor = N_CHECK(
+        addConstant(ctx, axesVec, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axesVec.size())}})
+            ->getOutput(0));
     auto* unsqueezeLayer = N_CHECK(ctx->network()->addUnsqueeze(tensor, *axesTensor));
     auto* unsqueezedTensor = N_CHECK(unsqueezeLayer->getOutput(0));
     LOG_VERBOSE("Original shape: " << shapeOf(tensor) << ", unsqueezing to: " << shapeOf(*unsqueezedTensor));

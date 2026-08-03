@@ -164,8 +164,8 @@ nvinfer1::ITensor* getRaggedMask(ImporterContext* ctx, const ::ONNX_NAMESPACE::N
     nvinfer1::ITensor* seqMask;
     if (reverse)
     {
-        counter = getElementWiseResult(
-            ctx, *unsqueezeTensor(ctx, *maxLen, {0}), *counter, nvinfer1::ElementWiseOperation::kSUB);
+        counter = getElementWiseResult(ctx, *unsqueezeTensor(ctx, *maxLen, std::array{int32_t{0}}), *counter,
+            nvinfer1::ElementWiseOperation::kSUB);
         seqMask = getElementWiseResult(ctx, *seqLens, *counter, nvinfer1::ElementWiseOperation::kLESS);
         seqMask = getUnaryResult(ctx, *seqMask, nvinfer1::UnaryOperation::kNOT);
     }

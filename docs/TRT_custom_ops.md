@@ -140,3 +140,66 @@ Custom op for KV cache updates with packed update support. Based on the TensorSc
 
 - `past_cache` must always be 4D `[B, H, N, D]`.
 - `update` must be 4D `[B, H, N, D]` for padded form or 3D `[T, H, D]` for packed form.
+
+## TRT_MoE
+
+Custom op for Mixture-of-Experts (MoE) feed-forward layers. Maps to TensorRT's `IMoELayer` via `INetworkDefinition::addMoE`. Supports gated linear units with optional SiLU activation (SwiGLU), optional per-expert biases, and optional quantization of the down-projection activations.
+
+### Attributes
+
+<dl>
+<dt><tt>activation_type - INT</tt></dt>
+<dd>Activation function applied between the gate and up projections. 0 = no activation (kNONE), 1 = SiLU (kSILU). Default is 0.</dd>
+<dt><tt>quantization_mode - INT</tt></dt>
+<dd>0 = no quantization, 1 = static quantization, 2 = dynamic double quantization (dynamic_dblq). When non-zero, <tt>quantization_dtype</tt> must also be specified. Default is 0.</dd>
+<dt><tt>quantization_dtype - INT</tt></dt>
+<dd>TensorRT <tt>DataType</tt> enum value for the down-projection activation quantization type (e.g., kFP8, kFP4). Required when <tt>quantization_mode</tt> is non-zero. Default is kFP8.</dd>
+<dt><tt>quantization_block_shape - LIST of INT (4 elements)</tt></dt>
+<dd>Block shape <tt>[d0, d1, d2, d3]</tt> for dynamic double quantization. Required when <tt>quantization_mode</tt> is 2.</dd>
+<dt><tt>dyn_q_output_scale_dtype - INT</tt></dt>
+<dd>TensorRT <tt>DataType</tt> enum value for the output scale tensor in dynamic double quantization. Required when <tt>quantization_mode</tt> is 2. Default is kFLOAT.</dd>
+<dt><tt>swiglu_limit - FLOAT</tt></dt>
+<dd>Clamp limit for the SwiGLU activation. Only consulted when any of the three <tt>swiglu_*</tt> attributes are present. Default is +∞ (no clamping).</dd>
+<dt><tt>swiglu_alpha - FLOAT</tt></dt>
+<dd>Alpha scale for the SwiGLU activation. Default is 1.0.</dd>
+<dt><tt>swiglu_beta - FLOAT</tt></dt>
+<dd>Beta offset for the SwiGLU activation. Default is 0.0.</dd>
+</dl>
+
+### Inputs (6-10)
+
+<dl>
+<dt><tt>hiddenStates</tt> (index 0) - FP32/FP16/BF16</dt>
+<dd>3D tensor of shape [batchSize, seqLen, hiddenSize]. Token embeddings to route through the MoE layer.</dd>
+<dt><tt>selectedExpertsForTokens</tt> (index 1) - INT32</dt>
+<dd>3D tensor of shape [batchSize, seqLen, topK]. Expert indices selected for each token.</dd>
+<dt><tt>scoresForSelectedExperts</tt> (index 2) - FP32/FP16/BF16</dt>
+<dd>3D tensor of shape [batchSize, seqLen, topK]. Routing weights for the selected experts.</dd>
+<dt><tt>fcGateWeights</tt> (index 3) - FP32/FP16/BF16</dt>
+<dd>3D tensor of shape [numExperts, hiddenSize, moeInterSize]. Gate projection weights.</dd>
+<dt><tt>fcUpWeights</tt> (index 4) - FP32/FP16/BF16 </dt>
+<dd>3D tensor of shape [numExperts, hiddenSize, moeInterSize]. Up projection weights.</dd>
+<dt><tt>fcDownWeights</tt> (index 5) - FP32/FP16/BF16</dt>
+<dd>3D tensor of shape [numExperts, moeInterSize, hiddenSize]. Down projection weights.</dd>
+<dt><tt>fcGateBiases</tt> (optional, index 6) - FP32/FP16/BF16</dt>
+<dd>Bias for the gate projection. Must be provided together with <tt>fcUpBiases</tt> and <tt>fcDownBiases</tt> — all three biases are required or none.</dd>
+<dt><tt>fcUpBiases</tt> (optional, index 7) - FP32/FP16/BF16</dt>
+<dd>Bias for the up projection. See <tt>fcGateBiases</tt>.</dd>
+<dt><tt>fcDownBiases</tt> (optional, index 8) - FP32/FP16/BF16</dt>
+<dd>Bias for the down projection. See <tt>fcGateBiases</tt>.</dd>
+<dt><tt>fcDownActivationScale</tt> (optional, index 9) - FP8/FP4</dt>
+<dd>Quantization scale for down-projection activations. Required when <tt>quantization_mode</tt> is non-zero.</dd>
+</dl>
+
+### Outputs
+
+<dl>
+<dt><tt>Y</tt></dt>
+<dd>3D tensor of shape [batchSize, seqLen, hiddenSize]. MoE layer output with the same shape and data type as <tt>hiddenStates</tt>.</dd>
+</dl>
+
+### Restrictions
+
+- Biases must be provided for all three projections (gate, up, down) or for none.
+- `fcDownActivationScale` (index 9) must be present when `quantization_mode` is non-zero; `quantization_dtype` must also be set in that case.
+- `quantization_block_shape` and `dyn_q_output_scale_dtype` are required only when `quantization_mode` is 2.
