@@ -240,6 +240,18 @@ bool WeightsContext::convertOnnxWeights(
     shape.nbDims = onnxTensor.dims().size();
     std::copy_n(onnxTensor.dims().begin(), shape.nbDims, shape.d);
 
+    // Reject initializers whose declared shape needs more elements than the source data field actually provides.
+    auto requireElems = [&](size_t availableElems) -> bool {
+        size_t const vol = static_cast<size_t>(volume(shape));
+        if (vol > availableElems)
+        {
+            LOG_ERROR("ONNX initializer " << initName << " declares volume " << vol
+                << " but only " << availableElems << " data elements are present");
+            return false;
+        }
+        return true;
+    };
+
     // Priority of importing weights:
     //  1. User provided
     //  2. External weights
@@ -339,11 +351,20 @@ bool WeightsContext::convertOnnxWeights(
         }
         else if (onnxTensor.raw_data().size() > 0)
         {
+            if (static_cast<size_t>(volume(shape)) > onnxTensor.raw_data().size() / sizeof(double))
+            {
+                LOG_ERROR("ONNX initializer " << initName << " declares more doubles than raw_data provides");
+                return false;
+            }
             dataPtr = convertDouble(reinterpret_cast<double const*>(onnxTensor.raw_data().data()), shape);
             nbytes = onnxTensor.raw_data().size() / (sizeof(double) / sizeof(float));
         }
         else if (onnxTensor.double_data().size() > 0)
         {
+            if (!requireElems(static_cast<size_t>(onnxTensor.double_data().size())))
+            {
+                return false;
+            }
             dataPtr = convertDouble(onnxTensor.double_data().data(), shape);
             if (multiplicationWillOverflow(nbytes, sizeof(float)))
             {
@@ -398,12 +419,24 @@ bool WeightsContext::convertOnnxWeights(
                 break;
             case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
             case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
+                if (!requireElems(static_cast<size_t>(onnxTensor.int32_data().size())))
+                {
+                    return false;
+                }
                 dataPtr = convertInt32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT8:
+                if (!requireElems(static_cast<size_t>(onnxTensor.int32_data().size())))
+                {
+                    return false;
+                }
                 dataPtr = convertInt32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::BOOL:
+                if (!requireElems(static_cast<size_t>(onnxTensor.int32_data().size())))
+                {
+                    return false;
+                }
                 dataPtr = convertInt32Data<uint8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT4:
