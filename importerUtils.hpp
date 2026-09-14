@@ -279,8 +279,13 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
 // of the corresponding data tensor, normalize to [0, rank-1].
 void normalizeAxes(ShapeTensor& axes, int32_t const rank);
 
-// Helper function to parse activation values for LSTM nodes
-std::vector<float> parseLSTMActivationValues(std::vector<nvinfer1::ActivationType> const& activationTypes,
+//! Expand activation alpha or beta values to one per activation type, filling defaults for any beyond the
+//! supplied list.
+//! \param[in] activationTypes Activation types the values map to; the result has one entry per type.
+//! \param[in] activationValues User-provided alpha/beta values; entries beyond \p activationTypes are ignored.
+//! \param[in] isAlpha True to fill alpha defaults, false to fill beta defaults.
+//! \return One value per entry in \p activationTypes, with defaults filled where no value was supplied.
+[[nodiscard]] std::vector<float> parseActivationValues(std::vector<nvinfer1::ActivationType> const& activationTypes,
     std::vector<float> const& activationValues, bool isAlpha);
 
 // Helper function to map various ONNX pooling ops into TensorRT.

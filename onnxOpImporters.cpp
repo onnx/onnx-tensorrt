@@ -2445,22 +2445,20 @@ DEFINE_BUILTIN_OP_IMPORTER(EyeLike)
     // Create weights and constant layer
     ONNXTRT_CHECK_NODE(!isDynamic(dims), "Eyelike does not work for dynamically shaped tensors.", node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
-    int totalWeights = dims.d[0] * dims.d[1];
-    std::vector<int> values(totalWeights);
-    for (int32_t r = 0; r < dims.d[0]; ++r)
-    {
-        for (int32_t c = 0; c < dims.d[1]; ++c)
-        {
-            values[r * dims.d[1] + c] = 0;
-            if (c - r == k)
-            {
-                values[r * dims.d[1] + c] = 1;
-            }
-        }
-    }
+    auto const rows = dims.d[0];
+    auto const cols = dims.d[1];
+    ONNXTRT_CHECK_NODE(rows >= 0 && cols >= 0 && (cols == 0 || rows <= std::numeric_limits<int64_t>::max() / cols),
+        "EyeLike output volume overflows.", node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
 
     ShapedWeights tempWeights = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, dims);
-    std::memcpy(tempWeights.values, values.data(), values.size() * sizeof(int));
+    auto* const values = static_cast<int32_t*>(tempWeights.values);
+    for (int64_t r = 0; r < rows; ++r)
+    {
+        for (int64_t c = 0; c < cols; ++c)
+        {
+            values[r * cols + c] = (c - r == k) ? 1 : 0;
+        }
+    }
     auto* layer = N_CHECK(ctx->network()->addConstant(dims, tempWeights));
     ctx->registerLayer(layer, node);
     auto* layerOutput = N_CHECK(layer->getOutput(0));
@@ -2854,13 +2852,10 @@ DEFINE_BUILTIN_OP_IMPORTER(GRU)
     }
     std::vector<trtAct> activations = attrs.get<std::vector<trtAct>>("activations", defaultActs);
 
-    std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    std::transform(activations.begin() + activationAlphas.size(), activations.end(),
-        std::back_inserter(activationAlphas), &getActivationDefaultAlpha);
-
-    std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    std::transform(activations.begin() + activationBetas.size(), activations.end(), std::back_inserter(activationBetas),
-        &getActivationDefaultBeta);
+    std::vector<float> activationAlphas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{}), true);
+    std::vector<float> activationBetas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_beta", std::vector<float>{}), false);
 
     // Need to split weights/biases into ZR gates and H gate, because h(t) computations depend on z(t) and r(t).
     nvinfer1::ITensor* numDirectionsTensor
@@ -3777,10 +3772,10 @@ DEFINE_BUILTIN_OP_IMPORTER(LSTM)
     std::vector<trtAct> activations = attrs.get<std::vector<trtAct>>("activations", defaultActs);
 
     std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    activationAlphas = parseLSTMActivationValues(activations, activationAlphas, true);
+    activationAlphas = parseActivationValues(activations, activationAlphas, true);
 
     std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    activationBetas = parseLSTMActivationValues(activations, activationBetas, false);
+    activationBetas = parseActivationValues(activations, activationBetas, false);
 
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].
     // So reshape such that we can perform a reduction to add Wb and Rb.
@@ -5655,13 +5650,10 @@ DEFINE_BUILTIN_OP_IMPORTER(RNN)
     std::vector<nvinfer1::ActivationType> activations
         = attrs.get<std::vector<nvinfer1::ActivationType>>("activations", defaultActs);
 
-    std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    std::transform(activations.begin() + activationAlphas.size(), activations.end(),
-        std::back_inserter(activationAlphas), &getActivationDefaultAlpha);
-
-    std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    std::transform(activations.begin() + activationBetas.size(), activations.end(), std::back_inserter(activationBetas),
-        &getActivationDefaultBeta);
+    std::vector<float> activationAlphas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{}), true);
+    std::vector<float> activationBetas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_beta", std::vector<float>{}), false);
 
     // Roll Rb into Wb (and RBb into WBb). Bias is in the form  [Wb[iofc], Rb[iofc], WBb[iofc], RBb[iofc]].
     // So reshape such that we can perform a reduction to add Wb and Rb.
@@ -6554,6 +6546,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
     // "A negative value means counting dimensions from the back.
     // Accepted range is [-rank, rank-1] where r = rank(input)."
     convertAxis(axis, inputDims.size(), node, nodeIdx);
+    // convertAxis allows axis == rank (for Q/DQ); Split needs [0, rank-1] to keep tmp[axis] in bounds.
+    ONNXTRT_CHECK_NODE(axis < std::ssize(inputDims), "Split axis must be less than the input rank.", node, nodeIdx,
+        ErrorCode::kINVALID_NODE);
 
     std::vector<int64_t> tmp(inputDims.size());
     std::iota(tmp.begin(), tmp.end(), 0);
@@ -6578,11 +6573,9 @@ DEFINE_BUILTIN_OP_IMPORTER(Split)
             if (inputs.at(1).is_weights())
             {
                 auto const splitWeights = inputs.at(1).weights();
-                int64_t const* splitValues = static_cast<int64_t const*>(splitWeights.values);
-                for (size_t i = 0; i < splitWeights.count(); i++)
-                {
-                    splitList.push_back(static_cast<int32_t>(splitValues[i]));
-                }
+                auto const splitValues
+                    = std::span(static_cast<int64_t const*>(splitWeights.values), splitWeights.count());
+                std::ranges::copy(splitValues, std::back_inserter(splitList));
             }
             else
             {
@@ -7694,6 +7687,7 @@ std::vector<nvinfer1::PluginField> loadFields(StringMap<std::vector<uint8_t>>& f
     }
     return fields;
 }
+
 
 nvinfer1::IPluginV2Layer* addPluginLayer(ImporterContext* ctx, std::vector<nvinfer1::ITensor*> const& pluginInputs,
     std::vector<nvinfer1::ITensor*> const& /* pluginShapeInputs */, nvinfer1::IPluginV2& plugin)

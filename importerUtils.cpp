@@ -1116,6 +1116,17 @@ NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     // Since axes can be sparse, get the expected number of provided values
     auto const nbValues = inputs.at(1).shape().d[0];
 
+    // Sanity check slice parameters: ends/axes/steps must have the same length as starts (omitted
+    // axes/steps hold nbDims entries).
+    auto const checkSameNbValues = [&](char const* name, int64_t length) {
+        ONNXTRT_CHECK_NODE(length == nbValues,
+            "Slice " << name << " length " << length << " does not equal starts length " << nbValues << ".", node,
+            nodeIdx, ErrorCode::kINVALID_NODE);
+    };
+    checkSameNbValues("ends", inputs.at(2).shape().d[0]);
+    checkSameNbValues("axes", nbInputs > 3 ? inputs.at(3).shape().d[0] : nbDims);
+    checkSameNbValues("steps", nbInputs > 4 ? inputs.at(4).shape().d[0] : nbDims);
+
     for (int32_t i = 0; i < nbValues; i++)
     {
         auto axesIndex = convertAxes(axesVals[i]);
@@ -1521,7 +1532,7 @@ nvinfer1::Dims insertDimension(nvinfer1::Dims const& dims, int const axis, int c
     return newDims;
 }
 
-std::vector<float> parseLSTMActivationValues(std::vector<nvinfer1::ActivationType> const& activationTypes,
+std::vector<float> parseActivationValues(std::vector<nvinfer1::ActivationType> const& activationTypes,
     std::vector<float> const& activationValues, bool isAlpha)
 {
     size_t actIndex{0};
