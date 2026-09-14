@@ -34,7 +34,7 @@ namespace
 } // namespace
 
 #ifdef _WIN32
-WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
+WeightsContext::MemoryMapping WeightsContext::mmap(std::string const& file)
 {
     auto* ctx = this; // For logging macros.
 
@@ -82,15 +82,15 @@ WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
 
     mMappedFiles[file] = fd;
     mFileMappingHandles[file] = mappingHandle;
-    mMemoryMappings[file] = std::make_pair(mappedAddr, fileSize);
-    return std::make_pair(mappedAddr, fileSize);
+    mMemoryMappings[file] = MemoryMapping{mappedAddr, fileSize};
+    return MemoryMapping{mappedAddr, fileSize};
 }
 
 void WeightsContext::clearMemoryMappings()
 {
     for (auto const& [file, mapping] : mMemoryMappings)
     {
-        UnmapViewOfFile(mapping.first);
+        UnmapViewOfFile(mapping.data);
     }
 
     for (auto const& [file, fd] : mFileMappingHandles)
@@ -108,7 +108,7 @@ void WeightsContext::clearMemoryMappings()
     mMemoryMappings.clear();
 }
 #else
-WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
+WeightsContext::MemoryMapping WeightsContext::mmap(std::string const& file)
 {
     auto* const ctx = this; // For logging macros.
 
@@ -143,7 +143,7 @@ WeightsContext::MemoryMapping_t WeightsContext::mmap(std::string const& file)
     }
 
     mMappedFiles[file] = fd;
-    auto it = mMemoryMappings.insert_or_assign(file, MemoryMapping_t{mappedAddr, fileSize}).first;
+    auto it = mMemoryMappings.insert_or_assign(file, MemoryMapping{mappedAddr, fileSize}).first;
     return it->second;
 }
 
@@ -151,7 +151,7 @@ void WeightsContext::clearMemoryMappings()
 {
     for (auto const& [file, mapping] : mMemoryMappings)
     {
-        ::munmap(mapping.first, mapping.second);
+        ::munmap(mapping.data, mapping.size);
     }
 
     for (auto const& [file, fd] : mMappedFiles)

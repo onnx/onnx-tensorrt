@@ -4,10 +4,13 @@
 
 #include "WeightsContext.hpp"
 #include <algorithm>
+#include <concepts>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <span>
+#include <utility>
 
 namespace onnx2trt
 {
@@ -45,29 +48,32 @@ int32_t* WeightsContext::convertUINT8(uint8_t const* weightValues, nvinfer1::Dim
     return int32Weights;
 }
 
-float* WeightsContext::convertDouble(double const* weightValues, nvinfer1::Dims const& shape)
+std::span<float> WeightsContext::convertDouble(std::span<double const> weightValues, nvinfer1::Dims const& shape)
 {
     auto* ctx = this; // For logging macros.
     int64_t const nbWeights = volume(shape);
-    float* floatWeights{
-        static_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape).values)};
+    if (std::cmp_greater(nbWeights, weightValues.size()))
+    {
+        LOG_ERROR("DOUBLE weights source holds " << weightValues.size() << " elements but shape " << shape
+                                                 << " requires " << nbWeights << ". Rejecting malformed weights.");
+        return {};
+    }
+    ShapedWeights floatWeightsObj = createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, shape);
+    std::span<float> const floatWeights{static_cast<float*>(floatWeightsObj.values), floatWeightsObj.count()};
 
     bool outOfBounds{false};
     double const floatMax = static_cast<double>(std::numeric_limits<float>::max());
     double const floatMin = static_cast<double>(std::numeric_limits<float>::lowest());
-    for (int64_t i = 0; i < nbWeights; i++)
+    for (size_t i = 0; i < static_cast<size_t>(nbWeights); i++)
     {
-        if (weightValues[i] > floatMax || weightValues[i] < floatMin)
+        std::same_as<double> auto const w = weightValues[i];
+        std::same_as<double> auto const clamped = std::clamp(w, floatMin, floatMax);
+        if (w != clamped)
         {
-            floatWeights[i] = static_cast<float>(std::max(std::min(weightValues[i], floatMax), floatMin));
-            LOG_WARNING("Weight at index " << i << ": " << weightValues[i]
-                                        << " is out of range. Clamping to: " << floatWeights[i]);
+            LOG_WARNING("Weight at index " << i << ": " << w << " is out of range. Clamping to: " << clamped);
             outOfBounds = true;
         }
-        else
-        {
-            floatWeights[i] = static_cast<float>(weightValues[i]);
-        }
+        floatWeights[i] = static_cast<float>(clamped);
     }
     if (outOfBounds)
     {
@@ -160,7 +166,7 @@ bool validateOnnxInitializer(::ONNX_NAMESPACE::TensorProto const& onnxTensor)
 
 // Function to read bytes from an external file and return the data in a buffer.
 bool WeightsContext::parseExternalWeights(
-    std::string const& file, int64_t offset, int64_t length, MemoryMapping_t& weightsRef)
+    std::string const& file, int64_t offset, int64_t length, MemoryMapping& weightsRef)
 {
     auto* ctx = this; // For logging macros.
     // Accessing parent directories (i.e. ../) is not allowed. Normalize path first.
@@ -201,23 +207,108 @@ bool WeightsContext::parseExternalWeights(
     LOG_VERBOSE("Mapping external weights file to memory: " << path);
     auto memoryMap = mmap(path);
 
-    if (memoryMap.second <= 0)
+    if (memoryMap.size <= 0)
     {
         LOG_ERROR("Failed to read weights from external file: " << path);
         return false;
     }
 
-    int64_t weightsSize = (length == 0) ? memoryMap.second : length;
+    // offset and length come from attacker-controlled external_data entries. Require the weight pointer
+    // and its end to lie within the mapped file before computing the pointer. offset within
+    // [0, mappedSize] keeps mappedSize - offset non-negative and the length check overflow-free.
+    int64_t const mappedSize = memoryMap.size;
+    if (!((0 <= offset && offset <= mappedSize) && (0 <= length && length <= mappedSize - offset)))
+    {
+        LOG_ERROR("ONNX external weights offset/length out of range for file: "
+            << path << " (offset=" << offset << ", length=" << length << ", file size=" << mappedSize << ")");
+        return false;
+    }
 
-    auto* weightsPtr = static_cast<char*>(memoryMap.first) + offset;
+    int64_t const weightsSize = (length == 0) ? mappedSize - offset : length;
 
-    weightsRef = std::make_pair(static_cast<void*>(weightsPtr), weightsSize);
+    auto* weightsPtr = static_cast<char*>(memoryMap.data) + offset;
+
+    weightsRef = MemoryMapping{static_cast<void*>(weightsPtr), weightsSize};
 
     return true;
 }
 
-// Function to read data from an ONNX Tensor and move it into a ShapedWeights object. Handles model, user-provided, and external weights.
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+bool WeightsContext::importExternalWeights(
+    ::ONNX_NAMESPACE::TensorProto const& onnxTensor, nvinfer1::Dims const& shape, ShapedWeights* weights)
+{
+    auto* ctx = this; // For logging macros.
+    auto onnxDtype = onnxTensor.data_type();
+
+    std::string location;
+    int64_t offset{0};
+    int64_t length{0};
+
+    // onnxTensor.external_data() is a String : String map that holds metadata about how to read from an external file.
+    for (auto onnxMapEntry : onnxTensor.external_data())
+    {
+        auto keyName = onnxMapEntry.key();
+        if (keyName == "location")
+        {
+            location = onnxMapEntry.value();
+        }
+        else if (keyName == "offset")
+        {
+            offset = std::atoll(onnxMapEntry.value().c_str());
+        }
+        else if (keyName == "length")
+        {
+            length = std::atoll(onnxMapEntry.value().c_str());
+        }
+        // Not used at the moment
+        else if (keyName == "checksum")
+        {
+            continue;
+        }
+        else
+        {
+            LOG_ERROR("Key value of: " << keyName << " was not expected!");
+            return false;
+        }
+    }
+
+    MemoryMapping weightsRef{};
+    if (!parseExternalWeights(location, offset, length, weightsRef))
+    {
+        return false;
+    }
+
+    void* dataPtr = weightsRef.data;
+
+    // Validate the mapped region holds exactly the bytes the shape requires for the on-disk dtype BEFORE any
+    // conversion reads from it. convertDouble reads volume(shape)*sizeof(double) bytes, so the size check must
+    // run against the pre-conversion dtype to avoid an out-of-bounds read.
+    ShapedWeights externalWeights(onnxDtype, dataPtr, shape);
+    if (static_cast<int64_t>(externalWeights.size_bytes()) != weightsRef.size)
+    {
+        LOG_ERROR("Unexpected size for the external weights! Expected size: "
+            << externalWeights.size_bytes() << " bytes (shape = " << shape << "). Actual size: " << weightsRef.size
+            << " bytes.");
+        return false;
+    }
+
+    // Cast non-native TRT types to their corresponding proxy types.
+    if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
+    {
+        std::span<float> const converted = convertDouble(
+            {static_cast<double const*>(dataPtr), static_cast<size_t>(weightsRef.size) / sizeof(double)}, shape);
+        if (converted.empty() && volume(shape) > 0)
+        {
+            return false;
+        }
+        externalWeights = ShapedWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, converted.data(), shape);
+    }
+
+    *weights = externalWeights;
+    return true;
+}
+
+// Function to read data from an ONNX Tensor and move it into a ShapedWeights object. Handles model, user-provided, and
+// external weights. NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool WeightsContext::convertOnnxWeights(
     ::ONNX_NAMESPACE::TensorProto const& onnxTensor, ShapedWeights* weights, bool ownAllWeights)
 {
@@ -257,73 +348,7 @@ bool WeightsContext::convertOnnxWeights(
     // External Data
     if (dataLocation == 1 && !userWeights)
     {
-        std::string location{""};
-        int64_t offset{0};
-        int64_t length{0};
-
-        // onnxTensor.external_data() is a String : String map that holds metadata about how to read from an external
-        // file
-        for (auto onnxMapEntry : onnxTensor.external_data())
-        {
-            auto keyName = onnxMapEntry.key();
-            if (keyName == "location")
-            {
-                location = onnxMapEntry.value();
-            }
-            else if (keyName == "offset")
-            {
-                offset = std::atoll(onnxMapEntry.value().c_str());
-            }
-            else if (keyName == "length")
-            {
-                length = std::atoll(onnxMapEntry.value().c_str());
-            }
-            // Not used at the moment
-            else if (keyName == "checksum")
-            {
-                continue;
-            }
-            else
-            {
-                LOG_ERROR("Key value of: " << keyName << " was not expected!");
-                return false;
-            }
-        }
-
-        // Buffer to hold the data read from the file
-        MemoryMapping_t weightsRef{};
-        // Will update dataBuf and nbytes by reference.
-        if (!parseExternalWeights(location, offset, length, weightsRef))
-        {
-            return false;
-        }
-
-        // For weights parsed from external files, createTempWeights is necessary to keep them in scope
-        ShapedWeights externalWeights;
-        dataPtr = weightsRef.first;
-
-        // Cast non-native TRT types to their corresponding proxy types
-        if (onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE)
-        {
-            // Cast DOUBLE weights to FLOAT.
-            dataPtr = convertDouble(reinterpret_cast<double const*>(dataPtr), shape);
-            nbytes = nbytes / (sizeof(double) / sizeof(float));
-            onnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
-        }
-
-        externalWeights = ShapedWeights(onnxDtype, dataPtr, shape);
-
-        // Check if the size of external weights is as expected.
-        if (static_cast<int64_t>(externalWeights.size_bytes()) != weightsRef.second)
-        {
-            LOG_ERROR("Unexpected size for the external weights! Expected size: "
-                << externalWeights.size_bytes() << " bytes (shape = " << shape << "). Actual size: " << nbytes
-                << " bytes.");
-            return false;
-        }
-
-        *weights = externalWeights;
-        return true;
+        return importExternalWeights(onnxTensor, shape, weights);
     }
 
     // Weights information is user provided or within the model
@@ -334,22 +359,34 @@ bool WeightsContext::convertOnnxWeights(
         if (userWeights)
         {
             std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
-            dataPtr = convertDouble(reinterpret_cast<double const*>(initDesc.first), shape);
+            dataPtr
+                = convertDouble({static_cast<double const*>(initDesc.first), initDesc.second / sizeof(double)}, shape)
+                      .data();
             nbytes = initDesc.second / (sizeof(double) / sizeof(float));
         }
         else if (onnxTensor.raw_data().size() > 0)
         {
-            dataPtr = convertDouble(reinterpret_cast<double const*>(onnxTensor.raw_data().data()), shape);
+            dataPtr = convertDouble({reinterpret_cast<double const*>(onnxTensor.raw_data().data()),
+                                        onnxTensor.raw_data().size() / sizeof(double)},
+                shape)
+                          .data();
             nbytes = onnxTensor.raw_data().size() / (sizeof(double) / sizeof(float));
         }
         else if (onnxTensor.double_data().size() > 0)
         {
-            dataPtr = convertDouble(onnxTensor.double_data().data(), shape);
-            if (multiplicationWillOverflow(nbytes, sizeof(float)))
+            dataPtr = convertDouble(
+                {onnxTensor.double_data().data(), static_cast<size_t>(onnxTensor.double_data().size())}, shape)
+                          .data();
+            if (multiplicationWillOverflow(onnxTensor.double_data().size(), sizeof(float)))
             {
                 return false;
             }
             nbytes = onnxTensor.double_data().size() * sizeof(float);
+        }
+        // An empty span (null data) means the source was too small for the declared shape (see convertDouble).
+        if (dataPtr == nullptr && volume(shape) > 0)
+        {
+            return false;
         }
         onnxDtype = ::ONNX_NAMESPACE::TensorProto::FLOAT;
     }
@@ -398,13 +435,19 @@ bool WeightsContext::convertOnnxWeights(
                 break;
             case ::ONNX_NAMESPACE::TensorProto::FLOAT16:
             case ::ONNX_NAMESPACE::TensorProto::BFLOAT16:
-                dataPtr = convertInt32Data<uint16_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<uint16_t>(
+                    {onnxTensor.int32_data().data(), static_cast<size_t>(onnxTensor.int32_data().size())}, shape,
+                    onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT8:
-                dataPtr = convertInt32Data<int8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<int8_t>(
+                    {onnxTensor.int32_data().data(), static_cast<size_t>(onnxTensor.int32_data().size())}, shape,
+                    onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::BOOL:
-                dataPtr = convertInt32Data<uint8_t>(onnxTensor.int32_data().data(), shape, onnxDtype);
+                dataPtr = convertInt32Data<uint8_t>(
+                    {onnxTensor.int32_data().data(), static_cast<size_t>(onnxTensor.int32_data().size())}, shape,
+                    onnxDtype);
                 break;
             case ::ONNX_NAMESPACE::TensorProto::INT4:
                 // int4 data is packed, each int32 element contains one byte (two int4 nibbles)

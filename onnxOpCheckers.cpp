@@ -444,13 +444,20 @@ DEFINE_OP_CHECKER(GRU)
     }
     std::vector<trtAct> activations = attrs.get<std::vector<trtAct>>("activations", defaultActs);
 
-    std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    std::transform(activations.begin() + activationAlphas.size(), activations.end(),
-        std::back_inserter(activationAlphas), &getActivationDefaultAlpha);
+    std::vector<float> activationAlphas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{}), true);
+    std::vector<float> activationBetas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_beta", std::vector<float>{}), false);
 
-    std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    std::transform(activations.begin() + activationBetas.size(), activations.end(), std::back_inserter(activationBetas),
-        &getActivationDefaultBeta);
+    // A valid ONNX GRU supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
+    // reverse-pass comparison below stays in bounds.
+    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
+    STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
+            && "GRU expects numDirections * 2 activations with matching activation_alpha/activation_beta counts.",
+        ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 
     // TODO: Support cases where in bidirectional GRUs, activations of reverse iteration do not match forward pass.
     // TODO: This will require splitting the input tensor in the loop when applying activations.
@@ -537,10 +544,20 @@ DEFINE_OP_CHECKER(LSTM)
     std::vector<trtAct> activations = attrs.get<std::vector<trtAct>>("activations", defaultActs);
 
     std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    activationAlphas = parseLSTMActivationValues(activations, activationAlphas, true);
+    activationAlphas = parseActivationValues(activations, activationAlphas, true);
 
     std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    activationBetas = parseLSTMActivationValues(activations, activationBetas, false);
+    activationBetas = parseActivationValues(activations, activationBetas, false);
+
+    // A valid ONNX LSTM supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
+    // reverse-pass comparison below stays in bounds.
+    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
+    STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
+            && "LSTM expects numDirections * 3 activations with matching activation_alpha/activation_beta counts.",
+        ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 
     // TODO: Support cases where in bidirectional LSTMs, activations of reverse iteration do not match forward pass.
     // TODO: This will require splitting the input tensor in the loop when applying activations.
@@ -750,13 +767,20 @@ DEFINE_OP_CHECKER(RNN)
     std::vector<nvinfer1::ActivationType> activations
         = attrs.get<std::vector<nvinfer1::ActivationType>>("activations", defaultActs);
 
-    std::vector<float> activationAlphas = attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{});
-    std::transform(activations.begin() + activationAlphas.size(), activations.end(),
-        std::back_inserter(activationAlphas), &getActivationDefaultAlpha);
+    std::vector<float> activationAlphas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_alpha", std::vector<float>{}), true);
+    std::vector<float> activationBetas = parseActivationValues(
+        activations, attrs.get<std::vector<float>>("activation_beta", std::vector<float>{}), false);
 
-    std::vector<float> activationBetas = attrs.get<std::vector<float>>("activation_beta", std::vector<float>{});
-    std::transform(activations.begin() + activationBetas.size(), activations.end(), std::back_inserter(activationBetas),
-        &getActivationDefaultBeta);
+    // A valid ONNX RNN supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
+    // reverse-pass comparison below stays in bounds.
+    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
+    STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
+            && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
+            && "RNN expects numDirections activations with matching activation_alpha/activation_beta counts.",
+        ErrorCode::kINVALID_NODE, node, errors, nodeIndex);
 
     // TODO: Support cases where in bidirectional RNNs, activations of reverse iteration do not match forward pass.
     // TODO: This will require splitting the input tensor in the loop when applying activations.

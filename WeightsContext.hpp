@@ -9,6 +9,7 @@
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,15 @@ using FileHandle =
 
 class WeightsContext
 {
+public:
+    //! A memory-mapped external weights file: a pointer to the mapping and its size in bytes.
+    struct MemoryMapping
+    {
+        void* data{nullptr};
+        int64_t size{0};
+    };
+
+private:
     nvinfer1::ILogger* mLogger{};
 
     // Vector of chunks to maintain ownership of weights.
@@ -38,8 +48,7 @@ class WeightsContext
 #ifdef _WIN32
     std::map<std::string, FileHandle> mFileMappingHandles;
 #endif
-    using MemoryMapping_t = std::pair<void*, int64_t>;
-    std::map<std::string, MemoryMapping_t> mMemoryMappings;
+    std::map<std::string, MemoryMapping> mMemoryMappings;
 
     template <typename T>
     using StringMap = std::unordered_map<std::string, T>;
@@ -63,27 +72,45 @@ public:
 
     int32_t* convertUINT8(uint8_t const* weightValues, nvinfer1::Dims const& shape);
 
-    float* convertDouble(double const* weightValues, nvinfer1::Dims const& shape);
+    //! Convert the DOUBLE weights in \p weightValues to FLOAT, clamping values outside the FLOAT range.
+    //! The result is backed by an internal buffer owned by this WeightsContext (see createTempWeights) and
+    //! remains valid for the context's lifetime.
+    //! \return A span over the converted FLOAT weights, or an empty span when \p weightValues holds fewer
+    //! than volume(shape) elements (which would otherwise be read out of bounds).
+    [[nodiscard]] std::span<float> convertDouble(std::span<double const> weightValues, nvinfer1::Dims const& shape);
 
-    template <typename DataType>
-    DataType* convertInt32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype);
+    //! Numerically cast the ONNX int32-backed \p weightValues to the destination type T, sized by \p shape.
+    //! \return A pointer to the converted weights, or nullptr when \p weightValues holds fewer than
+    //! volume(shape) elements (which would otherwise be read out of bounds).
+    template <typename T>
+    T* convertInt32Data(std::span<int32_t const> weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype);
 
     uint8_t* convertPackedInt32Data(
         int32_t const* weightValues, nvinfer1::Dims const& shape, size_t nbytes, int32_t onnxdtype);
 
-    // Function to create an internal buffer to own the weights without any type conversions.
+    //! Create an internal buffer that takes ownership of \p weightValues without any type conversion.
     void* ownWeights(void const* weightValues, ShapedWeights::DataType const dataType, nvinfer1::Dims const& shape,
         size_t const nBytes);
 
-    // Function to read bytes from an external file and return the data in a buffer.
-    bool parseExternalWeights(std::string const& file, int64_t offset, int64_t length, MemoryMapping_t& weightsRef);
+    //! Map \p file, then point \p weightsRef at the [offset, offset + length) window within it. Rejects
+    //! an offset/length that fall outside the mapped file. A length of 0 spans to the end of the file.
+    bool parseExternalWeights(std::string const& file, int64_t offset, int64_t length, MemoryMapping& weightsRef);
+
+    //! Import an initializer whose data lives in an external file into \p weights, validating the declared
+    //! offset/length against the mapped file and the mapped size against \p shape before any conversion.
+    //! \return false on any inconsistency.
+    bool importExternalWeights(
+        ::ONNX_NAMESPACE::TensorProto const& onnxTensor, nvinfer1::Dims const& shape, ShapedWeights* weights);
     // Function to read data from an ONNX Tensor and move it into a ShapedWeights object.
     // Handles external weights as well.
     bool convertOnnxWeights(
         ::ONNX_NAMESPACE::TensorProto const& onnxTensor, ShapedWeights* weights, bool ownAllWeights = false);
 
-    // Helper function to convert weightValues' type from fp16/bf16 to fp32.
-    template <typename DataType>
+    //! Convert the fp16/bf16 weights in \p w to a newly allocated fp32 buffer. The template parameter is the
+    //! source element type (half or BFloat16); the result is always fp32, backed by an internal buffer owned
+    //! by this WeightsContext.
+    //! \return A pointer to the fp32 weights.
+    template <typename T>
     [[nodiscard]] float* convertToFp32(ShapedWeights const& w);
 
     // Helper function to get fp32 representation of fp16, bf16, or fp32 weights.
@@ -119,7 +146,7 @@ public:
         return *mLogger;
     }
 
-    MemoryMapping_t mmap(std::string const& file);
+    MemoryMapping mmap(std::string const& file);
 
     void clearMemoryMappings();
 
@@ -131,24 +158,32 @@ public:
     bool loadExternalInit(char const* name, void const* data, size_t size);
 };
 
-template <typename DataType>
-DataType* WeightsContext::convertInt32Data(int32_t const* weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype)
+template <typename T>
+T* WeightsContext::convertInt32Data(
+    std::span<int32_t const> weightValues, nvinfer1::Dims const& shape, int32_t onnxdtype)
 {
+    auto* ctx = this; // For logging macros.
     size_t const nbWeights = volume(shape);
-    DataType* newWeights{static_cast<DataType*>(createTempWeights(onnxdtype, shape).values)};
+    if (nbWeights > weightValues.size())
+    {
+        LOG_ERROR("int32 weights source holds " << weightValues.size() << " elements but shape " << shape
+                                                << " requires " << nbWeights << ". Rejecting malformed weights.");
+        return nullptr;
+    }
+    T* newWeights{static_cast<T*>(createTempWeights(onnxdtype, shape).values)};
 
     for (size_t i = 0; i < nbWeights; i++)
     {
-        newWeights[i] = static_cast<DataType>(weightValues[i]);
+        newWeights[i] = static_cast<T>(weightValues[i]);
     }
     return newWeights;
 }
-template <typename DataType>
+template <typename T>
 [[nodiscard]] float* WeightsContext::convertToFp32(ShapedWeights const& w)
 {
     int64_t const nbWeights = volume(w.shape);
     auto result = static_cast<float*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::FLOAT, w.shape).values);
-    std::copy_n(static_cast<DataType const*>(w.values), nbWeights, result);
+    std::copy_n(static_cast<T const*>(w.values), nbWeights, result);
 
     return result;
 }
