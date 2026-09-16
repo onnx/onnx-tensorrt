@@ -9,6 +9,9 @@ import os
 
 import unittest
 import onnx.backend.test
+import numpy as np
+from onnx import TensorProto
+from onnx import helper as onnx_helper
 
 import onnx_tensorrt.backend as trt
 
@@ -175,6 +178,69 @@ backend_test.exclude(r'.*test_maxunpool.*')
 backend_test.exclude(r'.*test_convtranspose_3d_custom_cuda')
 # dilations not supported in ConvTRanspose layer
 backend_test.exclude(r'.*test_convtranspose_dilations_custom_cuda')
+
+
+class TensorRTCustomReduceLogSumExpTest(unittest.TestCase):
+    def test_reduce_log_sum_exp_large_finite_input_custom(self):
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x"], ["y"], keepdims=1)
+        graph = onnx_helper.make_graph(
+            [node],
+            "reduce_log_sum_exp_large_finite_input_custom",
+            [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [4])],
+            [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [1])],
+        )
+        model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
+        model.ir_version = 10
+
+        x = np.array([250.0, 248.0, 255.0, 251.0], dtype=np.float32)
+        expected = np.log(np.sum(np.exp(x - np.max(x)))) + np.max(x)
+
+        outputs = trt.run_model(model, [x], device="CUDA:0")
+        actual = float(outputs.y[0])
+
+        self.assertTrue(np.isfinite(actual))
+        self.assertAlmostEqual(actual, float(expected), places=5)
+
+    def test_reduce_log_sum_exp_keepdims_zero_custom(self):
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x", "axes"], ["y"], keepdims=0)
+        graph = onnx_helper.make_graph(
+            [node],
+            "reduce_log_sum_exp_keepdims_zero_custom",
+            [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 4])],
+            [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [2])],
+            initializer=[onnx_helper.make_tensor("axes", TensorProto.INT64, [1], np.array([1], dtype=np.int64))],
+        )
+        model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
+        model.ir_version = 10
+
+        x = np.array([[250.0, 248.0, 255.0, 251.0], [100.0, 101.0, 99.0, 97.0]], dtype=np.float32)
+        expected = np.log(np.sum(np.exp(x - np.max(x, axis=1, keepdims=True)), axis=1)) + np.max(x, axis=1)
+
+        outputs = trt.run_model(model, [x], device="CUDA:0")
+        actual = np.asarray(outputs.y)
+
+        self.assertTrue(np.all(np.isfinite(actual)))
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+    def test_reduce_log_sum_exp_noop_empty_axes_custom(self):
+        node = onnx_helper.make_node("ReduceLogSumExp", ["x", "axes"], ["y"], keepdims=0, noop_with_empty_axes=1)
+        graph = onnx_helper.make_graph(
+            [node],
+            "reduce_log_sum_exp_noop_empty_axes_custom",
+            [onnx_helper.make_tensor_value_info("x", TensorProto.FLOAT, [2, 2])],
+            [onnx_helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 2])],
+            initializer=[onnx_helper.make_tensor("axes", TensorProto.INT64, [0], np.array([], dtype=np.int64))],
+        )
+        model = onnx_helper.make_model(graph, opset_imports=[onnx_helper.make_opsetid("", 18)])
+        model.ir_version = 10
+
+        x = np.array([[250.0, 248.0], [255.0, 251.0]], dtype=np.float32)
+
+        outputs = trt.run_model(model, [x], device="CUDA:0")
+        actual = np.asarray(outputs.y)
+
+        self.assertEqual(actual.size, x.size)
+        np.testing.assert_allclose(actual.reshape(x.shape), x, rtol=1e-6, atol=1e-6)
 
 globals().update(backend_test
                  .enable_report()
