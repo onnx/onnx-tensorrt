@@ -4532,7 +4532,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         starts = ShapeTensor{ctx, inputs.at(1)};
         ends = ShapeTensor{ctx, inputs.at(2)};
         // "If axes are omitted, they are set to [0, ..., ndim-1]."
-        axes = nbInputs > 3 ? ShapeTensor(ctx, inputs.at(3)) : iotaShapeVector(dims.size());
+        axes = nbInputs > 3 ? ShapeTensor(ctx, inputs.at(3)) : iotaShapeVector(starts.size());
         // Doesn't support dynamic axes currently.
         ASSERT( (axes.allValuesKnown()) && "This version of TensorRT does not support dynamic axes.", ErrorCode::kUNSUPPORTED_NODE);
         ASSERT( (starts.size() == axes.size()) && "The shape of input starts misaligns with the shape of input axes.", ErrorCode::kUNSUPPORTED_NODE);

@@ -180,5 +180,33 @@ globals().update(backend_test
                  .enable_report()
                  .test_cases)
 
+
+# Regression test for issue #4470: a partial-axis Slice with omitted `axes`
+# must default axes to [0, 1, ..., len(starts)-1], not the full input rank.
+class TestSliceDefaultAxesPartial(unittest.TestCase):
+    def test_slice_default_axes_partial(self):
+        import numpy as np
+        import onnx
+        from onnx import TensorProto, helper
+
+        node = helper.make_node("Slice", inputs=["x", "starts", "ends"], outputs=["y"])
+        graph = helper.make_graph(
+            [node], "test_slice_default_axes_partial",
+            inputs=[
+                helper.make_tensor_value_info("x", TensorProto.FLOAT, [20, 10, 5]),
+                helper.make_tensor_value_info("starts", TensorProto.INT64, [2]),
+                helper.make_tensor_value_info("ends", TensorProto.INT64, [2]),
+            ],
+            outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, [2, 3, 5])],
+        )
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal((20, 10, 5)).astype(np.float32)
+        starts = np.array([0, 1], dtype=np.int64)
+        ends = np.array([2, 4], dtype=np.int64)
+        expected = x[0:2, 1:4]
+        outputs = trt.TensorRTBackend.run_model(model, inputs=[x, starts, ends])
+        np.testing.assert_allclose(outputs[0], expected, rtol=1e-6, atol=1e-6)
+
 if __name__ == '__main__':
     unittest.main()
