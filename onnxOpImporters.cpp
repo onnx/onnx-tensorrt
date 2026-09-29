@@ -6404,7 +6404,7 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         ends = ShapeTensor{*input2};
         // "If axes are omitted, they are set to [0, ..., ndim-1]."
         axes = nbInputs > 3 && !inputs.at(3).isNullTensor() ? ShapeTensor(ctx, inputs.at(3))
-                                                            : iotaShapeVector(dims.size());
+                                                            : iotaShapeVector(starts.size());
         ONNXTRT_CHECK_NODE((starts.size() == axes.size()),
             "The shape of input starts misaligns with the shape of input axes. Shape of input starts = "
                 << starts.size() << ", shape of input axes = " << axes.size() << ".",
