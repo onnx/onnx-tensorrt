@@ -3,25 +3,19 @@
  */
 
 #include "bfloat16.hpp"
-#include <cstring>
+#include <bit>
 
 namespace onnx2trt
 {
 
 BFloat16::operator float() const
 {
-    static_assert(sizeof(uint32_t) == sizeof(float), "");
-    float val{0.F};
-    auto bits = static_cast<uint32_t>(mRep) << 16;
-    std::memcpy(&val, &bits, sizeof(uint32_t));
-    return val;
+    return std::bit_cast<float>(static_cast<uint32_t>(mRep) << 16);
 }
 
 BFloat16::BFloat16(float x)
 {
-    static_assert(sizeof(uint32_t) == sizeof(float), "");
-    uint32_t bits{0};
-    std::memcpy(&bits, &x, sizeof(float));
+    uint32_t bits = std::bit_cast<uint32_t>(x);
 
     // FP32 format: 1 sign bit, 8 bit exponent, 23 bit mantissa
     // BF16 format: 1 sign bit, 8 bit exponent, 7 bit mantissa

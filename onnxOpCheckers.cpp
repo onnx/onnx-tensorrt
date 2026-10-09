@@ -260,10 +260,6 @@ DEFINE_OP_CHECKER(Constant)
     // serialized iNetworkDefinition which does not have this check.
     if (attrs.get<std::vector<float>>("trt_outputs_range_min", {}).empty())
     {
-        // The next NOLINT suppresses a modernize-use-emplace warning that originates from
-        // `push_back` inside the STATIC_CHECK / ADD_STATIC_ERROR macro expansion in
-        // parsers/onnx/Status.hpp; fixing the macro is out of scope for this MR.
-        // NOLINTNEXTLINE(modernize-use-emplace)
         STATIC_CHECK((!attrs.contains("sparse_value")) && (!attrs.contains("value_string")) && (!attrs.contains("value_strings"))
             && "This version of TensorRT does not support the sparse_value, value_string and value_strings attributes.",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
@@ -452,7 +448,6 @@ DEFINE_OP_CHECKER(GRU)
     // A valid ONNX GRU supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
     int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
-    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -552,7 +547,6 @@ DEFINE_OP_CHECKER(LSTM)
     // A valid ONNX LSTM supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
     int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
-    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -775,7 +769,6 @@ DEFINE_OP_CHECKER(RNN)
     // A valid ONNX RNN supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
     int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
-    // NOLINTNEXTLINE(modernize-use-emplace): push_back comes from the STATIC_CHECK/ADD_STATIC_ERROR macro.
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -1169,7 +1162,13 @@ DEFINE_OP_CHECKER(RegexFullMatch)
     STATIC_CHECK(false, ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 }
 
-DEFINE_OP_EMPTY_CHECKER(STFT)
+DEFINE_OP_CHECKER(STFT)
+{
+    OnnxAttrs attrs(node, ctx);
+    int64_t const onesided = attrs.get<int64_t>("onesided", 1);
+    STATIC_CHECK((onesided == 0 || onesided == 1) && "STFT 'onesided' must be 0 or 1.",
+        ErrorCode::kUNSUPPORTED_NODE_ATTR, node, errors, nodeIndex);
+}
 
 DEFINE_OP_CHECKER(SequenceAt)
 {

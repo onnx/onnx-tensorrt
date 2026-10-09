@@ -292,6 +292,7 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
         return;
     }
 
+    ONNXTRT_CHECK(node.output_size() > 0, "ConstantOfShape node has no outputs.", ErrorCode::kINVALID_NODE);
     LOG_REFITTER_VERBOSE("Refitting ConstantOfShape node: " << node.name() << ", output: " << node.output(0));
 
     mRefittableWeights.erase(name);
@@ -336,6 +337,8 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
 
 void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& node, std::string const& graphName)
 {
+    ONNXTRT_CHECK(node.output_size() > 0, "Constant node has no outputs.", ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK(node.attribute_size() > 0, "Constant node has no attributes.", ErrorCode::kINVALID_NODE);
 
     if (!mRefittableWeights.count(node.output(0)))
     {
@@ -510,6 +513,7 @@ void ModelRefitter::refitOnnxIfNode(::ONNX_NAMESPACE::NodeProto const& node)
 void ModelRefitter::refitOnnxLoopNode(::ONNX_NAMESPACE::NodeProto const& node)
 {
     LOG_REFITTER_VERBOSE("Refitting Loop node: " << node.name());
+    ONNXTRT_CHECK(node.attribute_size() > 0, "Loop node has no attributes.", ErrorCode::kINVALID_NODE);
     ::ONNX_NAMESPACE::GraphProto const& body = static_cast<::ONNX_NAMESPACE::GraphProto const&>(node.attribute(0).g());
     refitOnnxGraph(body);
 }

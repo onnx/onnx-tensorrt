@@ -157,6 +157,12 @@ public:
     bool parseModelProto() noexcept override;
 
     bool setBuilderConfig(nvinfer1::IBuilderConfig const* const builderConfig) noexcept override;
+
+    //! Set or clear the optional parse-time refit observer. Ownership remains with the caller.
+    void setRefitObserver(nvonnxparser::IRefitterObserver* observer) noexcept override
+    {
+        mImporterCtx.setRefitObserver(observer);
+    }
 };
 
 } // namespace onnx2trt

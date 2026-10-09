@@ -21,8 +21,10 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <sstream>
+#include <string_view>
 #include <typeindex>
 #include <unordered_map>
 
@@ -53,6 +55,7 @@ nvinfer1::IConstantLayer* addConstantScalar(
     static_cast<ScalarType*>(scalarWeights.values)[0] = static_cast<ScalarType>(scalar);
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(scalarWeights.shape, scalarWeights));
     ctx->network()->setWeightsName(scalarWeights, scalarWeights.getName());
+    ctx->notifyWeightsName(scalarWeights, scalarWeights.getName());
     return l;
 }
 
@@ -73,6 +76,7 @@ nvinfer1::IConstantLayer* addConstant(
     if (values.size() != 0)
     {
         ctx->network()->setWeightsName(weights, weights.getName());
+        ctx->notifyWeightsName(weights, weights.getName());
     }
     return l;
 }
@@ -250,6 +254,7 @@ nvinfer1::ITensor* iota(ImporterContext* ctx, ShapeTensor iotaDims, int32_t axis
 nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
     std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
 
+
 // Helper function to use modulatedDeformableConv2D plugin
 NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     size_t const nodeIdx, std::vector<TensorOrWeights>& inputs);
@@ -295,6 +300,13 @@ NodeOutputs poolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
 // Helper function to check if reduce op equals No-op
 bool IsReduceNoOp(
     ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<TensorOrWeights> const& inputs);
+
+//! Resolves the reduction axes of an ONNX Reduce* node into a TensorRT axis mask. Axes come from the "axes"
+//! attribute (opset < 18) or the optional axes input (opset >= 18), which must be a build-time constant.
+//! \return the mask, or std::nullopt when the axes are empty and noop_with_empty_axes is set, in which case the
+//! caller must forward the input unchanged.
+[[nodiscard]] std::optional<uint32_t> getReduceAxisMask(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, int32_t ndim, TensorOrWeights inputAxes);
 
 // Helper function to import reduce ops into TRT
 NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
@@ -512,7 +524,7 @@ bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims, std::vec
         }
     }
     trtDims.nbDims = onnxDimsVec.size();
-    std::copy(onnxDimsVec.begin(), onnxDimsVec.end(), trtDims.d);
+    std::ranges::copy(onnxDimsVec, trtDims.d);
     return true;
 }
 

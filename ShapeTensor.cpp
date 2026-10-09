@@ -73,10 +73,13 @@ ShapeTensor::ShapeTensor(ImporterContext* ctx, TensorOrWeights& t)
     }
 }
 
-static bool hasAllNonNegativeValues(const std::vector<int64_t>& values)
+namespace
 {
-    return std::all_of(values.begin(), values.end(), [](int x) { return x >= 0; });
+bool hasAllNonNegativeValues(std::vector<int64_t> const& values)
+{
+    return std::ranges::all_of(values, [](int x) { return x >= 0; });
 }
+} // namespace
 
 ShapeTensor::ShapeTensor(nvinfer1::ITensor& t, int depth)
     : mDepth(depth)
@@ -351,8 +354,8 @@ ShapeTensor concat(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor
     if (x.allValuesKnown() && y.allValuesKnown())
     {
         std::vector<int64_t> values(x.size() + y.size());
-        auto p = std::copy(x.begin(), x.end(), values.begin());
-        std::copy(y.begin(), y.end(), p);
+        auto p = std::ranges::copy(x, values.begin()).out;
+        std::ranges::copy(y, p);
         return ShapeTensor(1, std::move(values));
     }
 
@@ -363,14 +366,13 @@ ShapeTensor concat(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor
     return ShapeTensor(*concatOutput);
 }
 
-ShapeTensor gather(ImporterContext* ctx, const ShapeTensor& data, const ShapeTensor& indices)
+ShapeTensor gather(ImporterContext* ctx, ShapeTensor const& data, ShapeTensor const& indices)
 {
     assert(data.rank() == 1);
-    if (indices.allValuesKnown()
-        && std::all_of(indices.begin(), indices.end(), [&data](int i) { return data.valueKnown(i); }))
+    if (indices.allValuesKnown() && std::ranges::all_of(indices, [&data](int i) { return data.valueKnown(i); }))
     {
         std::vector<int64_t> z(indices.size());
-        std::transform(indices.begin(), indices.end(), z.begin(), [&data](int64_t i) {
+        std::ranges::transform(indices, z.begin(), [&data](int64_t i) {
             assert(0 <= i);
             assert(i < data.size());
             return data[i];
@@ -479,7 +481,7 @@ nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t
                     throw std::runtime_error(msg.str());
                 }
             }
-            std::copy(x.begin(), x.end(), d.d);
+            std::ranges::copy(x, d.d);
         }
     }
     return d;

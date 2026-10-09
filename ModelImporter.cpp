@@ -194,7 +194,7 @@ void ModelImporter::reportSubgraphs()
             return std::nullopt;
         };
         auto&& nodeInput = node.input();
-        return std::any_of(nodeInput.begin(), nodeInput.end(), [&](auto const& input) {
+        return std::ranges::any_of(nodeInput, [&](auto const& input) {
             auto loopInput = findLoopTensor();
             return unsupportedInputNames.count(input) || (loopInput.has_value() && *loopInput == input);
         });
@@ -874,6 +874,17 @@ bool ModelImporter::parse(
         }
 
         deserializeOnnxModel(serialized_onnx_model, serialized_onnx_model_size, &mOnnxModel);
+
+        // Populate the initializer map so the parse-time refit observer can classify named weights
+        // as initializer-backed (kIDENTITY / kDOUBLE_TO_FLOAT) on this path too, matching
+        // loadModelProto(). Clear first: the map holds pointers into mOnnxModel, and a reused
+        // parser instance would otherwise keep stale entries pointing into the previous model.
+        auto& initializerMap = ctx->getWeightsContext().initializerMap();
+        initializerMap.clear();
+        for (::ONNX_NAMESPACE::TensorProto const& initializer : mOnnxModel.graph().initializer())
+        {
+            initializerMap[initializer.name()] = &initializer;
+        }
         try
         {
             this->importModel();
