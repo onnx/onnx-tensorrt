@@ -26,11 +26,18 @@ void PluginDeleter::operator()(nvinfer1::IPluginV2* t)
     t->destroy();
 }
 
+nvinfer1::DataType ImporterContext::trtDtypeOf(int32_t onnxDtype) noexcept
+{
+    nvinfer1::DataType trtDtype{nvinfer1::DataType::kFLOAT};
+    (void) convertDtype(onnxDtype, &trtDtype);
+    return trtDtype;
+}
+
 Status notInvalidType(TensorOrWeights const& input, std::vector<std::string> const& invalidTypes,
     ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx)
 {
-    bool invalid = std::any_of(invalidTypes.begin(), invalidTypes.end(),
-        [&](std::string invalidType) { return input.getType() == invalidType; });
+    bool invalid
+        = std::ranges::any_of(invalidTypes, [&](std::string invalidType) { return input.getType() == invalidType; });
     if (invalid)
     {
         ASSERT_NODE(
@@ -317,7 +324,7 @@ void convertAxis(int32_t& axis, int32_t const nbDims, ::ONNX_NAMESPACE::NodeProt
     {
         axis += nbDims;
     }
-    // Support nbDims as a valid axis for QuantDequantLinearHelper
+    // Some operators take an insertion position, for which nbDims is a legal axis.
     ONNXTRT_CHECK_NODE((axis >= 0 && axis <= nbDims),
         "Axis must be in the range [0, nbDims (" << nbDims << ")]. Provided axis is: " << axis, node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
@@ -455,6 +462,7 @@ nvinfer1::ITensor& convertToTensor(TensorOrWeights& input, ImporterContext* ctx)
     {
         ctx->registerLayer(constantLayer, weights.getName(), nullptr);
         ctx->network()->setWeightsName(weights, weights.getName());
+        ctx->notifyWeightsName(weights, weights.getName());
     }
 
     auto* output = N_CHECK(constantLayer->getOutput(0));
@@ -545,8 +553,7 @@ void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1
     case nvinfer1::ElementWiseOperation::kAND:
     case nvinfer1::ElementWiseOperation::kOR:
     case nvinfer1::ElementWiseOperation::kXOR:
-        ONNXTRT_CHECK_NODE(
-            std::all_of(inputs.begin(), inputs.end(), [](TensorOrWeights const& input) { return input.isBool(); }),
+        ONNXTRT_CHECK_NODE(std::ranges::all_of(inputs, [](TensorOrWeights const& input) { return input.isBool(); }),
             "Elementwise layer only supports operator " + getElementWiseOpName(op)
                 + " and the given inputs with type BOOL.",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
@@ -562,8 +569,7 @@ void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1
     case nvinfer1::ElementWiseOperation::kPROD:
     case nvinfer1::ElementWiseOperation::kSUB:
     case nvinfer1::ElementWiseOperation::kSUM:
-        ONNXTRT_CHECK_NODE(
-            !std::any_of(inputs.begin(), inputs.end(), [](TensorOrWeights const& input) { return input.isBool(); }),
+        ONNXTRT_CHECK_NODE(!std::ranges::any_of(inputs, [](TensorOrWeights const& input) { return input.isBool(); }),
             "Elementwise layer does not support operator " + getElementWiseOpName(op)
                 + " and the given inputs with type BOOL.",
             node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
@@ -886,6 +892,7 @@ NodeOutputs greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
         ctx, node, nodeIdx, {firstOpResults.at(0), equalsResult.at(0)}, nvinfer1::ElementWiseOperation::kOR);
 }
 
+
 nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
     std::string const& pluginVersion, std::string const& pluginNamespace)
 {
@@ -912,7 +919,7 @@ nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std
 
     // Search for a creator that matches the requested plugin
     // the creators are guaranteed to be unique
-    auto const it = std::find_if(creators.begin(), creators.end(), [&](auto* const currentCreator) -> bool {
+    auto const it = std::ranges::find_if(creators, [&](auto* const currentCreator) -> bool {
         if (!currentCreator)
         {
             return false;
@@ -1835,16 +1842,10 @@ ShapedWeights getWeightsFromIdentityOrConstant(ImporterContext* ctx, nvinfer1::I
     return ShapedWeights{};
 }
 
-NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-    TensorOrWeights input, nvinfer1::ReduceOperation operation, TensorOrWeights inputAxes)
+std::optional<uint32_t> getReduceAxisMask(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, int32_t ndim, TensorOrWeights inputAxes)
 {
-    // TensorRT does not support reduction on Bool or UINT8 tensors.
-    checkNotInvalidType(input, {"BOOL", "UINT8"}, node, nodeIdx);
-
     OnnxAttrs attrs(node, ctx);
-    nvinfer1::ITensor& tensor = convertToTensor(input, ctx);
-    bool keepdims = attrs.get("keepdims", 1);
-    int32_t ndim = tensor.getDimensions().nbDims;
     std::vector<int32_t> axes;
     if (attrs.contains("axes"))
     {
@@ -1871,11 +1872,9 @@ NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
     // It's possible that the axes tensor, axes initializer, or axes attribute was empty. Handle such cases here.
     if (axes.empty())
     {
-        // Fast return path for no-op case.
         if (attrs.get("noop_with_empty_axes", 0) == 1)
         {
-            TensorOrWeights output = identity(ctx, input);
-            return {{output}};
+            return std::nullopt;
         }
         axes.resize(ndim);
         std::iota(axes.begin(), axes.end(), 0);
@@ -1887,8 +1886,25 @@ NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
         convertAxis(axis, ndim, node, nodeIdx);
         axisMask |= 1 << axis;
     }
+    return axisMask;
+}
 
-    auto* layer = N_CHECK(ctx->network()->addReduce(tensor, operation, axisMask, keepdims));
+NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
+    TensorOrWeights input, nvinfer1::ReduceOperation operation, TensorOrWeights inputAxes)
+{
+    OnnxAttrs attrs(node, ctx);
+    nvinfer1::ITensor& tensor = convertToTensor(input, ctx);
+    bool const keepdims = attrs.get("keepdims", 1);
+    auto const axisMask = getReduceAxisMask(ctx, node, nodeIdx, tensor.getDimensions().nbDims, inputAxes);
+    if (!axisMask)
+    {
+        TensorOrWeights output = identity(ctx, input);
+        return {{output}};
+    }
+    // TensorRT does not support reduction on Bool or UINT8 tensors.
+    checkNotInvalidType(input, {"BOOL", "UINT8"}, node, nodeIdx);
+
+    auto* layer = N_CHECK(ctx->network()->addReduce(tensor, operation, *axisMask, keepdims));
     ctx->registerLayer(layer, node);
     auto output = N_CHECK(layer->getOutput(0));
     return {{output}};
@@ -1939,6 +1955,10 @@ NodeOutputs scaleHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
     ctx->registerLayer(layer, node);
     ctx->network()->setWeightsName(shift, shiftName);
     ctx->network()->setWeightsName(scale, scaleName);
+    // Initializer-backed names emit here; synthesized names (e.g. the BatchNorm fold) are emitted
+    // with full transform context by the caller before reaching this point.
+    ctx->notifyWeightsName(shift, shiftName);
+    ctx->notifyWeightsName(scale, scaleName);
 
     tensorPtr = N_CHECK(layer->getOutput(0));
 
@@ -2003,7 +2023,7 @@ nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor
     auto* axesTensor
         = N_CHECK(addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axes.size())}})
                       ->getOutput(0));
-    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(tensor, *axesTensor));
+    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(tensor, axesTensor));
     auto* squeezedTensor = N_CHECK(squeezeLayer->getOutput(0));
     LOG_VERBOSE("Original shape: " << shapeOf(tensor) << ", squeezing to: " << shapeOf(*squeezedTensor));
     ctx->registerLayer(squeezeLayer, "ONNXTRT_squeezeTensor", nullptr);
@@ -2256,10 +2276,12 @@ NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodePro
     if (kernelWeights)
     {
         ctx->network()->setWeightsName(kernelWeights, inputs.at(1).getName().c_str());
+        ctx->notifyWeightsName(kernelWeights, inputs.at(1).getName().c_str());
     }
     if (biasWeights && inputs.size() == 3)
     {
         ctx->network()->setWeightsName(biasWeights, inputs.at(2).getName().c_str());
+        ctx->notifyWeightsName(biasWeights, inputs.at(2).getName().c_str());
     }
 
     nvinfer1::ITensor* outputTensor = N_CHECK(layer->getOutput(0));

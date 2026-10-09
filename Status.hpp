@@ -99,8 +99,9 @@
         {                                                                                                              \
             localFunctionStackChar.push_back(ctx->localFunctionErrors().back()[i].c_str());                            \
         }                                                                                                              \
-        error_list.push_back(onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index),          \
-            (node.name()), (node.op_type()), localFunctionStackChar));                                                 \
+        (error_list)                                                                                                   \
+            .emplace_back((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), ((node).name()),             \
+                ((node).op_type()), localFunctionStackChar);                                                           \
     } while (0)
 
 #define STATIC_CHECK(condition, error_code, node, error_list, index)                                                   \

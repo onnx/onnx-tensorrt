@@ -91,7 +91,7 @@ nvinfer1::Dims OnnxAttrs::get<nvinfer1::Dims>(std::string const& key) const
     {
         throw std::runtime_error{"Number of dimensions values exceed the maximum amount supported by TensorRT!"};
     }
-    std::copy(values.begin(), values.end(), dims.d);
+    std::ranges::copy(values, dims.d);
     // Note: No dimension type information is included
     return dims;
 }
@@ -113,7 +113,7 @@ nvinfer1::Permutation OnnxAttrs::get<nvinfer1::Permutation>(std::string const& k
     {
         throw std::runtime_error{"Number of permutations values exceed the maximum amount supported by TensorRT!"};
     }
-    std::copy(values.begin(), values.end(), perm.order);
+    std::ranges::copy(values, perm.order);
     // Fill unused values with identity permutation
     for (int32_t i = values.size(); i < nvinfer1::Dims::MAX_DIMS; ++i)
     {

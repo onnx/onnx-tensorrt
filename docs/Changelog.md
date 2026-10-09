@@ -2,9 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 11.4 GA Release - 2026-10-09
+- Added `IRefitterObserver` class and `IParser::setRefitObserver` to better handle refittable weights when parsing
+
 # TensorRT 11.3 GA Release - 2026-09-14
 For more details, see the 11.3 GA release notes
 - Refactored how external weights are handled in IParserRefitter
+
 
 # TensorRT 11.2 GA Release - 2026-8-2
 For more details, see the 11.2 GA release notes.

@@ -160,6 +160,13 @@ class ImporterContext
     //! Vector to hold expected graph outputs
     std::vector<::ONNX_NAMESPACE::ValueInfoProto> mGraphOutputNames;
 
+    //! Optional observer receiving one callback per refittable weight named during parsing. Owned externally.
+    nvonnxparser::IRefitterObserver* mRefitObserver{nullptr};
+    //! Weight names already reported to mRefitObserver. Lets a specialized emission site (e.g. the
+    //! BatchNorm fold, which knows its sources and epsilon) suppress the generic emission that
+    //! fires next to INetworkDefinition::setWeightsName for the same name.
+    std::unordered_set<std::string> mNotifiedRefitWeights;
+
 public:
     ImporterContext(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger)
         : mNetwork(network)
@@ -228,6 +235,105 @@ public:
     {
         return *mLogger;
     }
+
+    //! Set or clear the optional parse-time refit observer. Ownership remains with the caller.
+    void setRefitObserver(nvonnxparser::IRefitterObserver* observer)
+    {
+        mRefitObserver = observer;
+        mNotifiedRefitWeights.clear();
+    }
+
+    //! \return true when a parse-time refit observer is attached.
+    [[nodiscard]] bool hasRefitObserver() const
+    {
+        return mRefitObserver != nullptr;
+    }
+
+    //! Emit one record to the attached parse-time observer, deduplicated by trtName. No-op when no
+    //! observer is set. Mirrors ModelRefitter::notifyObserver so parse-time and refit-time records
+    //! share one schema.
+    void notifyRefittableWeight(char const* trtName, nvonnxparser::RefitTransformKind kind, int32_t onnxDtype,
+        nvinfer1::DataType trtDtype, int64_t count, std::span<char const* const> sources, float epsilon = 0.0F,
+        std::span<std::byte const> fixedData = {}) noexcept
+    {
+        if (mRefitObserver == nullptr || trtName == nullptr || !mNotifiedRefitWeights.insert(trtName).second)
+        {
+            return;
+        }
+        nvonnxparser::RefitRecord const record{
+            .trtName = trtName,
+            .kind = kind,
+            .onnxDtype = onnxDtype,
+            .trtDtype = trtDtype,
+            .count = count,
+            .nbSources = static_cast<int32_t>(sources.size()),
+            .sourceOnnxNames = sources.data(),
+            .epsilon = epsilon,
+            .fixedData = fixedData.empty() ? nullptr : static_cast<void const*>(fixedData.data()),
+            .fixedDataSize = fixedData.size(),
+        };
+        mRefitObserver->onRefittableWeight(record);
+    }
+
+    //! Generic emission next to INetworkDefinition::setWeightsName: classify the named weight by
+    //! looking its name up in the loaded model's initializer map. Initializer-backed weights are
+    //! kIDENTITY (or kDOUBLE_TO_FLOAT when the source dtype is DOUBLE); anything else (e.g. a
+    //! Constant node output materialized as a network constant) is emitted with the weight bytes
+    //! embedded, so the record stays replayable without knowing the weight's provenance.
+    void notifyWeightsName(ShapedWeights const& weights, char const* name) noexcept
+    {
+        if (mRefitObserver == nullptr || name == nullptr)
+        {
+            return;
+        }
+        char const* const sourceName = name;
+        auto const& initializers = mWeightsContext.initializerMap();
+        auto const it = initializers.find(name);
+        if (it != initializers.end())
+        {
+            int32_t const onnxDtype = it->second->data_type();
+            auto const kind = onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE
+                ? nvonnxparser::RefitTransformKind::kDOUBLE_TO_FLOAT
+                : nvonnxparser::RefitTransformKind::kIDENTITY;
+            notifyRefittableWeight(name, kind, onnxDtype, trtDtypeOf(weights.type),
+                static_cast<int64_t>(weights.count()), std::span<char const* const>{&sourceName, 1});
+            return;
+        }
+        std::span<std::byte const> const bytes{
+            static_cast<std::byte const*>(weights.values), static_cast<size_t>(weights.size_bytes())};
+        notifyRefittableWeight(name, nvonnxparser::RefitTransformKind::kCONSTANT_NODE, weights.type,
+            trtDtypeOf(weights.type), static_cast<int64_t>(weights.count()),
+            std::span<char const* const>{&sourceName, 1}, 0.0F, bytes);
+    }
+
+    //! Overload for sites that only hold nvinfer1::Weights (no ONNX dtype, no safe byte view).
+    //! Emits only when the name resolves to a model initializer; other names must be covered by a
+    //! specialized emission site (the dedup set in notifyRefittableWeight makes that ordering safe).
+    void notifyWeightsName(nvinfer1::Weights const& weights, char const* name) noexcept
+    {
+        if (mRefitObserver == nullptr || name == nullptr)
+        {
+            return;
+        }
+        char const* const sourceName = name;
+        auto const& initializers = mWeightsContext.initializerMap();
+        auto const it = initializers.find(name);
+        if (it == initializers.end())
+        {
+            return;
+        }
+        int32_t const onnxDtype = it->second->data_type();
+        auto const kind = onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE
+            ? nvonnxparser::RefitTransformKind::kDOUBLE_TO_FLOAT
+            : nvonnxparser::RefitTransformKind::kIDENTITY;
+        notifyRefittableWeight(name, kind, onnxDtype, weights.type, weights.count,
+            std::span<char const* const>{&sourceName, 1});
+    }
+
+    //! Resolve the nvinfer1 dtype for an ONNX TensorProto::DataType, defaulting to kFLOAT for
+    //! unmapped dtypes (the onnxDtype travels verbatim in the record either way). Defined in
+    //! importerUtils.cpp: the implementation needs convertDtype, whose header includes this one.
+    [[nodiscard]] static nvinfer1::DataType trtDtypeOf(int32_t onnxDtype) noexcept;
 
     // Register an unique name for the created weights
     ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims shape, bool refittable = false)
