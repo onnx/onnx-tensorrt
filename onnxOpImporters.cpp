@@ -6239,6 +6239,11 @@ DEFINE_BUILTIN_OP_IMPORTER(GridSample)
     {
         sampleMode = nvinfer1::SampleMode::kREFLECT;
     }
+    else
+    {
+        ONNXTRT_CHECK_NODE(
+            false, "Unsupported padding mode: " << paddingMode, node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE_ATTR);
+    }
 
     auto mode = attrs.get<std::string>("mode", "linear");
     nvinfer1::InterpolationMode interpolationMode{nvinfer1::InterpolationMode::kNEAREST};
