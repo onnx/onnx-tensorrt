@@ -58,13 +58,13 @@ public:
         }
     }
 
-    bool hasError() const
+    [[nodiscard]] bool hasError() const
     {
         return mOnnxErrorRecorder != nullptr && mOnnxErrorRecorder->getNbErrors() != 0;
     }
 
     //! Return recorder used by hasError().
-    nvinfer1::IErrorRecorder* getErrorRecorder() const
+    [[nodiscard]] nvinfer1::IErrorRecorder* getErrorRecorder() const
     {
         return mOnnxErrorRecorder ? mOnnxErrorRecorder : nullptr;
     }
@@ -95,10 +95,11 @@ class ImporterContext
     std::set<std::string> mLayerNames;
     //! An increasing suffix counter used to uniquify layer names.
     int64_t mSuffixCounter{0};
-    //! Set to keep track of how many times a refittable name created by the parser shows up, to avoid duplicate naming in TRT.
-    //! Currently tracks the following nodes:
+    //! Set to keep track of how many times a refittable name created by the parser shows up, to avoid duplicate naming
+    //! in TRT. Currently tracks the following nodes:
     //!     1. BatchNorm - Parser pre-combines scales and bias weights for the IScaleLayer.
-    //!     2. ConstantOfShape - The value of the ConstantOfShape does not have a name, so the parser needs to create one for it.
+    //!     2. ConstantOfShape - The value of the ConstantOfShape does not have a name, so the parser needs to create
+    //!     one for it.
     std::set<std::string> mTempRefittableWeights;
     //! An increasing suffix counter used to uniquify refittable weight names created by the parser.
     int64_t mTempRefittableWeightsSuffixCounter{0};
@@ -115,7 +116,7 @@ class ImporterContext
     bool mConvertDoubleLogged{false};
     bool mConvertDoubleOutOfBoundsLogged{false};
     //! OnnxParserFlags specified by the parser.
-    nvonnxparser::OnnxParserFlags mOnnxParserFlags;
+    nvonnxparser::OnnxParserFlags mOnnxParserFlags{};
     StringMap<std::vector<nvinfer1::ITensor const*>> mNodeNameToTensor;
 
     //! Logical library names for VC plugin libraries. This gets translated to library paths
@@ -299,6 +300,17 @@ public:
                 static_cast<int64_t>(weights.count()), std::span<char const* const>{&sourceName, 1});
             return;
         }
+        if (weights.values == nullptr)
+        {
+            // kCONSTANT_NODE records carry the weight bytes (see RefitTransformKind), so a
+            // payload-less weight that is not an initializer cannot be described: emit nothing
+            // rather than a record that violates the contract. Auto-placeholders never reach this
+            // point; importPlaceholder() emits their initializer-backed record directly.
+            auto* ctx = this; // For logging
+            LOG_WARNING("Refit observer: weight '" << name
+                                                   << "' has no payload and no initializer; no record emitted.");
+            return;
+        }
         std::span<std::byte const> const bytes{
             static_cast<std::byte const*>(weights.values), static_cast<size_t>(weights.size_bytes())};
         notifyRefittableWeight(name, nvonnxparser::RefitTransformKind::kCONSTANT_NODE, weights.type,
@@ -326,8 +338,8 @@ public:
         auto const kind = onnxDtype == ::ONNX_NAMESPACE::TensorProto::DOUBLE
             ? nvonnxparser::RefitTransformKind::kDOUBLE_TO_FLOAT
             : nvonnxparser::RefitTransformKind::kIDENTITY;
-        notifyRefittableWeight(name, kind, onnxDtype, weights.type, weights.count,
-            std::span<char const* const>{&sourceName, 1});
+        notifyRefittableWeight(
+            name, kind, onnxDtype, weights.type, weights.count, std::span<char const* const>{&sourceName, 1});
     }
 
     //! Resolve the nvinfer1 dtype for an ONNX TensorProto::DataType, defaulting to kFLOAT for
@@ -371,7 +383,7 @@ public:
         else
         {
             domain = "ai.onnx";
-            assert(mOpsets.count(domain));
+            assert(mOpsets.contains(domain));
             return mOpsets.at(domain);
         }
     }
@@ -476,17 +488,16 @@ public:
     }
     void addLayerOutputTensors(std::string name, std::vector<TensorOrWeights> const& outputs)
     {
-        static std::unordered_set<std::string> duplicateNames;
+        static std::unordered_set<std::string> sDuplicateNames;
         if (mNodeNameToTensor.contains(name))
         {
             // Log once (only if insertion succeeded) for each unique name.
-            auto result = duplicateNames.insert(name);
+            auto result = sDuplicateNames.insert(name);
             if (result.second)
             {
                 auto* ctx = this; // For logging
-                LOG_WARNING(
-                    "A node named " << name
-                                    << " already exists, the output tensors of this new instance will not be queryable.");
+                LOG_WARNING("A node named "
+                    << name << " already exists, the output tensors of this new instance will not be queryable.");
             }
             return;
         }
@@ -526,14 +537,12 @@ public:
     [[nodiscard]] bool getAdjustForDLAMode() const;
 };
 
-typedef std::vector<TensorOrWeights> NodeOutputs;
-typedef std::function<NodeOutputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
-    std::vector<TensorOrWeights>& inputs)>
-    NodeImporter;
+using NodeOutputs = std::vector<TensorOrWeights>;
+using NodeImporter = std::function<NodeOutputs(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    size_t const nodeIdx, std::vector<TensorOrWeights>& inputs)>;
 
-typedef std::function<void(
-    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)>
-    OpStaticErrorChecker;
+using OpStaticErrorChecker = std::function<void(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
+    std::vector<Status>& errors, size_t const nodeIndex)>;
 
 } // namespace onnx2trt
 

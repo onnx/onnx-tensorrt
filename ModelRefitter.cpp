@@ -152,8 +152,8 @@ size_t ModelRefitter::batchnormWeightRefitter(::ONNX_NAMESPACE::NodeProto const&
         notifyObserver(combinedScale.name, nvonnxparser::RefitTransformKind::kBATCH_NORM_FOLD_SCALE, sourceOnnxDtype,
             resolveTrtDtype(combinedScale.type), static_cast<int64_t>(combinedScale.count()),
             std::span<char const* const>{foldSources}, epsilonFloat);
-        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedScale.name, std::move(combinedScale)),
-            "Failed to set named weights", ErrorCode::kREFIT_FAILED);
+        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedScale.name, combinedScale), "Failed to set named weights",
+            ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
     }
     if (mRefittableWeights.contains(combinedBias.name))
@@ -162,8 +162,8 @@ size_t ModelRefitter::batchnormWeightRefitter(::ONNX_NAMESPACE::NodeProto const&
         notifyObserver(combinedBias.name, nvonnxparser::RefitTransformKind::kBATCH_NORM_FOLD_BIAS, sourceOnnxDtype,
             resolveTrtDtype(combinedBias.type), static_cast<int64_t>(combinedBias.count()),
             std::span<char const* const>{foldSources}, epsilonFloat);
-        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedBias.name, std::move(combinedBias)),
-            "Failed to set named weights", ErrorCode::kREFIT_FAILED);
+        ONNXTRT_CHECK(mRefitter->setNamedWeights(combinedBias.name, combinedBias), "Failed to set named weights",
+            ErrorCode::kREFIT_FAILED);
         ++successfullyRefittedWeights;
     }
     return successfullyRefittedWeights;
@@ -195,7 +195,7 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
 {
     for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
     {
-        if (!mRefittableWeights.count(initializer.name()))
+        if (!mRefittableWeights.contains(initializer.name()))
         {
             continue;
         }
@@ -204,7 +204,7 @@ void ModelRefitter::refitOnnxGraph(::ONNX_NAMESPACE::GraphProto const& graph)
         // might have the same name across different nested constructs (e.g. IF nodes);
         // the assumption is that those weights would have the same value
         mRefittableWeights.erase(initializer.name());
-        if (mRefittedWeights.count(initializer.name()))
+        if (mRefittedWeights.contains(initializer.name()))
         {
             LOG_REFITTER_WARNING("Duplicate initializer name ("
                 << initializer.name() << ") was found when processing the graph (" << graph.name()
@@ -248,8 +248,8 @@ void ModelRefitter::refitOnnxNode(::ONNX_NAMESPACE::NodeProto const& node, ::ONN
     // For nodes that contain subgraphs (Ifs, Loops, Scans),
     // ensure that the recursion depth is limited to a set amount.
     ++mNestedDepth;
-    static size_t const MAX_NESTED_SUBGRAPHS = 24;
-    ONNXTRT_CHECK((mNestedDepth <= MAX_NESTED_SUBGRAPHS),
+    static size_t const kMAX_NESTED_SUBGRAPHS = 24;
+    ONNXTRT_CHECK((mNestedDepth <= kMAX_NESTED_SUBGRAPHS),
         "ONNX graph contains nested structures that exceed the maximum allowed by TensorRT!",
         ErrorCode::kUNSUPPORTED_GRAPH);
 
@@ -320,7 +320,7 @@ void ModelRefitter::refitOnnxConstantOfShapeNode(::ONNX_NAMESPACE::NodeProto con
     else
     {
         weights = namedConstantOfShape;
-        static_cast<float*>(weights.values)[0] = 0.f;
+        static_cast<float*>(weights.values)[0] = 0.F;
     }
 
     if (mObserver != nullptr)
@@ -340,7 +340,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
     ONNXTRT_CHECK(node.output_size() > 0, "Constant node has no outputs.", ErrorCode::kINVALID_NODE);
     ONNXTRT_CHECK(node.attribute_size() > 0, "Constant node has no attributes.", ErrorCode::kINVALID_NODE);
 
-    if (!mRefittableWeights.count(node.output(0)))
+    if (!mRefittableWeights.contains(node.output(0)))
     {
         return;
     }
@@ -348,7 +348,7 @@ void ModelRefitter::refitOnnxConstantNode(::ONNX_NAMESPACE::NodeProto const& nod
     LOG_REFITTER_VERBOSE("Refitting Constant node: " << node.name() << ", output: " << node.output(0));
 
     mRefittableWeights.erase(node.output(0));
-    if (mRefittedWeights.count(node.output(0)))
+    if (mRefittedWeights.contains(node.output(0)))
     {
         LOG_REFITTER_WARNING("Duplicate weight name name ("
             << node.output(0) << ") was found when processing the graph (" << graphName

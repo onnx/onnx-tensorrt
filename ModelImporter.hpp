@@ -30,7 +30,7 @@ class ModelImporter : public nvonnxparser::IParser
     using SubGraphSupportVector_t = std::vector<SubGraphSupport_t>;
 
 protected:
-    StringMap<NodeImporter> _op_importers;
+    StringMap<NodeImporter> mOpImporters;
     virtual void importModel();
 
 private:
@@ -59,7 +59,7 @@ private:
 
 public:
     ModelImporter(nvinfer1::INetworkDefinition* network, nvinfer1::ILogger* logger) noexcept
-        : _op_importers(getBuiltinOpImporterMap())
+        : mOpImporters(getBuiltinOpImporterMap())
         , mImporterCtx(network, logger)
     {
     }

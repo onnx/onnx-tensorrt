@@ -9,8 +9,8 @@
 #include "errorHelpers.hpp"
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <ostream>
 #include <ranges>
 #include <regex>
@@ -54,7 +54,7 @@ void checkNotInvalidType(TensorOrWeights const& input, std::vector<std::string> 
         ErrorCode::kUNSUPPORTED_NODE);
 }
 
-NodeOutputs activationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs activationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ActivationType op, float* alpha, float* beta)
 {
     checkNotInvalidType(inputs.at(0), {"INT32", "BOOL", "UINT8"}, node, nodeIdx);
@@ -76,7 +76,7 @@ NodeOutputs activationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeP
 
 nvinfer1::ITensor* addClip(ImporterContext* ctx, nvinfer1::ITensor* input, float clip)
 {
-    if (clip >= 0.f)
+    if (clip >= 0.F)
     {
         nvinfer1::IActivationLayer* layer
             = N_CHECK(ctx->network()->addActivation(*input, nvinfer1::ActivationType::kCLIP));
@@ -87,7 +87,7 @@ nvinfer1::ITensor* addClip(ImporterContext* ctx, nvinfer1::ITensor* input, float
     return input;
 }
 
-NodeOutputs argMinMaxHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs argMinMaxHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op)
 {
     checkNotInvalidType(inputs.at(0), {"UINT8"}, node, nodeIdx);
@@ -221,30 +221,45 @@ void broadcastTensors(ImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::IT
     broadcastTensor(ctx, t3, maxDims);
 }
 
-// Helper functions for calculateBias:
-int32_t getBias(std::vector<int32_t> const& dimension_count, std::vector<int32_t> const& pitches, int32_t axis)
+namespace
 {
-    int32_t result{0};
-    for (int32_t i = 0; i < static_cast<int32_t>(dimension_count.size()); i++)
+
+//! \brief Compute the flat index bias for one GatherElements output position.
+//!
+//! Dot-products \p dimensionCount against \p pitches over all dimensions
+//! except \p axis; the result is added to the gathered index to form the
+//! flat offset into the data tensor.
+//!
+//! \param dimensionCount Current multi-dimensional index (excluding the gather axis).
+//! \param pitches        Row-major strides of the data tensor (from calculatePitches).
+//! \param axis           Gather axis, excluded from the sum.
+//! \return Flat element offset into the data tensor for this output position.
+[[nodiscard]] int64_t getBias(std::span<int64_t const> dimensionCount, std::span<int64_t const> pitches, int32_t axis)
+{
+    int64_t result{0};
+    for (int32_t i = 0; i < static_cast<int32_t>(dimensionCount.size()); i++)
     {
         if (i != axis)
         {
-            result += dimension_count[i] * pitches[i];
+            result += dimensionCount[i] * pitches[i];
         }
     }
     return result;
 }
 
-void incrementOuterDimension(std::vector<int32_t>& dimensionCount, nvinfer1::Dims idxDims)
+//! \brief Advance \p dimensionCount by one position in row-major order within \p idxDims.
+//!
+//! Increments the innermost coordinate and carries into outer dimensions
+//! when the limit for that axis is reached, wrapping the axis back to zero.
+void incrementOuterDimension(std::vector<int64_t>& dimensionCount, nvinfer1::Dims const& idxDims)
 {
-    // Start at [x,x,0]. Increment starting from the outer dimension.
+    // Increment starting from the innermost dimension and carry outward.
     int32_t rank = dimensionCount.size();
 
     for (int32_t i = rank - 1; i >= 0; i--)
     {
-        int dimLimit = idxDims.d[i];
         // If we're not at the limit, increment current axis and return
-        if (++dimensionCount[i] != dimLimit)
+        if (++dimensionCount[i] != idxDims.d[i])
         {
             break;
         }
@@ -253,42 +268,50 @@ void incrementOuterDimension(std::vector<int32_t>& dimensionCount, nvinfer1::Dim
     }
 }
 
-std::vector<int32_t> calculateBias(
-    nvinfer1::Dims const& daDims, nvinfer1::Dims const& idxDims, std::vector<int32_t> const& pitches, int32_t axis)
+} // namespace
+
+std::vector<int64_t> calculateBias(
+    nvinfer1::Dims const& daDims, nvinfer1::Dims const& idxDims, std::span<int64_t const> pitches, int32_t axis)
 {
-    std::vector<int32_t> biasVector;
-    std::vector<int32_t> dimensionCount(daDims.nbDims, 0);
+    std::vector<int64_t> biasVector;
+    std::vector<int64_t> dimensionCount(daDims.nbDims, 0);
     int64_t total = volume(idxDims);
 
     for (int64_t i = 0; i < total; i++)
     {
-        int32_t bias = getBias(dimensionCount, pitches, axis);
-        biasVector.push_back(bias);
+        biasVector.push_back(getBias(dimensionCount, pitches, axis));
         incrementOuterDimension(dimensionCount, idxDims);
     }
     return biasVector;
 }
 
-std::vector<int32_t> calculatePitches(nvinfer1::Dims const& inputDims)
+//! \brief Compute the row-major pitches (strides) of \p inputDims.
+//!
+//! Returns a vector of length \p inputDims.nbDims where entry \p i holds the product of
+//! \p inputDims.d[i+1] through \p inputDims.d[nbDims-1], i.e. the number of elements to
+//! skip when incrementing dimension \p i by one.  The last entry is always 1.
+//!
+//! \param inputDims Static dimensions of the tensor (no dynamic dims).
+//! \return Per-dimension strides in elements, outermost first.
+[[nodiscard]] std::vector<int64_t> calculatePitches(nvinfer1::Dims const& inputDims)
 {
-    int32_t pitch = 1;
-    int32_t nbDims = inputDims.nbDims;
-    std::vector<int32_t> pitches(nbDims);
-    pitches[nbDims - 1] = pitch;
-    for (int32_t i = nbDims - 2; i >= 0; i--)
+    int32_t const nbDims = inputDims.nbDims;
+    if (nbDims <= 0)
     {
-        pitch *= inputDims.d[i + 1];
-        pitches[i] = pitch;
+        return {};
     }
+    std::vector<int64_t> pitches(nbDims);
+    std::exclusive_scan(std::make_reverse_iterator(inputDims.d + nbDims), std::make_reverse_iterator(inputDims.d),
+        pitches.rbegin(), int64_t{1}, std::multiplies<int64_t>{});
     return pitches;
 }
 
-bool canUseNDResize(size_t const scaleSize, float const* scaleFactors, size_t const n)
+[[nodiscard]] bool canUseNDResize(std::span<float const> scaleFactors, size_t const n)
 {
     // Linear resize supports up to 3D resize on the outermost dimensions (n = 3).
-    if (scaleSize > n)
+    if (scaleFactors.size() > n)
     {
-        for (size_t i = 0; i < scaleSize - n; i++)
+        for (size_t i = 0; i < scaleFactors.size() - n; i++)
         {
             if (scaleFactors[i] != 1)
             {
@@ -409,7 +432,7 @@ onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt
     float* sh = static_cast<float*>(shift.values);
     for (int i = 0, n = shift.count(); i < n; i++)
     {
-        sh[i] = 0.0f;
+        sh[i] = 0.0F;
     }
     return shift;
 }
@@ -544,7 +567,7 @@ std::string getElementWiseOpName(nvinfer1::ElementWiseOperation op)
     }
 }
 
-void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1::ElementWiseOperation op,
+void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, nvinfer1::ElementWiseOperation const op,
     ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx)
 {
     switch (op)
@@ -696,20 +719,20 @@ float getActivationDefaultAlpha(nvinfer1::ActivationType type)
 {
     switch (type)
     {
-    case nvinfer1::ActivationType::kCLIP: return 0.f;
-    case nvinfer1::ActivationType::kELU: return 1.0f;
-    case nvinfer1::ActivationType::kGELU_ERF: return 0.f;
-    case nvinfer1::ActivationType::kGELU_TANH: return 0.f;
-    case nvinfer1::ActivationType::kHARD_SIGMOID: return 0.2f;
-    case nvinfer1::ActivationType::kLEAKY_RELU: return 0.01f;
-    case nvinfer1::ActivationType::kRELU: return 0.f;
-    case nvinfer1::ActivationType::kSCALED_TANH: return 1.0f;
-    case nvinfer1::ActivationType::kSELU: return 1.67326319217681884765625f;
-    case nvinfer1::ActivationType::kSIGMOID: return 0.f;
-    case nvinfer1::ActivationType::kSOFTPLUS: return 0.f;
-    case nvinfer1::ActivationType::kSOFTSIGN: return 0.f;
-    case nvinfer1::ActivationType::kTANH: return 0.f;
-    case nvinfer1::ActivationType::kTHRESHOLDED_RELU: return 1.0f;
+    case nvinfer1::ActivationType::kCLIP: return 0.F;
+    case nvinfer1::ActivationType::kELU: return 1.0F;
+    case nvinfer1::ActivationType::kGELU_ERF: return 0.F;
+    case nvinfer1::ActivationType::kGELU_TANH: return 0.F;
+    case nvinfer1::ActivationType::kHARD_SIGMOID: return 0.2F;
+    case nvinfer1::ActivationType::kLEAKY_RELU: return 0.01F;
+    case nvinfer1::ActivationType::kRELU: return 0.F;
+    case nvinfer1::ActivationType::kSCALED_TANH: return 1.0F;
+    case nvinfer1::ActivationType::kSELU: return 1.67326319217681884765625F;
+    case nvinfer1::ActivationType::kSIGMOID: return 0.F;
+    case nvinfer1::ActivationType::kSOFTPLUS: return 0.F;
+    case nvinfer1::ActivationType::kSOFTSIGN: return 0.F;
+    case nvinfer1::ActivationType::kTANH: return 0.F;
+    case nvinfer1::ActivationType::kTHRESHOLDED_RELU: return 1.0F;
     }
     throw std::runtime_error{"Unrecognized activation type"};
 }
@@ -718,20 +741,20 @@ float getActivationDefaultBeta(nvinfer1::ActivationType type)
 {
     switch (type)
     {
-    case nvinfer1::ActivationType::kCLIP: return 0.f;
-    case nvinfer1::ActivationType::kELU: return 0.f;
-    case nvinfer1::ActivationType::kGELU_ERF: return 0.f;
-    case nvinfer1::ActivationType::kGELU_TANH: return 0.f;
-    case nvinfer1::ActivationType::kHARD_SIGMOID: return 0.5f;
-    case nvinfer1::ActivationType::kLEAKY_RELU: return 0.f;
-    case nvinfer1::ActivationType::kRELU: return 0.f;
-    case nvinfer1::ActivationType::kSCALED_TANH: return 1.0f;
-    case nvinfer1::ActivationType::kSELU: return 1.05070102214813232421875f;
-    case nvinfer1::ActivationType::kSIGMOID: return 0.f;
-    case nvinfer1::ActivationType::kSOFTPLUS: return 0.f;
-    case nvinfer1::ActivationType::kSOFTSIGN: return 0.f;
-    case nvinfer1::ActivationType::kTANH: return 0.f;
-    case nvinfer1::ActivationType::kTHRESHOLDED_RELU: return 0.f;
+    case nvinfer1::ActivationType::kCLIP: return 0.F;
+    case nvinfer1::ActivationType::kELU: return 0.F;
+    case nvinfer1::ActivationType::kGELU_ERF: return 0.F;
+    case nvinfer1::ActivationType::kGELU_TANH: return 0.F;
+    case nvinfer1::ActivationType::kHARD_SIGMOID: return 0.5F;
+    case nvinfer1::ActivationType::kLEAKY_RELU: return 0.F;
+    case nvinfer1::ActivationType::kRELU: return 0.F;
+    case nvinfer1::ActivationType::kSCALED_TANH: return 1.0F;
+    case nvinfer1::ActivationType::kSELU: return 1.05070102214813232421875F;
+    case nvinfer1::ActivationType::kSIGMOID: return 0.F;
+    case nvinfer1::ActivationType::kSOFTPLUS: return 0.F;
+    case nvinfer1::ActivationType::kSOFTSIGN: return 0.F;
+    case nvinfer1::ActivationType::kTANH: return 0.F;
+    case nvinfer1::ActivationType::kTHRESHOLDED_RELU: return 0.F;
     }
     throw std::runtime_error{"Unrecognized activation type"};
 }
@@ -880,7 +903,7 @@ nvinfer1::ITensor* globalPoolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::N
     return N_CHECK(layer->getOutput(0));
 }
 
-NodeOutputs greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs greaterLessOrEqual(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB, bool greater)
 {
     nvinfer1::ElementWiseOperation op
@@ -891,7 +914,6 @@ NodeOutputs greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
     return elementwiseHelper(
         ctx, node, nodeIdx, {firstOpResults.at(0), equalsResult.at(0)}, nvinfer1::ElementWiseOperation::kOR);
 }
-
 
 nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
     std::string const& pluginVersion, std::string const& pluginNamespace)
@@ -1138,8 +1160,8 @@ NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     {
         auto axesIndex = convertAxes(axesVals[i]);
         ONNXTRT_CHECK_NODE((axesIndex >= 0 && axesIndex < nbDims),
-            "Slice axis " << axesVals[i] << " is out of bounds for a tensor with " << nbDims << " dimensions.",
-            node, nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
+            "Slice axis " << axesVals[i] << " is out of bounds for a tensor with " << nbDims << " dimensions.", node,
+            nodeIdx, ErrorCode::kUNSUPPORTED_NODE);
         // Modify starts
         int32_t stepSign = stepVals[i] < 0 ? -1 : 0;
         starts.d[axesIndex] = convertStarts(startVals[i], inputDims.d[axesIndex], stepSign);
@@ -1458,7 +1480,7 @@ nvinfer1::Dims makeDims(int32_t nbDims, int64_t val)
     return dims;
 }
 
-NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs normalizationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, bool const useV2)
 {
     auto* input = &convertToTensor(inputs.at(0), ctx);
@@ -1466,7 +1488,7 @@ NodeOutputs normalizationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::No
     auto* bias = &convertToTensor(inputs.at(2), ctx);
 
     OnnxAttrs attrs(node, ctx);
-    float epsilon = attrs.get("epsilon", 1e-5f);
+    float epsilon = attrs.get("epsilon", 1e-5F);
     int32_t nbGroups = attrs.get("num_groups", 1);
 
     auto nbDims = input->getDimensions().nbDims;
@@ -1544,11 +1566,11 @@ std::vector<float> parseActivationValues(std::vector<nvinfer1::ActivationType> c
 {
     size_t actIndex{0};
     std::vector<float> tmpActs{};
-    for (size_t i = 0; i < activationTypes.size(); ++i)
+    for (auto const activationType : activationTypes)
     {
         float defaultVal
-            = isAlpha ? getActivationDefaultAlpha(activationTypes[i]) : getActivationDefaultBeta(activationTypes[i]);
-        if (defaultVal == 0.f || actIndex == activationValues.size())
+            = isAlpha ? getActivationDefaultAlpha(activationType) : getActivationDefaultBeta(activationType);
+        if (defaultVal == 0.F || actIndex == activationValues.size())
         {
             tmpActs.push_back(defaultVal);
         }
@@ -1703,8 +1725,7 @@ template <typename TargetType>
         return castWeightValues<TargetType, int32_t>(sourceWeights, targetWeights);
     case ::ONNX_NAMESPACE::TensorProto::INT64:
         return castWeightValues<TargetType, int64_t>(sourceWeights, targetWeights);
-    case ::ONNX_NAMESPACE::TensorProto::FLOAT:
-        return castWeightValues<TargetType, float>(sourceWeights, targetWeights);
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT: return castWeightValues<TargetType, float>(sourceWeights, targetWeights);
     default: return false;
     }
 }
@@ -1716,36 +1737,20 @@ template <typename TargetType>
     bool success{false};
     switch (targetType)
     {
-    case nvinfer1::DataType::kBOOL:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::BOOL;
-        break;
-    case nvinfer1::DataType::kINT8:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT8;
-        break;
-    case nvinfer1::DataType::kUINT8:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::UINT8;
-        break;
-    case nvinfer1::DataType::kINT32:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT32;
-        break;
-    case nvinfer1::DataType::kINT64:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT64;
-        break;
-    case nvinfer1::DataType::kFLOAT:
-        targetOnnxType = ::ONNX_NAMESPACE::TensorProto::FLOAT;
-        break;
+    case nvinfer1::DataType::kBOOL: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::BOOL; break;
+    case nvinfer1::DataType::kINT8: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT8; break;
+    case nvinfer1::DataType::kUINT8: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::UINT8; break;
+    case nvinfer1::DataType::kINT32: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT32; break;
+    case nvinfer1::DataType::kINT64: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::INT64; break;
+    case nvinfer1::DataType::kFLOAT: targetOnnxType = ::ONNX_NAMESPACE::TensorProto::FLOAT; break;
     default: return ShapedWeights{};
     }
 
     ShapedWeights targetWeights = ctx->getWeightsContext().createTempWeights(targetOnnxType, sourceWeights.shape);
     switch (targetOnnxType)
     {
-    case ::ONNX_NAMESPACE::TensorProto::BOOL:
-        success = castWeightsToType<bool>(sourceWeights, targetWeights);
-        break;
-    case ::ONNX_NAMESPACE::TensorProto::INT8:
-        success = castWeightsToType<int8_t>(sourceWeights, targetWeights);
-        break;
+    case ::ONNX_NAMESPACE::TensorProto::BOOL: success = castWeightsToType<bool>(sourceWeights, targetWeights); break;
+    case ::ONNX_NAMESPACE::TensorProto::INT8: success = castWeightsToType<int8_t>(sourceWeights, targetWeights); break;
     case ::ONNX_NAMESPACE::TensorProto::UINT8:
         success = castWeightsToType<uint8_t>(sourceWeights, targetWeights);
         break;
@@ -1755,16 +1760,14 @@ template <typename TargetType>
     case ::ONNX_NAMESPACE::TensorProto::INT64:
         success = castWeightsToType<int64_t>(sourceWeights, targetWeights);
         break;
-    case ::ONNX_NAMESPACE::TensorProto::FLOAT:
-        success = castWeightsToType<float>(sourceWeights, targetWeights);
-        break;
+    case ::ONNX_NAMESPACE::TensorProto::FLOAT: success = castWeightsToType<float>(sourceWeights, targetWeights); break;
     default: break;
     }
     return success ? targetWeights : ShapedWeights{};
 }
 
-void weightsToAxesVector(TensorOrWeights weights, std::vector<int32_t>* axes, ::ONNX_NAMESPACE::NodeProto const& node,
-    size_t const nodeIdx)
+void weightsToAxesVector(
+    TensorOrWeights weights, std::vector<int32_t>* axes, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx)
 {
     ShapedWeights const axesWeights = weights.weights();
     ONNXTRT_CHECK_NODE((axesWeights.type == ::ONNX_NAMESPACE::TensorProto::INT32)
@@ -1776,8 +1779,8 @@ void weightsToAxesVector(TensorOrWeights weights, std::vector<int32_t>* axes, ::
     axes->reserve(axes64.size());
     for (int64_t const axis : axes64)
     {
-        ONNXTRT_CHECK_NODE(axis >= std::numeric_limits<int32_t>::lowest()
-                && axis <= std::numeric_limits<int32_t>::max(),
+        ONNXTRT_CHECK_NODE(
+            axis >= std::numeric_limits<int32_t>::lowest() && axis <= std::numeric_limits<int32_t>::max(),
             "Axis input contains a value outside INT32 range: " << axis, node, nodeIdx, ErrorCode::kINVALID_NODE);
         axes->push_back(static_cast<int32_t>(axis));
     }
@@ -1923,12 +1926,12 @@ nvinfer1::ITensor* reshapeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor
     return N_CHECK(layer->getOutput(0));
 }
 
-NodeOutputs scaleHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs scaleHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode, nvinfer1::Weights const& shift,
     nvinfer1::Weights const& scale, nvinfer1::Weights const& power, char const* shiftName, char const* scaleName)
 {
     nvinfer1::ITensor* tensorPtr = &tensor_;
-    const ShapeTensor origShape = shapeOf(*tensorPtr);
+    ShapeTensor const origShape = shapeOf(*tensorPtr);
 
     // TensorRT scale layers support 4D(NCHW) or 5D(NCDHW) input.
     // For input other than 4D or 5D will be expanded or squeezed to 4D.
@@ -1944,8 +1947,8 @@ NodeOutputs scaleHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
         else
         {
             // Collapse trailing dimensions if origShape.size() > 5
-            const ShapeTensor collapsedDim = product(ctx, origShape, 3, origShape.size(), 1);
-            const ShapeTensor collapsedShape = concat(ctx, gather(ctx, origShape, iotaShapeVector(3)), collapsedDim);
+            ShapeTensor const collapsedDim = product(ctx, origShape, 3, origShape.size(), 1);
+            ShapeTensor const collapsedShape = concat(ctx, gather(ctx, origShape, iotaShapeVector(3)), collapsedDim);
             tensorPtr = &reshape(ctx, *tensorPtr, collapsedShape);
         }
     }
@@ -1988,9 +1991,11 @@ void setAttr(nvinfer1::Dims* trtAttr, ::ONNX_NAMESPACE::AttributeProto const* on
 }
 
 nvinfer1::ITensor* sliceAcrossAxis(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* data, int32_t const axis)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor* data, int32_t const axis)
 {
-    ShapeTensor starts, sizes, strides;
+    ShapeTensor starts;
+    ShapeTensor sizes;
+    ShapeTensor strides;
     ShapeTensor axisLength = ShapeTensor(*getAxisLengthInt64(ctx, data, axis, {1, {1}}));
     int32_t const nbDims = data->getDimensions().nbDims;
 
@@ -2023,14 +2028,14 @@ nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor
     auto* axesTensor
         = N_CHECK(addConstant(ctx, axes, ::ONNX_NAMESPACE::TensorProto::INT32, {1, {static_cast<int64_t>(axes.size())}})
                       ->getOutput(0));
-    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueeze(tensor, axesTensor));
+    auto* squeezeLayer = N_CHECK(ctx->network()->addSqueezeV2(tensor, axesTensor));
     auto* squeezedTensor = N_CHECK(squeezeLayer->getOutput(0));
     LOG_VERBOSE("Original shape: " << shapeOf(tensor) << ", squeezing to: " << shapeOf(*squeezedTensor));
     ctx->registerLayer(squeezeLayer, "ONNXTRT_squeezeTensor", nullptr);
     return squeezedTensor;
 }
 
-nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm)
 {
     nvinfer1::IShuffleLayer* layer = N_CHECK(ctx->network()->addShuffle(tensor));
@@ -2091,7 +2096,7 @@ std::string getUnaryOpName(nvinfer1::UnaryOperation op)
     }
 }
 
-NodeOutputs unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs unaryHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     TensorOrWeights& input, nvinfer1::UnaryOperation op)
 {
     nvinfer1::ITensor* tensorPtr = &convertToTensor(input, ctx);
@@ -2149,7 +2154,7 @@ NodeOutputs unaryHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto&
     return {{tensorPtr}};
 }
 
-NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs convMultiInput(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs)
 {
     ONNXTRT_CHECK(inputs.size() >= 2, "Convolution require at least 2 inputs.", ErrorCode::kUNSUPPORTED_NODE);
@@ -2334,7 +2339,7 @@ nvinfer1::ITensor* resizeShapeTensor(ImporterContext* ctx, nvinfer1::ITensor& in
     return N_CHECK(intCast->getOutput(0));
 }
 
-std::string const getNodeName(::ONNX_NAMESPACE::NodeProto const& node)
+std::string getNodeName(::ONNX_NAMESPACE::NodeProto const& node)
 {
     if (node.name().empty() && (node.output_size() != 0))
     {
@@ -2346,19 +2351,24 @@ std::string const getNodeName(::ONNX_NAMESPACE::NodeProto const& node)
     }
 }
 
+namespace
+{
+
 //! Return ShapeTensor representing x clamped to closed interval [lowerBound,upperBound].
-static ShapeTensor clamp(
+ShapeTensor clamp(
     ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& lowerBound, ShapeTensor const& upperBound)
 {
     return min(ctx, max(ctx, x, lowerBound), upperBound);
 }
 
 //! Return ShapeTensor representing indices < 0 ? inputDims + indices : indices
-static ShapeTensor bumpIfNegative(ImporterContext* ctx, ShapeTensor const& inputDims, ShapeTensor const& indices)
+ShapeTensor bumpIfNegative(ImporterContext* ctx, ShapeTensor const& inputDims, ShapeTensor const& indices)
 {
     auto const signs = clamp(ctx, indices, shapeVector(-1), shapeVector(0));
     return sub(ctx, indices, mul(ctx, signs, inputDims));
 }
+
+} // namespace
 
 void decodeOnnxStartsAndEnds(ImporterContext* ctx, ShapeTensor const& inputDims, ShapeTensor const& steps,
     ShapeTensor& starts, ShapeTensor& ends)
@@ -2406,7 +2416,7 @@ ShapeTensor computeSliceSizes(ImporterContext* ctx, ShapeTensor const& starts, S
 }
 
 nvinfer1::ITensor* addSoftmax(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx, nvinfer1::ITensor& input)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, nvinfer1::ITensor& input)
 {
     OnnxAttrs attrs(node, ctx);
     // "axis : int (default is opset specific)"
@@ -2538,9 +2548,9 @@ void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     metadata << "[ONNX Layer: " << getNodeName(node);
 
     // Generate local function stack string.
-    for (auto it = ctx->localFunctionStack().crbegin(); it < ctx->localFunctionStack().crend(); ++it)
+    for (auto const& localFunction : ctx->localFunctionStack() | std::views::reverse)
     {
-        metadata << " | " << it->nodeName << " (" << it->functionName << ")";
+        metadata << " | " << localFunction.nodeName << " (" << localFunction.functionName << ")";
     }
 
     metadata << "]";
@@ -2560,9 +2570,9 @@ void processMetadata(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& no
     metadata << "[ONNX Layer: " << getNodeName(node);
 
     // Generate local function stack string.
-    for (auto it = ctx->localFunctionStack().crbegin(); it < ctx->localFunctionStack().crend(); ++it)
+    for (auto const& localFunction : ctx->localFunctionStack() | std::views::reverse)
     {
-        metadata << " | " << it->nodeName << " (" << it->functionName << ")";
+        metadata << " | " << localFunction.nodeName << " (" << localFunction.functionName << ")";
     }
 
     metadata << "]";

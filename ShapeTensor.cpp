@@ -56,7 +56,7 @@ ShapeTensor::ShapeTensor(ImporterContext* ctx, TensorOrWeights& t)
     }
     else
     {
-        const nvinfer1::Dims d = t.shape();
+        nvinfer1::Dims const d = t.shape();
         auto const& weights = t.weights();
         if (isFloat())
         {
@@ -89,7 +89,7 @@ ShapeTensor::ShapeTensor(nvinfer1::ITensor& t, int depth)
     // shapes always have integral type.
     , mIsFloat(depth == 0 && t.getType() == nvinfer1::DataType::kFLOAT)
 {
-    const nvinfer1::Dims dims = t.getDimensions();
+    nvinfer1::Dims const dims = t.getDimensions();
     assert((!isFloat() || mDepth == 0) && "floating-point shape tensor must have depth == 0");
 
     switch (mDepth)
@@ -181,7 +181,7 @@ nvinfer1::ITensor& ShapeTensor::tensor(ImporterContext* ctx) const
         if (allValuesKnown())
         {
             // Create constant
-            const nvinfer1::Dims dims{rank(), {size()}};
+            nvinfer1::Dims const dims{rank(), {size()}};
             // Must create temp weights in the parser in order to keep ownership of weights.
             auto shapeWeights = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto::INT64, dims);
             std::memcpy(shapeWeights.values, mValues.data(), mValues.size() * sizeof(int64_t));
@@ -212,12 +212,12 @@ ShapeTensor iotaShapeVector(int32_t n)
     return ShapeTensor(1, std::move(values));
 }
 
-ShapeTensor similar(ImporterContext* ctx, const ShapeTensor& exemplar, int64_t value)
+ShapeTensor similar(ImporterContext* ctx, ShapeTensor const& exemplar, int64_t value)
 {
     return fillShapeVector(ctx, value, shapeOf(exemplar));
 }
 
-ShapeTensor fillShapeVector(ImporterContext* ctx, int64_t value, const ShapeTensor& count)
+ShapeTensor fillShapeVector(ImporterContext* ctx, int64_t value, ShapeTensor const& count)
 {
     assert(count.rank() == 1 && "implementation assumes 1D size");
     assert(count.size() == 1 && "implementation assumes 1D size of known size");
@@ -237,12 +237,15 @@ ShapeTensor fillShapeVector(ImporterContext* ctx, int64_t value, const ShapeTens
 
 using nvinfer1::ElementWiseOperation;
 
+namespace
+{
+
 //! Helper that implements an elementwise operations on two shape tensors x and y.
 //! f must implement the operation on a pair of int64_t.
 //! commutes should be true f is commutative.
 //! rightIdentity should be the right identity value for f.
-static ShapeTensor op(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y, ElementWiseOperation operation,
-    bool commutative, int64_t rightIdentity, const std::function<int64_t(int64_t, int64_t)>&& f)
+ShapeTensor op(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y, ElementWiseOperation operation,
+    bool commutative, int64_t rightIdentity, std::function<int64_t(int64_t, int64_t)> const&& f)
 {
     assert(!x.rankKnown() || !y.rankKnown() || x.rank() == y.rank());
     // Return early for empty-vector operands -- when present, the result is empty too.
@@ -285,42 +288,44 @@ static ShapeTensor op(ImporterContext* ctx, const ShapeTensor& x, const ShapeTen
     return ShapeTensor(*elemOutput, 0);
 }
 
-ShapeTensor add(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+} // anonymous namespace
+
+ShapeTensor add(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
-    return op(ctx, x, y, ElementWiseOperation::kSUM, true, 0, std::plus<int64_t>());
+    return op(ctx, x, y, ElementWiseOperation::kSUM, true, 0, std::plus<>());
 }
 
-ShapeTensor sub(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor sub(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
-    return op(ctx, x, y, ElementWiseOperation::kSUB, false, 0, std::minus<int64_t>());
+    return op(ctx, x, y, ElementWiseOperation::kSUB, false, 0, std::minus<>());
 }
 
-ShapeTensor mul(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor mul(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
-    return op(ctx, x, y, ElementWiseOperation::kPROD, true, 1, std::multiplies<int64_t>());
+    return op(ctx, x, y, ElementWiseOperation::kPROD, true, 1, std::multiplies<>());
 }
 
-ShapeTensor min(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor min(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kMIN, true, std::numeric_limits<int64_t>::max(),
         [](int64_t x, int64_t y) { return std::min(x, y); });
 }
 
-ShapeTensor max(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor max(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kMAX, true, std::numeric_limits<int64_t>::min(),
         [](int64_t x, int64_t y) { return std::max(x, y); });
 }
-ShapeTensor floorDiv(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor floorDiv(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
     return op(ctx, x, y, ElementWiseOperation::kFLOOR_DIV, false, 1, [](int64_t x, int64_t y) {
         assert(y != 0 && "divisor must be non-zero");
-        const int64_t d = x / y;
+        int64_t const d = x / y;
         return d * y == x ? d : d - ((x < 0) ^ (y < 0));
     });
 }
 
-ShapeTensor broadcast(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor broadcast(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
     // max(x,y) works unless x or y is 0.
     // min(x,y,1) yields 0 if x or y is 0, and 1 otherwise.
@@ -328,7 +333,7 @@ ShapeTensor broadcast(ImporterContext* ctx, const ShapeTensor& x, const ShapeTen
     return mul(ctx, max(ctx, x, y), min(ctx, x, min(ctx, y, similar(ctx, y, 1))));
 }
 
-ShapeTensor product(ImporterContext* ctx, const ShapeTensor& x, int first, int last, int rank)
+ShapeTensor product(ImporterContext* ctx, ShapeTensor const& x, int first, int last, int rank)
 {
     assert(first <= last);
     ShapeTensor z(rank, std::vector<int64_t>(1, 1));
@@ -339,7 +344,7 @@ ShapeTensor product(ImporterContext* ctx, const ShapeTensor& x, int first, int l
     return z;
 }
 
-ShapeTensor concat(ImporterContext* ctx, const ShapeTensor& x, const ShapeTensor& y)
+ShapeTensor concat(ImporterContext* ctx, ShapeTensor const& x, ShapeTensor const& y)
 {
     assert(!x.rankKnown() || x.rank() == 1);
     assert(!y.rankKnown() || y.rank() == 1);
@@ -412,11 +417,11 @@ ShapeTensor shapeOf(TensorOrWeights& t)
     {
         return shapeOf(t.tensor());
     }
-    const nvinfer1::Dims& d = t.weights().shape;
+    nvinfer1::Dims const& d = t.weights().shape;
     return ShapeTensor(1, std::vector<int64_t>(d.d, d.d + d.nbDims));
 }
 
-ShapeTensor shapeOf(const ShapeTensor& t)
+ShapeTensor shapeOf(ShapeTensor const& t)
 {
     assert(t.mDepth >= 0);
     if (t.mTensor)
@@ -431,7 +436,7 @@ ShapeTensor shapeOf(const ShapeTensor& t)
     return t.rank() == 0 ? ShapeTensor(0, std::vector<int64_t>{}) : ShapeTensor(1, std::vector<int64_t>{t.size()});
 }
 
-ShapeTensor convertTo1D(ImporterContext* ctx, const ShapeTensor& tensor)
+ShapeTensor convertTo1D(ImporterContext* ctx, ShapeTensor const& tensor)
 {
     assert(tensor.rank() == 0);
     assert(tensor.size() == 1);
@@ -442,7 +447,7 @@ ShapeTensor convertTo1D(ImporterContext* ctx, const ShapeTensor& tensor)
     return ShapeTensor(*N_CHECK(addShuffle(ctx, tensor.tensor(ctx), shapeVector(1))->getOutput(0)));
 }
 
-ShapeTensor convertTo0D(ImporterContext* ctx, const ShapeTensor& tensor)
+ShapeTensor convertTo0D(ImporterContext* ctx, ShapeTensor const& tensor)
 {
     if (tensor.size() != 1)
     {
@@ -463,7 +468,7 @@ ShapeTensor convertTo0D(ImporterContext* ctx, const ShapeTensor& tensor)
 //!
 //! The string that should describe the context of the dimensions,
 //! e.g. "reshape" or "fill output".
-nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t minAllowed, int32_t maxAllowed)
+nvinfer1::Dims shapeTensorToDims(ShapeTensor const& x, char const* what, int32_t minAllowed, int32_t maxAllowed)
 {
     nvinfer1::Dims d{-1, {}};
     if (x.sizeKnown())
@@ -472,7 +477,7 @@ nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t
         if (x.allValuesKnown())
         {
             assert(x.size() <= nvinfer1::Dims::MAX_DIMS);
-            for (const auto& dim : x)
+            for (auto const& dim : x)
             {
                 if (dim < minAllowed || dim > maxAllowed)
                 {
@@ -487,9 +492,12 @@ nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t
     return d;
 }
 
+namespace
+{
+
 //! If not all values in x are known, set layer input specifed by inputIndex
 //! to tensor with value of x.
-static void setShapeInputIfDynamic(ImporterContext* ctx, nvinfer1::ILayer* layer, int inputIndex, const ShapeTensor& x)
+void setShapeInputIfDynamic(ImporterContext* ctx, nvinfer1::ILayer* layer, int inputIndex, ShapeTensor const& x)
 {
     if (!x.allValuesKnown())
     {
@@ -497,7 +505,9 @@ static void setShapeInputIfDynamic(ImporterContext* ctx, nvinfer1::ILayer* layer
     }
 }
 
-bool operator==(const ShapeTensor& x, const ShapeTensor& y)
+} // namespace
+
+bool operator==(ShapeTensor const& x, ShapeTensor const& y)
 {
     if (x.allValuesKnown() && y.allValuesKnown())
     {
@@ -507,9 +517,9 @@ bool operator==(const ShapeTensor& x, const ShapeTensor& y)
     return x.mTensor == y.mTensor && x.mDepth == y.mDepth;
 }
 
-nvinfer1::ITensor& reshape(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& newShape)
+nvinfer1::ITensor& reshape(ImporterContext* ctx, nvinfer1::ITensor& data, ShapeTensor const& newShape)
 {
-    const ShapeTensor oldShape = shapeOf(data);
+    ShapeTensor const oldShape = shapeOf(data);
     if (newShape == oldShape)
     {
         return data;
@@ -518,7 +528,7 @@ nvinfer1::ITensor& reshape(ImporterContext* ctx, nvinfer1::ITensor& data, const 
 }
 
 nvinfer1::IShuffleLayer* addShuffle(
-    ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& reshapeDims, bool zeroIsPlaceholder)
+    ImporterContext* ctx, nvinfer1::ITensor& data, ShapeTensor const& reshapeDims, bool zeroIsPlaceholder)
 {
     nvinfer1::IShuffleLayer* shuffle = N_CHECK(ctx->network()->addShuffle(data));
     if (reshapeDims.allValuesKnown())
@@ -535,14 +545,15 @@ nvinfer1::IShuffleLayer* addShuffle(
     return shuffle;
 }
 
-nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
-    const ShapeTensor& sizes, const ShapeTensor& strides)
+nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, ShapeTensor const& starts,
+    ShapeTensor const& sizes, ShapeTensor const& strides)
 {
-    constexpr int32_t minDim = std::numeric_limits<int32_t>::min();
-    constexpr int32_t maxDim = std::numeric_limits<int32_t>::max();
-    nvinfer1::ISliceLayer* slice = N_CHECK(ctx->network()->addSlice(data,
-        shapeTensorToDims(starts, "slice start", minDim, maxDim), shapeTensorToDims(sizes, "slice size", 0, maxDim),
-        shapeTensorToDims(strides, "slide strides", minDim, maxDim)));
+    constexpr int32_t kMIN_DIM = std::numeric_limits<int32_t>::min();
+    constexpr int32_t kMAX_DIM = std::numeric_limits<int32_t>::max();
+    nvinfer1::ISliceLayer* slice
+        = N_CHECK(ctx->network()->addSlice(data, shapeTensorToDims(starts, "slice start", kMIN_DIM, kMAX_DIM),
+            shapeTensorToDims(sizes, "slice size", 0, kMAX_DIM),
+            shapeTensorToDims(strides, "slice strides", kMIN_DIM, kMAX_DIM)));
     setShapeInputIfDynamic(ctx, slice, 1, starts);
     setShapeInputIfDynamic(ctx, slice, 2, sizes);
     setShapeInputIfDynamic(ctx, slice, 3, strides);
@@ -550,7 +561,7 @@ nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, c
     return slice;
 }
 
-nvinfer1::IFillLayer* addFill(ImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op)
+nvinfer1::IFillLayer* addFill(ImporterContext* ctx, ShapeTensor const& shape, nvinfer1::FillOperation op)
 {
     nvinfer1::IFillLayer* fill = N_CHECK(
         ctx->network()->addFill(shapeTensorToDims(shape, "fill output", 0, std::numeric_limits<int32_t>::max()), op,
@@ -560,7 +571,7 @@ nvinfer1::IFillLayer* addFill(ImporterContext* ctx, const ShapeTensor& shape, nv
     return fill;
 }
 
-std::ostream& operator<<(std::ostream& stream, const ShapeTensor& x)
+std::ostream& operator<<(std::ostream& stream, ShapeTensor const& x)
 {
     stream << "(";
     for (int i = 0, e = x.size(); i < e; ++i)

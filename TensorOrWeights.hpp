@@ -34,15 +34,15 @@ public:
         : mVariant(weights)
     {
     }
-    bool is_tensor() const
+    [[nodiscard]] bool is_tensor() const
     {
         return !this->is_weights();
     }
-    bool is_weights() const
+    [[nodiscard]] bool is_weights() const
     {
         return std::holds_alternative<ShapedWeights>(mVariant);
     }
-    bool isNullTensor() const
+    [[nodiscard]] bool isNullTensor() const
     {
         ITensor* const* ptrPtr = std::get_if<ITensor*>(&mVariant);
         return ptrPtr != nullptr && *ptrPtr == nullptr;
@@ -55,7 +55,7 @@ public:
         }
         throw std::runtime_error("Trying to access weights or a null tensor!");
     }
-    nvinfer1::ITensor const& tensor() const
+    [[nodiscard]] nvinfer1::ITensor const& tensor() const
     {
         return const_cast<TensorOrWeights&>(*this).tensor();
     }
@@ -67,11 +67,11 @@ public:
         }
         throw std::runtime_error("Trying to access a null weights!");
     }
-    ShapedWeights const& weights() const
+    [[nodiscard]] ShapedWeights const& weights() const
     {
         return const_cast<TensorOrWeights&>(*this).weights();
     }
-    nvinfer1::Dims shape() const
+    [[nodiscard]] nvinfer1::Dims shape() const
     {
         return is_tensor() ? tensor().getDimensions() : weights().shape;
     }
@@ -79,43 +79,43 @@ public:
     {
         return std::visit([](auto&& ptrOrWeights) { return static_cast<bool>(ptrOrWeights); }, mVariant);
     }
-    bool isFp32() const
+    [[nodiscard]] bool isFp32() const
     {
         return this->getDataType() == nvinfer1::DataType::kFLOAT;
     }
-    bool isFp16() const
+    [[nodiscard]] bool isFp16() const
     {
         return this->getDataType() == nvinfer1::DataType::kHALF;
     }
-    bool isBFp16() const
+    [[nodiscard]] bool isBFp16() const
     {
         return this->getDataType() == nvinfer1::DataType::kBF16;
     }
-    bool isInt32() const
+    [[nodiscard]] bool isInt32() const
     {
         return this->getDataType() == nvinfer1::DataType::kINT32;
     }
-    bool isInt64() const
+    [[nodiscard]] bool isInt64() const
     {
         return this->getDataType() == nvinfer1::DataType::kINT64;
     }
-    bool isInt8() const
+    [[nodiscard]] bool isInt8() const
     {
         return this->getDataType() == nvinfer1::DataType::kINT8;
     }
-    bool isUint8() const
+    [[nodiscard]] bool isUint8() const
     {
         return this->getDataType() == nvinfer1::DataType::kUINT8;
     }
-    bool isInt4() const
+    [[nodiscard]] bool isInt4() const
     {
         return this->getDataType() == nvinfer1::DataType::kINT4;
     }
-    bool isBool() const
+    [[nodiscard]] bool isBool() const
     {
         return this->getDataType() == nvinfer1::DataType::kBOOL;
     }
-    bool isFp8() const
+    [[nodiscard]] bool isFp8() const
     {
         return this->getDataType() == nvinfer1::DataType::kFP8;
     }
@@ -131,14 +131,14 @@ public:
             weights().setName(name);
         }
     }
-    std::string getName() const
+    [[nodiscard]] std::string getName() const
     {
         return is_tensor() ? tensor().getName() : weights().getName();
     }
 
     //! \return the type as a string, e.g. "FLOAT", "HALF", "BF16", "INT8", "UINT8", "INT32", "INT64", "BOOL", "FP8",
     //! "INT4", "FP4", "E8M0".
-    std::string getType() const;
+    [[nodiscard]] std::string getType() const;
 
     static nvinfer1::DataType convertONNXDataType(ShapedWeights::DataType datatype);
 
@@ -146,7 +146,7 @@ public:
     //! \note DataType::kE8M0 is not supported and throws.
     static ShapedWeights::DataType convertTRTDataType(nvinfer1::DataType datatype);
 
-    nvinfer1::DataType getDataType() const
+    [[nodiscard]] nvinfer1::DataType getDataType() const
     {
         if (is_tensor())
         {
@@ -158,7 +158,7 @@ public:
         }
     }
 
-    ShapedWeights::DataType getONNXDataType() const
+    [[nodiscard]] ShapedWeights::DataType getONNXDataType() const
     {
         if (is_tensor())
         {

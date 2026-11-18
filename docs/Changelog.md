@@ -2,12 +2,22 @@
 
 # ONNX-TensorRT Changelog
 
+# TensorRT 11.5 GA Release - 2026-11-18
+For more details, see the 11.5 GA release notes.
+
+- Added support for ONNX opset 25 and updated the supported ONNX release to 1.22.0.
+- Updated the CMake build to locate CUDA with `find_package(CUDAToolkit)`; use `-DCUDAToolkit_ROOT` to point at a non-default CUDA install instead of `-DCUDA_TOOLKIT_ROOT_DIR`.
+- Added support for Squeeze when `axis` input is omitted.
+
 # TensorRT 11.4 GA Release - 2026-10-09
-- Added `IRefitterObserver` class and `IParser::setRefitObserver` to better handle refittable weights when parsing
+For more details, see the 11.4 GA release notes.
+
+- Added `IRefitterObserver` class and `IParser::setRefitObserver` to better handle refittable weights when parsing.
 
 # TensorRT 11.3 GA Release - 2026-09-14
 For more details, see the 11.3 GA release notes
-- Refactored how external weights are handled in IParserRefitter
+
+- Refactored how external weights are handled in IParserRefitter.
 
 
 # TensorRT 11.2 GA Release - 2026-8-2

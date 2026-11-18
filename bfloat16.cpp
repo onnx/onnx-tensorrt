@@ -21,10 +21,10 @@ BFloat16::BFloat16(float x)
     // BF16 format: 1 sign bit, 8 bit exponent, 7 bit mantissa
 
     // Mask for exponent
-    constexpr uint32_t exponent = 0xFFU << 23;
+    constexpr uint32_t kEXPONENT = 0xFFU << 23;
 
     // Check if exponent is all 1s (NaN or infinite)
-    if ((bits & exponent) != exponent)
+    if ((bits & kEXPONENT) != kEXPONENT)
     {
         // x is finite - round to even
         bits += 0x7FFFU + (bits >> 16 & 1);

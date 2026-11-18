@@ -65,12 +65,12 @@ ShapedWeights::operator nvinfer1::Weights() const
     return w;
 }
 
-const char* ShapedWeights::getName() const
+char const* ShapedWeights::getName() const
 {
     return this->name;
 }
 
-void ShapedWeights::setName(const char* n)
+void ShapedWeights::setName(char const* n)
 {
     this->name = n;
 }

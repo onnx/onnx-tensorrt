@@ -16,7 +16,7 @@ For press and other inquiries, please contact Hector Marinez at hmarinez@nvidia.
 
 ## Supported TensorRT Versions
 
-Development on the this branch is for the latest version of [TensorRT 11.4](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
+Development on this branch is for the latest version of [TensorRT 11.5](https://developer.nvidia.com/nvidia-tensorrt-download) with full-dimensions and dynamic shape support.
 
 For previous versions of TensorRT, refer to their respective branches.
 
@@ -28,8 +28,8 @@ Current supported ONNX operators are found in the [operator support matrix](docs
 
 ### Dependencies
 
- - [TensorRT 11.4](https://developer.nvidia.com/tensorrt)
- - [TensorRT 11.4 open source libraries](https://github.com/NVIDIA/TensorRT/)
+ - [TensorRT 11.5](https://developer.nvidia.com/tensorrt)
+ - [TensorRT 11.5 open source libraries](https://github.com/NVIDIA/TensorRT/)
  - [Protobuf >= 3.20.3 (Optional)](https://github.com/google/protobuf/releases)
 
 ### Building
@@ -44,11 +44,11 @@ Once you have cloned the repository, you can build the parser libraries and exec
     # Ensure that you update your LD_LIBRARY_PATH to pick up the location of the newly built library:
     export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 
-Note that this project has a dependency on CUDA. By default the build will look in `/usr/local/cuda` for the CUDA toolkit installation. If your CUDA path is different, overwrite the default path by providing `-DCUDA_TOOLKIT_ROOT_DIR=<path_to_cuda_install>` in the CMake command.
+This project depends on CUDA. If CMake cannot find the toolkit, provide its location with -DCUDAToolkit_ROOT=<path_to_cuda_install>.
 
 To build with `protobuf-lite` support, add `-DUSE_ONNX_LITE_PROTO=1` to the end of the `cmake` command.
 
-### InstanceNormalizaiton Performance
+### InstanceNormalization Performance
 
 There are two implementations of InstanceNormalization that may perform differently depending on various parameters. By default, the parser will use the native TensorRT implementation of InstanceNorm. Users that want to benchmark using the plugin implementation of InstanceNorm can unset the parser flag `kNATIVE_INSTANCENORM` prior to parsing the model. Note that the plugin implementation cannot be used for building version compatible or hardware compatible engines, and attempting to do so will result in an error.
 
@@ -59,7 +59,7 @@ C++ Example:
 
 Python Example:
 
-    // Unset the NATIVE_INSTANCENORM flag to use the plugin implementation.
+    # Unset the NATIVE_INSTANCENORM flag to use the plugin implementation.
     parser.clear_flag(trt.OnnxParserFlag.NATIVE_INSTANCENORM)
 
 ## Executable Usage
@@ -82,9 +82,9 @@ Refer to the link or run `polygraphy run -h` for more information on CLI options
 
 Python bindings for the ONNX-TensorRT parser are packaged in the shipped `.whl` files.
 
-TensorRT 11.4 supports ONNX release 1.21.0. Install it with:
+TensorRT 11.5 supports ONNX release 1.22.0. Install it with:
 
-    python3 -m pip install onnx==1.21.0
+    python3 -m pip install onnx==1.22.0
 
 The ONNX-TensorRT backend can be installed by running:
 

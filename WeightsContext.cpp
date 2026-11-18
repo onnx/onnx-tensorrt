@@ -9,6 +9,8 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <numeric>
+#include <optional>
 #include <span>
 #include <utility>
 
@@ -16,14 +18,14 @@ namespace onnx2trt
 {
 
 void* WeightsContext::ownWeights(
-    void const* weightValues, const ShapedWeights::DataType dataType, nvinfer1::Dims const& shape, const size_t nBytes)
+    void const* weightValues, ShapedWeights::DataType const dataType, nvinfer1::Dims const& shape, size_t const nBytes)
 {
     auto* ctx = this; // For logging macros.
     ShapedWeights reservedWeightsObj{createTempWeights(dataType, shape)};
     if (nBytes > reservedWeightsObj.size_bytes())
     {
         LOG_ERROR("Weights data size (" << nBytes << " bytes) exceeds the shape-derived allocation size ("
-            << reservedWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
+                                        << reservedWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
         return nullptr;
     }
     std::memcpy(reservedWeightsObj.values, weightValues, nBytes);
@@ -38,8 +40,7 @@ WeightsContext::~WeightsContext()
 int32_t* WeightsContext::convertUINT8(uint8_t const* weightValues, nvinfer1::Dims const& shape)
 {
     int64_t const nbWeights = volume(shape);
-    int32_t* int32Weights{
-        static_cast<int32_t*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, shape).values)};
+    int32_t* int32Weights{static_cast<int32_t*>(createTempWeights(::ONNX_NAMESPACE::TensorProto::INT32, shape).values)};
 
     for (int64_t i = 0; i < nbWeights; i++)
     {
@@ -91,7 +92,7 @@ uint8_t* WeightsContext::convertPackedInt32Data(
     if (nbytes > newWeightsObj.size_bytes())
     {
         LOG_ERROR("Packed int32 data size (" << nbytes << " bytes) exceeds the shape-derived allocation size ("
-            << newWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
+                                             << newWeightsObj.size_bytes() << " bytes). Rejecting malformed weights.");
         return nullptr;
     }
     uint8_t* newWeights{static_cast<uint8_t*>(newWeightsObj.values)};
@@ -116,26 +117,23 @@ bool multiplicationWillOverflow(size_t const a, size_t const b)
     return false;
 }
 
-
-size_t getInitializerVol(google::protobuf::RepeatedField<int64_t> const& dims)
+std::optional<size_t> getInitializerVol(google::protobuf::RepeatedField<int64_t> const& dims)
 {
-    size_t vol = 1;
-    auto nbDims = dims.size();
-    for (int32_t i = 0; i < nbDims; i++)
-    {
-        auto dimVal = dims.Get(i);
-        if (dimVal == 0)
-        {
-            vol = 0;
-            break;
-        }
-        if (vol > std::numeric_limits<size_t>::max() / dimVal)
-        {
-            return false;
-        }
-        vol = vol * dimVal;
-    }
-    return vol;
+    // Fold in the optional domain: nullopt marks a malformed (negative) dimension or a product that
+    // would overflow size_t, and must stay distinct from a legitimately empty tensor (volume 0).
+    return std::accumulate(dims.begin(), dims.end(), std::optional<size_t>{1},
+        [](std::optional<size_t> const acc, int64_t dimVal) -> std::optional<size_t> {
+            if (!acc.has_value() || dimVal < 0)
+            {
+                return std::nullopt;
+            }
+            auto const dim = static_cast<size_t>(dimVal);
+            if (dim != 0 && *acc > std::numeric_limits<size_t>::max() / dim)
+            {
+                return std::nullopt;
+            }
+            return *acc * dim;
+        });
 }
 
 // Helper function to ensure that a ONNX initializer is supportable by TensorRT.
@@ -154,14 +152,9 @@ bool validateOnnxInitializer(::ONNX_NAMESPACE::TensorProto const& onnxTensor)
     {
         return false;
     }
-    // Validate volume is within bounds.
-    size_t vol = getInitializerVol(onnxTensor.dims());
-    // Validate size in bytes is within bounds.
-    if (vol > std::numeric_limits<size_t>::max() / typeSize)
-    {
-        return false;
-    }
-    return true;
+    // Validate the volume and its size in bytes are within bounds.
+    std::optional<size_t> const vol = getInitializerVol(onnxTensor.dims());
+    return vol.has_value() && *vol <= std::numeric_limits<size_t>::max() / typeSize;
 }
 
 // Function to read bytes from an external file and return the data in a buffer.
@@ -327,9 +320,8 @@ bool WeightsContext::convertOnnxWeights(
     size_t nbytes{0};
     auto onnxDtype = onnxTensor.data_type();
 
-    nvinfer1::Dims shape{};
-    shape.nbDims = onnxTensor.dims().size();
-    std::copy_n(onnxTensor.dims().begin(), shape.nbDims, shape.d);
+    nvinfer1::Dims shape{onnxTensor.dims().size(), {}};
+    std::ranges::copy(onnxTensor.dims(), shape.d);
 
     // Priority of importing weights:
     //  1. User provided
@@ -401,7 +393,7 @@ bool WeightsContext::convertOnnxWeights(
         if (userWeights)
         {
             std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
-            dataPtr = (void*) initDesc.first;
+            dataPtr = const_cast<void*>(initDesc.first);
             nbytes = initDesc.second;
         }
         else if (onnxTensor.raw_data().size() > 0)
@@ -468,7 +460,7 @@ bool WeightsContext::convertOnnxWeights(
         if (userWeights)
         {
             std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
-            dataPtr = (void*) initDesc.first;
+            dataPtr = const_cast<void*>(initDesc.first);
             nbytes = initDesc.second;
         }
         else if (onnxTensor.raw_data().size() > 0)
@@ -496,7 +488,7 @@ bool WeightsContext::convertOnnxWeights(
         if (userWeights)
         {
             std::pair<void const*, size_t> initDesc = mExternalInits.at(initName);
-            dataPtr = (void*) initDesc.first;
+            dataPtr = const_cast<void*>(initDesc.first);
             nbytes = initDesc.second;
         }
         else if (onnxTensor.raw_data().size() > 0)
@@ -532,7 +524,7 @@ bool WeightsContext::convertOnnxWeights(
     if (trt_weights.size_bytes() != nbytes)
     {
         LOG_ERROR("Size mismatch when importing initializer: " << onnxTensor.name() << ". Expected size: " << nbytes
-                                                            << " , actual size: " << trt_weights.size_bytes());
+                                                               << " , actual size: " << trt_weights.size_bytes());
         return false;
     }
     *weights = trt_weights;
@@ -559,8 +551,8 @@ float* WeightsContext::getFP32Values(ShapedWeights const& w)
 ShapedWeights WeightsContext::createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
     std::set<std::string>& namesSet, int64_t& suffixCounter, bool refittable)
 {
-    return createNamedWeights(type, shape,
-        generateUniqueName(namesSet, suffixCounter, refittable ? "tmp_refittable_weight" : "tmp_weight"));
+    return createNamedWeights(
+        type, shape, generateUniqueName(namesSet, suffixCounter, refittable ? "tmp_refittable_weight" : "tmp_weight"));
 }
 
 ShapedWeights WeightsContext::createTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape)
@@ -614,7 +606,13 @@ bool WeightsContext::loadExternalInit(char const* name, void const* data, size_t
     auto* init = it->second;
 
     // Validate size
-    size_t byteSize = getTensorOrWeightsSizeBytes(getInitializerVol(init->dims()), init->data_type());
+    std::optional<size_t> const vol = getInitializerVol(init->dims());
+    if (!vol.has_value())
+    {
+        LOG_ERROR("Initializer " << name << " has a negative or overflowing shape volume!");
+        return false;
+    }
+    size_t byteSize = getTensorOrWeightsSizeBytes(*vol, init->data_type());
     if (byteSize != size)
     {
         LOG_ERROR("Provided initializer size " << size << " mismatches with that expected by the model: " << byteSize);

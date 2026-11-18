@@ -3,10 +3,12 @@
  */
 #include "errorHelpers.hpp"
 
+#include <utility>
+
 namespace onnx2trt
 {
 OnnxTrtException::OnnxTrtException(Status status)
-    : mStatus(status)
+    : mStatus(std::move(status))
 {
 }
 Status OnnxTrtException::getStatus() const noexcept

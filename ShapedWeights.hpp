@@ -33,13 +33,13 @@ public:
 
     explicit ShapedWeights(DataType type, void* values, nvinfer1::Dims shape_);
 
-    size_t count() const;
+    [[nodiscard]] size_t count() const;
 
-    size_t size_bytes() const;
+    [[nodiscard]] size_t size_bytes() const;
 
-    const char* getName() const;
+    [[nodiscard]] char const* getName() const;
 
-    void setName(const char* name);
+    void setName(char const* name);
 
     //! True if values exist.
     explicit operator bool() const;
@@ -54,17 +54,17 @@ public:
     }
 
     template <typename T>
-    const T& at(size_t index) const
+    [[nodiscard]] T const& at(size_t index) const
     {
         assert(values && index < count());
-        return static_cast<const T*>(values)[index];
+        return static_cast<T const*>(values)[index];
     }
 
 public:
     DataType type{static_cast<DataType>(-1)};
     void* values{nullptr};
     nvinfer1::Dims shape{-1, {}};
-    const char* name{};
+    char const* name{};
 };
 
 class ImporterContext;

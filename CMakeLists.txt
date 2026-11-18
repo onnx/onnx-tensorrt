@@ -28,7 +28,7 @@ add_definitions("-DSOURCE_LENGTH=${SOURCE_LENGTH}")
 # Version information
 #--------------------------------------------------
 set(ONNX2TRT_MAJOR 11)
-set(ONNX2TRT_MINOR 4)
+set(ONNX2TRT_MINOR 5)
 set(ONNX2TRT_PATCH 0)
 set(ONNX2TRT_VERSION "${ONNX2TRT_MAJOR}.${ONNX2TRT_MINOR}.${ONNX2TRT_PATCH}" CACHE STRING "ONNX2TRT version")
 
@@ -97,18 +97,11 @@ if(NOT TARGET onnx_proto)
 endif()
 
 # Find CUDA
-if (NOT CUDA_TOOLKIT_ROOT_DIR)
-  set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
-endif()
-find_path(CUDA_INCLUDE_DIR cuda_runtime.h
-  HINTS ${CUDA_TOOLKIT_ROOT_DIR}
-  PATH_SUFFIXES include
-)
-MESSAGE(STATUS "Found CUDA headers at ${CUDA_INCLUDE_DIR}")
+find_package(CUDAToolkit REQUIRED)
 
 # TensorRT
 find_path(TENSORRT_INCLUDE_DIR NvInfer.h
-  HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+  HINTS ${TENSORRT_ROOT}
   PATH_SUFFIXES include)
 MESSAGE(STATUS "Found TensorRT headers at ${TENSORRT_INCLUDE_DIR}")
 
@@ -155,7 +148,10 @@ set(nvonnxparser_lib_name_static "nvonnxparser_static")
 # Importer library
 # --------------------------------
 add_library(${nvonnxparser_lib_name} SHARED ${IMPORTER_SOURCES})
-target_include_directories(${nvonnxparser_lib_name} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+if(MSVC)
+    target_sources(${nvonnxparser_lib_name} PRIVATE ${ONNX2TRT_ROOT}/nvonnxparser.def)
+endif()
+target_include_directories(${nvonnxparser_lib_name} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR} ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(${nvonnxparser_lib_name} PUBLIC onnx_proto ${PROTOBUF_LIBRARY})
 set_target_properties(${nvonnxparser_lib_name} PROPERTIES
   VERSION   ${ONNX2TRT_VERSION}
@@ -167,7 +163,7 @@ set_target_properties(${nvonnxparser_lib_name} PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
 )
 add_library(${nvonnxparser_lib_name_static} STATIC ${IMPORTER_SOURCES})
-target_include_directories(${nvonnxparser_lib_name_static} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+target_include_directories(${nvonnxparser_lib_name_static} PUBLIC ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR} ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(${nvonnxparser_lib_name_static} PUBLIC onnx_proto ${PROTOBUF_LIBRARY})
 set_target_properties(${nvonnxparser_lib_name_static} PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
@@ -179,7 +175,7 @@ set_target_properties(${nvonnxparser_lib_name_static} PROPERTIES
 # --------------------------------
 if(BUILD_ONNXIFI)
   add_library(trt_onnxify SHARED ${ONNXIFI_SOURCES})
-  target_include_directories(trt_onnxify PUBLIC ${CUDA_INCLUDE_DIR} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR})
+  target_include_directories(trt_onnxify PUBLIC ${CUDAToolkit_INCLUDE_DIRS} ${ONNX_INCLUDE_DIRS} ${TENSORRT_INCLUDE_DIR} ${TENSORRT_PYTHON_INCLUDE_DIR})
   target_link_libraries(trt_onnxify PUBLIC ${nvonnxparser_lib_name_static} ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 endif()
 

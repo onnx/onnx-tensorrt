@@ -4,7 +4,7 @@ namespace onnx2trt
 {
 
 template <typename T>
-std::ostream& printSequence(std::ostream& stream, const T* begin, int count)
+std::ostream& printSequence(std::ostream& stream, T const* begin, int count)
 {
     stream << "(";
     if (count > 0)

@@ -129,7 +129,8 @@ onnx2trt::ShapedWeights OnnxAttrs::get<onnx2trt::ShapedWeights>(std::string cons
     std::string extName = this->at(key)->ref_attr_name();
     bool isExtAttr = isExternalAttribute(extName, mCtx);
 
-    ::ONNX_NAMESPACE::TensorProto const& onnxTensor = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->t() : this->at(key)->t();
+    ::ONNX_NAMESPACE::TensorProto const& onnxTensor
+        = isExtAttr ? mCtx->localFunctionStack().back().attrs.at(extName)->t() : this->at(key)->t();
     onnx2trt::ShapedWeights weights;
     bool success = mCtx->getWeightsContext().convertOnnxWeights(onnxTensor, &weights, true);
     if (!success)
@@ -218,7 +219,7 @@ inline nvinfer1::ActivationType activationStringToEnum(std::string const& type)
 template <>
 nvinfer1::ActivationType OnnxAttrs::get<nvinfer1::ActivationType>(std::string const& key) const
 {
-    const std::string type = this->get<std::string>(key);
+    std::string const type = this->get<std::string>(key);
     return activationStringToEnum(type);
 }
 
@@ -226,9 +227,9 @@ template <>
 std::vector<nvinfer1::ActivationType> OnnxAttrs::get<std::vector<nvinfer1::ActivationType>>(
     std::string const& key) const
 {
-    const auto strings = this->at(key)->strings();
+    auto const strings = this->at(key)->strings();
     std::vector<nvinfer1::ActivationType> actTypes;
-    for (const auto& str : strings)
+    for (auto const& str : strings)
     {
         actTypes.emplace_back(activationStringToEnum(str));
     }
@@ -236,7 +237,7 @@ std::vector<nvinfer1::ActivationType> OnnxAttrs::get<std::vector<nvinfer1::Activ
 }
 
 template <>
-const ::ONNX_NAMESPACE::GraphProto& OnnxAttrs::get<const ::ONNX_NAMESPACE::GraphProto&>(std::string const& key) const
+::ONNX_NAMESPACE::GraphProto const& OnnxAttrs::get<::ONNX_NAMESPACE::GraphProto const&>(std::string const& key) const
 {
     return this->at(key)->g();
 }
@@ -289,7 +290,7 @@ nvinfer1::MatrixOperation OnnxAttrs::get<nvinfer1::MatrixOperation>(std::string 
 template <>
 nvinfer1::InterpolationMode OnnxAttrs::get<nvinfer1::InterpolationMode>(std::string const& key) const
 {
-    const auto& mode = this->get<std::string>(key);
+    auto const& mode = this->get<std::string>(key);
     if (mode == "nearest")
     {
         return nvinfer1::InterpolationMode::kNEAREST;
@@ -305,7 +306,7 @@ template <>
 nvinfer1::ResizeCoordinateTransformation OnnxAttrs::get<nvinfer1::ResizeCoordinateTransformation>(
     std::string const& key) const
 {
-    const auto& transformation = this->get<std::string>(key);
+    auto const& transformation = this->get<std::string>(key);
     if (transformation == "align_corners")
     {
         return nvinfer1::ResizeCoordinateTransformation::kALIGN_CORNERS;
@@ -324,7 +325,7 @@ nvinfer1::ResizeCoordinateTransformation OnnxAttrs::get<nvinfer1::ResizeCoordina
 template <>
 nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(std::string const& key) const
 {
-    const auto& selector = this->get<std::string>(key);
+    auto const& selector = this->get<std::string>(key);
     if (selector == "formula")
     {
         return nvinfer1::ResizeSelector::kFORMULA;
@@ -339,7 +340,7 @@ nvinfer1::ResizeSelector OnnxAttrs::get<nvinfer1::ResizeSelector>(std::string co
 template <>
 nvinfer1::ResizeRoundMode OnnxAttrs::get<nvinfer1::ResizeRoundMode>(std::string const& key) const
 {
-    const auto& roundMode = this->get<std::string>(key);
+    auto const& roundMode = this->get<std::string>(key);
     if (roundMode == "half_up")
     {
         return nvinfer1::ResizeRoundMode::kHALF_UP;

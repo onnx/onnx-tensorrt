@@ -11,10 +11,9 @@ namespace onnx2trt
 {
 
 // Search for a network Layer name in a SubgraphPortsMap.
-SubgraphPortsMap::const_iterator findLayer(const SubgraphPortsMap& inputs, const std::string layerName)
+SubgraphPortsMap::const_iterator findLayer(SubgraphPortsMap const& inputs, std::string const layerName)
 {
-    return std::find_if(
-        inputs.begin(), inputs.end(), [&](const auto& item) { return layerName == item.first->getName(); });
+    return std::ranges::find(inputs, layerName, [](auto const& item) { return item.first->getName(); });
 }
 
 // Add an ConditionalInputLayer between `layer` and its inputs.
@@ -41,12 +40,12 @@ void addConditionalInputLayer(ImporterContext* ctx, nvinfer1::IIfConditional* co
     {
         inputLayer = N_CHECK(conditional->addInput(*input));
         inputsMap[name] = inputLayer;
-        const std::string inputLayerName(name);
+        std::string const inputLayerName(name);
         ctx->registerLayer(inputLayer, inputLayerName + "_InputLayer", node);
         // Note: Since multiple conditionals may use the same external tensor, check unique names for output tensors of
         // IfConditionalInputLayers to avoid tensor name duplication.
-        ctx->registerTensor(
-            TensorOrWeights{N_CHECK(inputLayer->getOutput(0))}, inputLayerName + "_InputLayer_output", /*checkUniqueName*/ true);
+        ctx->registerTensor(TensorOrWeights{N_CHECK(inputLayer->getOutput(0))}, inputLayerName + "_InputLayer_output",
+            /*checkUniqueName*/ true);
     }
     else
     {
@@ -96,14 +95,14 @@ void addConditionalInputIfNeeded(ImporterContext* ctx, nvinfer1::IIfConditional*
         auto iter = findLayer(subgraphInputsMap, layerName);
         if (iter != subgraphInputsMap.end())
         {
-            const auto& indicesSet = iter->second;
+            auto const& indicesSet = iter->second;
             inIndices.insert(indicesSet.begin(), indicesSet.end());
         }
 
         return inIndices;
     };
 
-    const auto inIndices = getLayerExternalInputs(layer.getName());
+    auto const inIndices = getLayerExternalInputs(layer.getName());
     for (auto inIdx : inIndices)
     {
         LOG_VERBOSE("Adding Input layer for " << layer.getName());
@@ -113,21 +112,21 @@ void addConditionalInputIfNeeded(ImporterContext* ctx, nvinfer1::IIfConditional*
 
 // Add IConditionalInputLayers to `layer`'s inputs.
 void addIfInputLayers(ImporterContext* ctx, nvinfer1::IIfConditional* conditional, InputsMap& inputsMap,
-    const std::vector<nvinfer1::ILayer*>& newLayers, ::ONNX_NAMESPACE::NodeProto const* node)
+    std::vector<nvinfer1::ILayer*> const& newLayers, ::ONNX_NAMESPACE::NodeProto const* node)
 {
     // Find all of the tensors entering the subgraph.
     SubgraphPortsMap externalInputs;
     getSubgraphInputs(newLayers, externalInputs);
 
     // Add a ConditionalInputLayer in front of each input that is external to the subgraph.
-    for (const auto& layer : newLayers)
+    for (auto const& layer : newLayers)
     {
         addConditionalInputIfNeeded(ctx, conditional, inputsMap, *layer, externalInputs, node);
     }
 }
 
 // Given a subgraph, find all of its external inputs (tensors entering the subgraph).
-void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, SubgraphPortsMap& externalInputs)
+void getSubgraphInputs(std::vector<nvinfer1::ILayer*> const& newLayers, SubgraphPortsMap& externalInputs)
 {
     using PortIndex = int32_t;
     using TensorsSet = std::unordered_set<nvinfer1::ITensor*>;
@@ -149,7 +148,7 @@ void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, Subgraph
         }
     };
 
-    for (const auto& l : newLayers)
+    for (auto const& l : newLayers)
     {
         getTensors(l, false, [&](nvinfer1::ITensor* t) { outputTensors.insert(t); });
         getTensors(l, true, [&](nvinfer1::ITensor* t) { inputTensors.insert(t); });
@@ -168,7 +167,7 @@ void getSubgraphInputs(const std::vector<nvinfer1::ILayer*>& newLayers, Subgraph
 
             TensorsVec nodeAccessor;
             getNodeAccessor(l, nodeAccessor);
-            for (const auto& tensor : nodeAccessor)
+            for (auto const& tensor : nodeAccessor)
             {
                 if (tensor == nullptr)
                 {

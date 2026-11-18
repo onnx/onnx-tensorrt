@@ -72,8 +72,7 @@ constexpr int32_t EnumMax<ErrorCode>() noexcept
 //!
 //! \see IParser::setFlags() and IParser::getFlags()
 //!
-using OnnxParserFlags
-    = uint32_t;
+using OnnxParserFlags = uint32_t;
 
 enum class OnnxParserFlag : int32_t
 {
@@ -161,7 +160,7 @@ public:
     virtual int32_t localFunctionStackSize() const = 0;
 
 protected:
-    virtual ~IParserError() {}
+    virtual ~IParserError() = default;
 };
 
 class IRefitterObserver;
@@ -194,7 +193,7 @@ public:
     //! \see getNbErrors() getError()
     //!
     virtual bool parse(
-        void const* serialized_onnx_model, size_t serialized_onnx_model_size, const char* model_path = nullptr) noexcept
+        void const* serialized_onnx_model, size_t serialized_onnx_model_size, char const* model_path = nullptr) noexcept
         = 0;
 
     //!
@@ -218,7 +217,7 @@ public:
     //!
     //! \param op_name The name of the ONNX operator to check for support
     //!
-    virtual bool supportsOperator(const char* op_name) const noexcept = 0;
+    virtual bool supportsOperator(char const* op_name) const noexcept = 0;
 
     //!
     //!\brief Get the number of errors that occurred during prior calls to
@@ -338,7 +337,8 @@ public:
     //! \return true if the model is supported
     //!
     virtual bool supportsModelV2(
-        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept = 0;
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept
+        = 0;
 
     //!
     //! \brief Get the number of subgraphs. Calling this function before calling \p supportsModelV2 results in undefined
@@ -388,7 +388,8 @@ public:
     //! \see getNbErrors() getError()
     //!
     virtual bool loadModelProto(
-        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept = 0;
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept
+        = 0;
 
     //!
     //! \brief Prompt the ONNX parser to load an initializer with user-provided binary data.
@@ -426,7 +427,7 @@ public:
     //!
     //! \return true if the IBuilderConfig was set successfully, false otherwise.
     //!
-    virtual bool setBuilderConfig(const nvinfer1::IBuilderConfig* const builderConfig) noexcept = 0;
+    virtual bool setBuilderConfig(nvinfer1::IBuilderConfig const* const builderConfig) noexcept = 0;
 
     //!
     //! \brief Set or clear an optional observer notified once per refittable weight during parsing.
@@ -440,6 +441,25 @@ public:
     //! absorb some of them. Consumers replaying the records against an engine must skip
     //! records whose trtName the engine's nvinfer1::IRefitter does not report in
     //! getAllWeights, and rely on refitCudaEngine's missing-weights check for coverage.
+    //!
+    //! TensorRT-RTX only: When an observer is attached to the parser associated with a BuilderConfig that sets
+    //! kREFIT_INDIVIDUAL and kSTRIP_PLAN, the parser will provide placeholder weights for the listed initializers
+    //! of the following ONNX nodes:
+    //!  * Conv kernels and biases
+    //!  * Gemm operands and bias
+    //!  * MatMul operands
+    //!  * DequantizeLinear scales
+    //!  * DequantizeLinear FP8 or FP4 data
+    //!  * TRT_FP8DequantizeLinear/TRT_MXFP8DequantizeLinear FP8 data
+    //! A placeholder weight is represented by nvinfer1::Weights with the same type and count as the original
+    //! initializer, but with nullptr values. All placeholder weights are expected to be refit prior to inference.
+    //!
+    //! A placeholder weight will not be produced under the following circumstances:
+    //!  * If the initializer is also a graph input or output
+    //!  * If the initializer is referenced by a nested graph
+    //!
+    //! Placeholders will not be created when importing a model whose producer name is "TensorRT". Networks
+    //! containing placeholders must be built with IBuilder::buildSerializedNetwork().
     //!
     //! Records are only valid if the subsequent parse call returns true.
     //!
@@ -649,7 +669,8 @@ public:
     //! \see getNbErrors() getError()
     //!
     virtual bool loadModelProto(
-        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept = 0;
+        void const* serializedOnnxModel, size_t serializedOnnxModelSize, char const* modelPath = nullptr) noexcept
+        = 0;
 
     //!
     //! \brief Prompt the ONNX refitter to load an initializer with user-provided binary data.

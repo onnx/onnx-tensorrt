@@ -8,7 +8,6 @@
 namespace onnx2trt
 {
 
-
 ONNXParserErrorRecorder* ONNXParserErrorRecorder::create(
     nvinfer1::ILogger* logger, nvinfer1::IErrorRecorder* otherRecorder)
 {
@@ -21,7 +20,7 @@ ONNXParserErrorRecorder* ONNXParserErrorRecorder::create(
         }
         return recorder;
     }
-    catch (const std::exception& e)
+    catch (std::exception const& e)
     {
         logError(logger, e.what());
         return nullptr;
@@ -37,7 +36,7 @@ void ONNXParserErrorRecorder::destroy(ONNXParserErrorRecorder*& recorder)
     }
 }
 
-void ONNXParserErrorRecorder::logError(nvinfer1::ILogger* logger, const char* str)
+void ONNXParserErrorRecorder::logError(nvinfer1::ILogger* logger, char const* str)
 {
     if (logger)
     {
@@ -45,8 +44,7 @@ void ONNXParserErrorRecorder::logError(nvinfer1::ILogger* logger, const char* st
     }
 }
 
-ONNXParserErrorRecorder::ONNXParserErrorRecorder(
-    nvinfer1::ILogger* logger, nvinfer1::IErrorRecorder* otherRecorder)
+ONNXParserErrorRecorder::ONNXParserErrorRecorder(nvinfer1::ILogger* logger, nvinfer1::IErrorRecorder* otherRecorder)
     : mUserRecorder(otherRecorder)
     , mLogger(logger)
 {
@@ -72,7 +70,7 @@ void ONNXParserErrorRecorder::clear() noexcept
         std::lock_guard<std::mutex> guard(mStackLock);
         mErrorStack.clear();
     }
-    catch (const std::exception& e)
+    catch (std::exception const& e)
     {
         logError(mLogger, e.what());
     }
@@ -83,7 +81,7 @@ bool ONNXParserErrorRecorder::reportError(nvinfer1::ErrorCode val, nvinfer1::IEr
     try
     {
         std::lock_guard<std::mutex> guard(mStackLock);
-        mErrorStack.push_back(errorPair(val, desc));
+        mErrorStack.emplace_back(val, desc);
         if (mUserRecorder)
         {
             mUserRecorder->reportError(val, desc);
@@ -93,7 +91,7 @@ bool ONNXParserErrorRecorder::reportError(nvinfer1::ErrorCode val, nvinfer1::IEr
             logError(mLogger, desc);
         }
     }
-    catch (const std::exception& e)
+    catch (std::exception const& e)
     {
         logError(mLogger, e.what());
     }

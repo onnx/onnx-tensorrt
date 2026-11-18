@@ -154,7 +154,7 @@ namespace onnx2trt
 
 void ImporterContext::pushBaseNameScope()
 {
-    mBaseNameScopeStack.push_back({});
+    mBaseNameScopeStack.emplace_back();
 }
 
 void ImporterContext::popBaseNameScope()
@@ -334,14 +334,16 @@ std::vector<std::string> ImporterContext::getUsedVCPluginLibraries()
 #endif
 }
 
-void ImporterContext::checkDLASupport(int32_t numPrevLayers, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIndex)
+void ImporterContext::checkDLASupport(
+    int32_t numPrevLayers, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIndex)
 {
     for (int32_t i = numPrevLayers; i < network()->getNbLayers(); ++i)
     {
         auto* layer = network()->getLayer(i);
         if (!mBuilderConfig->canRunOnDLA(layer))
         {
-            ONNXTRT_THROW(MAKE_NODE_ERROR("DLA validation failed for layer: " + std::string(layer->getName()), ErrorCode::kUNSUPPORTED_NODE, node, nodeIndex));
+            ONNXTRT_THROW(MAKE_NODE_ERROR("DLA validation failed for layer: " + std::string(layer->getName()),
+                ErrorCode::kUNSUPPORTED_NODE, node, nodeIndex));
         }
     }
 }
