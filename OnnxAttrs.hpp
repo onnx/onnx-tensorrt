@@ -15,7 +15,7 @@ class OnnxAttrs
 {
     template <typename T>
     using string_map = std::unordered_map<std::string, T>;
-    typedef string_map<::ONNX_NAMESPACE::AttributeProto const*> AttrMap;
+    using AttrMap = string_map<::ONNX_NAMESPACE::AttributeProto const*>;
     AttrMap mAttrs;
     onnx2trt::ImporterContext* mCtx;
 
@@ -59,6 +59,6 @@ public:
     template <typename T>
     T get(std::string const& key, T const& default_value) const
     {
-        return mAttrs.count(key) ? this->get<T>(key) : default_value;
+        return mAttrs.contains(key) ? this->get<T>(key) : default_value;
     }
 };

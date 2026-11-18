@@ -26,8 +26,8 @@ namespace onnx2trt
 
 StringMap<OpStaticErrorChecker>& getOpStaticErrorCheckerMap()
 {
-    static StringMap<OpStaticErrorChecker> error_checkers;
-    return error_checkers;
+    static StringMap<OpStaticErrorChecker> sErrorCheckers;
+    return sErrorCheckers;
 }
 
 namespace
@@ -40,7 +40,7 @@ using nvinfer1::DataType;
     static void _ignore_unused1_##x()                                                                                  \
     {                                                                                                                  \
         (void) _ignore_unused2_##x;                                                                                    \
-        (void) x;                                                                                                      \
+        (void) (x);                                                                                                    \
     }                                                                                                                  \
     static void _ignore_unused2_##x()                                                                                  \
     {                                                                                                                  \
@@ -73,7 +73,7 @@ bool registerOpStaticErrorChecker(std::string op, OpStaticErrorChecker const& ch
 }
 
 void argMinMaxCheckHelper(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
     int32_t selectLastIndex = attrs.get<int32_t>("select_last_index", 0);
@@ -83,15 +83,17 @@ void argMinMaxCheckHelper(
 }
 
 void poolingCheckHelper(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, std::vector<Status>& errors, size_t const nodeIndex)
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, std::vector<Status>& errors, size_t const nodeIndex)
 {
     OnnxAttrs attrs(node, ctx);
     if (ctx->getOpsetVersion() >= 10)
     {
         auto const dilations = attrs.get<std::vector<int32_t>>("dilations", std::vector<int32_t>(2, 1));
-        for (size_t i = 0; i < dilations.size(); i++)
-            STATIC_CHECK((dilations[i] == 1) && "This version of TensorRT does not support dilations other than 1.",
+        for (int32_t const dilation : dilations)
+        {
+            STATIC_CHECK((dilation == 1) && "This version of TensorRT does not support dilations other than 1.",
                 ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
+        }
     }
 }
 
@@ -271,7 +273,7 @@ DEFINE_OP_CHECKER(ConstantOfShape)
     OnnxAttrs attrs(node, ctx);
     ShapedWeights zeroWeights
         = ctx->createNamedTempWeights(::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, nvinfer1::Dims{1, {1}});
-    static_cast<float*>(zeroWeights.values)[0] = 0.f;
+    static_cast<float*>(zeroWeights.values)[0] = 0.F;
     auto valueWeights = TensorOrWeights{attrs.get("value", zeroWeights)};
     STATIC_CHECK(notInvalidType(valueWeights, {"UINT8"}, node, nodeIndex).is_success()
             && "Invalid input type for ConstantOfShape",
@@ -432,7 +434,7 @@ DEFINE_OP_CHECKER(GRU)
     std::string const direction = attrs.get<std::string>("direction", "forward");
     int32_t const numDirections = (direction == "bidirectional") ? 2 : 1;
 
-    constexpr int32_t NUM_ACTIVATIONS = 2;
+    constexpr int32_t kNUM_ACTIVATIONS = 2;
     std::vector<trtAct> defaultActs{trtAct::kSIGMOID, trtAct::kTANH};
     if (numDirections == 2)
     {
@@ -447,7 +449,7 @@ DEFINE_OP_CHECKER(GRU)
 
     // A valid ONNX GRU supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
-    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    int32_t const expectedNumActivations = numDirections * kNUM_ACTIVATIONS;
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -458,11 +460,11 @@ DEFINE_OP_CHECKER(GRU)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + kNUM_ACTIVATIONS, activations.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + kNUM_ACTIVATIONS, activationAlphas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + kNUM_ACTIVATIONS, activationBetas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the GRU do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
 }
@@ -499,7 +501,8 @@ DEFINE_OP_EMPTY_CHECKER(IsNaN)
 
 DEFINE_OP_CHECKER(LayerNormalization)
 {
-    // TRT only expects one valid output. Other outputs are training artifacts that should've been removed for inference graphs.
+    // TRT only expects one valid output. Other outputs are training artifacts that should've been removed for inference
+    // graphs.
     emptyOutputChecker(ctx, node, errors, nodeIndex, 1);
 }
 
@@ -530,7 +533,7 @@ DEFINE_OP_CHECKER(LSTM)
     STATIC_CHECK(inputForget == 0 && "Coupled input/forget is unsupported in the LSTM converter",
         ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
 
-    constexpr int32_t NUM_ACTIVATIONS = 3;
+    constexpr int32_t kNUM_ACTIVATIONS = 3;
     std::vector<trtAct> defaultActs{trtAct::kSIGMOID, trtAct::kTANH, trtAct::kTANH};
     if (numDirections == 2)
     {
@@ -546,7 +549,7 @@ DEFINE_OP_CHECKER(LSTM)
 
     // A valid ONNX LSTM supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
-    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    int32_t const expectedNumActivations = numDirections * kNUM_ACTIVATIONS;
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -557,11 +560,11 @@ DEFINE_OP_CHECKER(LSTM)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + kNUM_ACTIVATIONS, activations.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + kNUM_ACTIVATIONS, activationAlphas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activation alphas for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + kNUM_ACTIVATIONS, activationBetas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activation betas for the reverse pass of the LSTM do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
 }
@@ -749,10 +752,10 @@ DEFINE_OP_CHECKER(RNN)
 {
     OnnxAttrs attrs{node, ctx};
 
-    const std::string direction = attrs.get<std::string>("direction", "forward");
-    const int32_t numDirections = (direction == "bidirectional") ? 2 : 1;
+    std::string const direction = attrs.get<std::string>("direction", "forward");
+    int32_t const numDirections = (direction == "bidirectional") ? 2 : 1;
 
-    constexpr int32_t NUM_ACTIVATIONS = 1;
+    constexpr int32_t kNUM_ACTIVATIONS = 1;
     std::vector<nvinfer1::ActivationType> defaultActs{nvinfer1::ActivationType::kTANH};
     if (numDirections == 2)
     {
@@ -768,7 +771,7 @@ DEFINE_OP_CHECKER(RNN)
 
     // A valid ONNX RNN supplies numDirections * NUM_ACTIVATIONS values; reject mismatches so the
     // reverse-pass comparison below stays in bounds.
-    int32_t const expectedNumActivations = numDirections * NUM_ACTIVATIONS;
+    int32_t const expectedNumActivations = numDirections * kNUM_ACTIVATIONS;
     STATIC_CHECK(static_cast<int32_t>(activations.size()) == expectedNumActivations
             && static_cast<int32_t>(activationAlphas.size()) == expectedNumActivations
             && static_cast<int32_t>(activationBetas.size()) == expectedNumActivations
@@ -779,11 +782,11 @@ DEFINE_OP_CHECKER(RNN)
     // TODO: This will require splitting the input tensor in the loop when applying activations.
     if (numDirections == 2)
     {
-        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + NUM_ACTIVATIONS, activations.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activations.begin(), activations.begin() + kNUM_ACTIVATIONS, activations.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + NUM_ACTIVATIONS, activationAlphas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationAlphas.begin(), activationAlphas.begin() + kNUM_ACTIVATIONS, activationAlphas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
-        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + NUM_ACTIVATIONS, activationBetas.begin() + NUM_ACTIVATIONS)
+        STATIC_CHECK(std::equal(activationBetas.begin(), activationBetas.begin() + kNUM_ACTIVATIONS, activationBetas.begin() + kNUM_ACTIVATIONS)
             && "The parser does not currently support cases where activations for the reverse pass of the RNN do not match the forward pass.", ErrorCode::kUNSUPPORTED_NODE, node, errors, nodeIndex);
     }
 }

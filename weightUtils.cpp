@@ -7,12 +7,12 @@
 #include "half.h"
 #include <cstring> // For std::memcpy
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <sstream>
 #include <typeindex>
 #include <unordered_map>
-#include <iterator>
 
 namespace onnx2trt
 {

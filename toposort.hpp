@@ -8,18 +8,15 @@
 #include <vector>
 
 #include <iostream>
-using std::cout;
-using std::cerr;
-using std::endl;
 
-namespace
+namespace toposortDetail
 {
 
 enum NodeState
 {
-    NODE_UNVISITED,
-    NODE_ACTIVE,
-    NODE_VISITED
+    kNODE_UNVISITED,
+    kNODE_ACTIVE,
+    kNODE_VISITED
 };
 
 template <class Container>
@@ -29,19 +26,19 @@ template <class Container>
     std::vector<size_t>* order)
 {
     NodeState& node_state = node_states->at(node_idx);
-    if (node_state == NODE_ACTIVE)
+    if (node_state == kNODE_ACTIVE)
     {
         // Cycle detected!
-        cerr << "ERROR: Graph contains a cycle" << endl;
+        std::cerr << "ERROR: Graph contains a cycle" << std::endl;
         return false;
     }
-    else if (node_state == NODE_VISITED)
+    else if (node_state == kNODE_VISITED)
     {
         return true;
     }
     else
     {
-        node_state = NODE_ACTIVE;
+        node_state = kNODE_ACTIVE;
         for (auto const& input : nodes[node_idx].input())
         {
             auto const inputIt = node_map.find(input);
@@ -74,13 +71,13 @@ template <class Container>
                 }
             }
         }
-        node_state = NODE_VISITED;
+        node_state = kNODE_VISITED;
         order->push_back(node_idx);
     }
     return true;
 }
 
-} // anonymous namespace
+} // namespace toposortDetail
 
 //! Topologically sort \p nodes, storing the resulting node index order in \p order.
 //! \p extra_deps maps node indices to additional tensor names they implicitly depend on
@@ -103,16 +100,16 @@ template <class Container>
             if (!node_map.emplace(output, i).second)
             {
                 // Output name appears more than once in graph!
-                cerr << "ERROR: Output name is not unique: " << output << endl;
+                std::cerr << "ERROR: Output name is not unique: " << output << std::endl;
                 return false;
             }
         }
     }
     order->reserve(nodes.size());
-    std::vector<NodeState> node_states(nodes.size(), NODE_UNVISITED);
+    std::vector<toposortDetail::NodeState> node_states(nodes.size(), toposortDetail::kNODE_UNVISITED);
     for (size_t i = 0; i < (size_t) nodes.size(); ++i)
     {
-        if (!get_post_order(i, nodes, node_map, extra_deps, &node_states, order))
+        if (!toposortDetail::get_post_order(i, nodes, node_map, extra_deps, &node_states, order))
         {
             return false;
         }

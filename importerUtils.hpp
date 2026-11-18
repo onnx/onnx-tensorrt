@@ -27,6 +27,7 @@
 #include <string_view>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 
 namespace onnx2trt
 {
@@ -64,11 +65,15 @@ template <typename ScalarType>
 nvinfer1::IConstantLayer* addConstant(
     ImporterContext* ctx, std::vector<ScalarType> const& values, ShapedWeights::DataType type, nvinfer1::Dims shape)
 {
-    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, "Found type mismatch when creating scalar value", ErrorCode::kINTERNAL_ERROR);
-    ONNXTRT_CHECK(volume(shape) == static_cast<int64_t>(values.size()), "Shape does not match number of values provided", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(getShapedWeightsDataType<ScalarType>() == type, "Found type mismatch when creating scalar value",
+        ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(volume(shape) == static_cast<int64_t>(values.size()),
+        "Shape does not match number of values provided", ErrorCode::kINTERNAL_ERROR);
     auto const sizeInBits = getDtypeSizeBits(type);
-    ONNXTRT_CHECK(sizeInBits % 8 == 0, "Size of type must be a multiple of 8 bits", ErrorCode::kINTERNAL_ERROR); // TRT-22989: handle sub-byte size and shape checks
-    ONNXTRT_CHECK(sizeof(ScalarType) == sizeInBits / 8, "ONNX dtype does not have the same size as the value type", ErrorCode::kINTERNAL_ERROR);
+    ONNXTRT_CHECK(sizeInBits % 8 == 0, "Size of type must be a multiple of 8 bits",
+        ErrorCode::kINTERNAL_ERROR); // TRT-22989: handle sub-byte size and shape checks
+    ONNXTRT_CHECK(sizeof(ScalarType) == sizeInBits / 8, "ONNX dtype does not have the same size as the value type",
+        ErrorCode::kINTERNAL_ERROR);
     ShapedWeights weights = ctx->createNamedTempWeights(type, shape);
     std::memcpy(weights.values, values.data(), values.size() * sizeof(ScalarType));
     nvinfer1::IConstantLayer* l = N_CHECK(ctx->network()->addConstant(weights.shape, weights));
@@ -106,14 +111,14 @@ enum ScaleOp
 };
 
 // Helper function to import ONNX activation nodes into TRT
-NodeOutputs activationHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs activationHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ActivationType op, float* alpha = nullptr, float* beta = nullptr);
 
 // Add clipping to a tensor if clip is a valid value.
 nvinfer1::ITensor* addClip(ImporterContext* ctx, nvinfer1::ITensor* input, float clip);
 
 // Helper function to import ArgMax and ArgMin nodes into TRT
-NodeOutputs argMinMaxHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs argMinMaxHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::TopKOperation op);
 
 //! If t has rank less than nbDims, reshape it to have nbDims by prepending ones to its dimensions.
@@ -126,15 +131,27 @@ void broadcastTensors(ImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::IT
 // Helper function to broadcast three tensors to the largest one's shape
 void broadcastTensors(ImporterContext* ctx, nvinfer1::ITensor*& t1, nvinfer1::ITensor*& t2, nvinfer1::ITensor*& t3);
 
-// Helper function to calculate the bias tensor for GatherElements.
-std::vector<int32_t> calculateBias(
-    nvinfer1::Dims const& daDims, nvinfer1::Dims const& idxDims, std::vector<int32_t> const& pitches, int32_t axis);
+//! \brief Compute per-element flat offsets for a GatherElements operation.
+//!
+//! For each index position in \p idxDims, accumulates the dot product of the multi-dimensional
+//! coordinate (excluding \p axis) against \p pitches to give the flat offset into the data tensor.
+//!
+//! \param daDims  Shape of the data tensor.
+//! \param idxDims Shape of the index tensor.
+//! \param pitches Row-major strides of the data tensor (from calculatePitches).
+//! \param axis    Gather axis, excluded from the offset sum.
+//! \return Flat offsets, one per index element, in index-tensor traversal order.
+[[nodiscard]] std::vector<int64_t> calculateBias(
+    nvinfer1::Dims const& daDims, nvinfer1::Dims const& idxDims, std::span<int64_t const> pitches, int32_t axis);
 
-// Helper function to check that linear/cubic resize can be used
-bool canUseNDResize(size_t const scaleSize, float const* scaleFactors, size_t const n);
+//! \brief Return true if \p scaleFactors permit an N-D resize of type supported by TRT.
+//!
+//! TRT linear resize supports at most \p n spatial dimensions on the outermost axes; all
+//! outer scale factors beyond that must be 1.  Cubic resize uses n=2.
+[[nodiscard]] bool canUseNDResize(std::span<float const> scaleFactors, size_t const n);
 
-// Helper function to calculate and return a vector representation of the pitches of a given shape
-std::vector<int32_t> calculatePitches(nvinfer1::Dims const& inputDims);
+//! \brief Compute the row-major pitches (strides) of \p inputDims.
+[[nodiscard]] std::vector<int64_t> calculatePitches(nvinfer1::Dims const& inputDims);
 
 // Helper function to add a Cast layer in the network
 nvinfer1::ITensor* castHelper(ImporterContext* ctx, nvinfer1::ITensor* input, nvinfer1::DataType dtype);
@@ -166,7 +183,7 @@ onnx2trt::ShapedWeights createZeroShifts(onnx2trt::ShapedWeights const& shiftInt
 nvinfer1::ITensor* createZeroTensor(ImporterContext* ctx, nvinfer1::ITensor* data);
 
 // Helper function to convert multi input convolution
-NodeOutputs convMultiInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs convMultiInput(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs);
 
 // Helper function to convert a 1D tensor into a scalar
@@ -185,7 +202,7 @@ nvinfer1::ITensor* convertScalarToVector(ImporterContext* ctx, nvinfer1::ITensor
 int divCeil(int n, int d);
 
 // Helper function to check that the input data types for an elementwise operation are supported
-void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, const nvinfer1::ElementWiseOperation op,
+void elementwiseCheck(std::vector<TensorOrWeights> const& inputs, nvinfer1::ElementWiseOperation const op,
     ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx);
 
 // Helper function to import an ONNX elementwise op into TRT
@@ -241,7 +258,7 @@ nvinfer1::ITensor* globalPoolingHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::N
 
 // Helper function to create a greaterOrEqual or lessOrEqual operation. Provide `greater=true` for greaterOrEqual,
 // `greater=false` for lessOrEqual
-NodeOutputs greaterLessOrEqual(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs greaterLessOrEqual(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     nvinfer1::ITensor* inputA, nvinfer1::ITensor* inputB, bool greater);
 
 // Helper function to determine if a shape contains dynamic dimensions
@@ -253,7 +270,6 @@ nvinfer1::ITensor* iota(ImporterContext* ctx, ShapeTensor iotaDims, int32_t axis
 // Helper function to load a creator from the registry
 nvinfer1::IPluginCreatorInterface* importPluginCreator(ImporterContext* ctx, std::string const& pluginName,
     std::string const& pluginVersion, std::string const& pluginNamespace = kTRT_STD_PLUGIN_NAMESPACE);
-
 
 // Helper function to use modulatedDeformableConv2D plugin
 NodeOutputs modulatedDeformableConvPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
@@ -316,7 +332,7 @@ NodeOutputs reduceTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const
 nvinfer1::ITensor* reshapeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, nvinfer1::Dims shape);
 
 // Helper function to map attributes to a TRT scale layer
-NodeOutputs scaleHelper(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs scaleHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     nvinfer1::ITensor& tensor_, nvinfer1::ScaleMode mode, nvinfer1::Weights const& shift,
     nvinfer1::Weights const& scale, nvinfer1::Weights const& power, char const* shiftName, char const* scaleName);
 
@@ -326,13 +342,13 @@ void setAttr(nvinfer1::Dims* trtAttr, ::ONNX_NAMESPACE::AttributeProto const* on
 
 // Helper function to slice away elements on a given axis dimension
 nvinfer1::ITensor* sliceAcrossAxis(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ITensor* data, int32_t const axis);
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ITensor* data, int32_t const axis);
 
 // Helper function to squeeze a tensor on a given set of axes
 nvinfer1::ITensor* squeezeTensor(ImporterContext* ctx, nvinfer1::ITensor& tensor, std::vector<int32_t> const& axes);
 
 // Helper function to transpose a tensor given a permutation
-nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+nvinfer1::ITensor* transposeTensor(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     nvinfer1::ITensor& tensor, nvinfer1::Permutation const& perm);
 
 ::ONNX_NAMESPACE::TensorProto_DataType trtDataTypeToONNX(nvinfer1::DataType dt);
@@ -359,16 +375,15 @@ void weightsToVector(TensorOrWeights weights, std::vector<WeightType>* weightVec
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::BOOL)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT)
             || (sWeights.type == ::ONNX_NAMESPACE::TensorProto::FLOAT16),
-        "Found invalid weights type of: " << sWeights.type,
-        ErrorCode::kINVALID_NODE);
+        "Found invalid weights type of: " << sWeights.type, ErrorCode::kINVALID_NODE);
     size_t const nbWeights = sWeights.count();
     weightVector->resize(nbWeights);
     if (nbWeights == 0)
     {
         return;
     }
-    ONNXTRT_CHECK(sWeights.values != nullptr, "Cannot convert weights with null values to a vector!",
-        ErrorCode::kINVALID_NODE);
+    ONNXTRT_CHECK(
+        sWeights.values != nullptr, "Cannot convert weights with null values to a vector!", ErrorCode::kINVALID_NODE);
     if (sWeights.type == ::ONNX_NAMESPACE::TensorProto::INT64)
     {
         auto array_start = static_cast<int64_t*>(sWeights.values);
@@ -400,7 +415,7 @@ NodeOutputs staticSliceImporter(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProt
     std::vector<TensorOrWeights>& inputs, nvinfer1::ITensor& data);
 
 // Helper function to convert ONNX node name. If no node name, using name of first output.
-std::string const getNodeName(::ONNX_NAMESPACE::NodeProto const& node);
+[[nodiscard]] std::string getNodeName(::ONNX_NAMESPACE::NodeProto const& node);
 
 //! Decode in place the starts and ends indices according to ONNX Slice rules.
 void decodeOnnxStartsAndEnds(ImporterContext* ctx, ShapeTensor const& inputDims, ShapeTensor const& steps,
@@ -417,10 +432,10 @@ ShapeTensor axesToInterlaceSubscripts(ShapeTensor const& axes, int nbDims);
 
 //! Helper function to add SoftMax layer.
 nvinfer1::ITensor* addSoftmax(
-    ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx, nvinfer1::ITensor& input);
+    ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx, nvinfer1::ITensor& input);
 
 //! Helper function to import ONNX scatter nodes into TRT
-NodeOutputs addScatterLayer(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, size_t const nodeIdx,
+NodeOutputs addScatterLayer(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, size_t const nodeIdx,
     std::vector<TensorOrWeights>& inputs, nvinfer1::ScatterMode mode, int32_t axis = 0);
 
 //! Helper function to calculate mod(A, B), A & B are integers
@@ -490,10 +505,10 @@ public:
     std::string dimParam;
 
     //! Construct a NamedDimension where the tensor will be filled in later.
-    NamedDimension(int32_t index_, std::string const& dimParam_)
+    NamedDimension(int32_t index_, std::string dimParam_)
         : tensor(nullptr)
         , index(index_)
-        , dimParam(dimParam_)
+        , dimParam(std::move(dimParam_))
     {
     }
 };
@@ -519,7 +534,7 @@ bool convertOnnxDims(OnnxDims const& onnxDims, nvinfer1::Dims& trtDims, std::vec
             {
                 namedDims.emplace_back(static_cast<int32_t>(onnxDimsVec.size()), onnxDim.dim_param());
             }
-            const int32_t dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() >= 0 ? onnxDim.dim_value() : -1) : -1;
+            int32_t const dim = onnxDim.dim_param() == "" ? (onnxDim.dim_value() >= 0 ? onnxDim.dim_value() : -1) : -1;
             onnxDimsVec.emplace_back(dim);
         }
     }

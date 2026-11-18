@@ -21,7 +21,7 @@
     catch (std::exception & e)                                                                                         \
     {                                                                                                                  \
         mImporterCtx.getErrorRecorder()->reportError(nvinfer1::ErrorCode::kUNSPECIFIED_ERROR, e.what());               \
-        mErrors.push_back(Status{ErrorCode::kINTERNAL_ERROR, e.what()});                                               \
+        mErrors.emplace_back(ErrorCode::kINTERNAL_ERROR, e.what());                                                    \
     }
 
 #define ONNXTRT_CATCH_LOG(logger)                                                                                      \
@@ -34,11 +34,14 @@
     catch (std::exception & e)                                                                                         \
     {                                                                                                                  \
         (logger)->log(nvinfer1::ILogger::Severity::kINTERNAL_ERROR, e.what());                                         \
-        mErrors.push_back(Status{ErrorCode::kINTERNAL_ERROR, e.what()});                                               \
+        mErrors.emplace_back(ErrorCode::kINTERNAL_ERROR, e.what());                                                    \
     }
 
 #define ONNXTRT_THROW(status) throw OnnxTrtException(status)
 
+// desc is a stream-insertion expression, e.g. ONNXTRT_CHECK(x, "Expected " << y, code), so it cannot be
+// parenthesized.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define ONNXTRT_CHECK(cond, desc, code)                                                                                \
     if (!(cond))                                                                                                       \
     {                                                                                                                  \
@@ -54,6 +57,7 @@
         ss << "Assertion failed: " << #cond << ": " << desc;                                                           \
         ONNXTRT_THROW(MAKE_NODE_ERROR((ss.str()), (code), (node), (nodeIdx)));                                         \
     }
+// NOLINTEND(bugprone-macro-parentheses)
 
 namespace onnx2trt
 {
@@ -80,7 +84,7 @@ inline char const* errorCodeStr(ErrorCode code)
     return "UNKNOWN";
 }
 
-inline std::string const parserErrorStr(nvonnxparser::IParserError const* error)
+inline std::string parserErrorStr(nvonnxparser::IParserError const* error)
 {
     std::string const nodeInfo = "In node " + std::to_string(error->node()) + " with name: " + error->nodeName()
         + " and operator: " + error->nodeOperator() + " ";
@@ -107,7 +111,7 @@ public:
 
     char const* what() const noexcept override;
 
-    virtual ~OnnxTrtException() {}
+    ~OnnxTrtException() override = default;
 };
 
 } // namespace onnx2trt

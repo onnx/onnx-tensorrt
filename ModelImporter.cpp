@@ -18,9 +18,13 @@
 #include <limits>
 #include <optional>
 #include <sys/stat.h>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace onnx2trt
+{
+
+namespace
 {
 
 // Helper class and object to shutdown protobuf library upon library unload.
@@ -33,7 +37,9 @@ public:
     }
 };
 
-static ProtobufShutter protobufShutter;
+ProtobufShutter gProtobufShutter;
+
+} // namespace
 
 // Helper for deserializing INetwork
 void setTensorLocations(
@@ -48,7 +54,7 @@ void setTensorLocations(
         nvinfer1::TensorLocation loc
             = location == "device" ? nvinfer1::TensorLocation::kDEVICE : nvinfer1::TensorLocation::kHOST;
 
-        if (ctx->tensorLocations().count(tensor) > 0)
+        if (ctx->tensorLocations().contains(tensor))
         {
             ONNXTRT_CHECK(ctx->tensorLocations()[tensor] == loc, "The tensor location cannot be changed.",
                 ErrorCode::kINVALID_GRAPH);
@@ -86,8 +92,11 @@ void setStringMap(
     }
 }
 
+namespace
+{
+
 //! Make error explanation from TensorRT error recorder.
-static std::string makeErrorExplanation(ImporterContext* ctx, std::string const& nodeName)
+std::string makeErrorExplanation(ImporterContext* ctx, std::string const& nodeName)
 {
     std::ostringstream result;
     result << "Invalid Node - " << nodeName;
@@ -102,6 +111,8 @@ static std::string makeErrorExplanation(ImporterContext* ctx, std::string const&
     }
     return result.str();
 }
+
+} // namespace
 
 void ModelImporter::logModelInfo()
 {
@@ -171,7 +182,7 @@ void ModelImporter::reportSubgraphs()
         else
         {
             // Input name is extracted through error->file as all errors thrown on input tensors are wrapped
-            // around the macro MAKE_INPUT_ERROR.
+            // around the macro CHECK_INPUT.
             unsupportedInputNames.insert(error->file());
         }
     }
@@ -196,7 +207,7 @@ void ModelImporter::reportSubgraphs()
         auto&& nodeInput = node.input();
         return std::ranges::any_of(nodeInput, [&](auto const& input) {
             auto loopInput = findLoopTensor();
-            return unsupportedInputNames.count(input) || (loopInput.has_value() && *loopInput == input);
+            return unsupportedInputNames.contains(input) || (loopInput.has_value() && *loopInput == input);
         });
     };
 
@@ -253,7 +264,7 @@ bool isNodeInPluginRegistry(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto co
     std::string const pluginVersion{attrs.get<std::string>("plugin_version", "1")};
     std::string const pluginNamespace{attrs.get<std::string>("plugin_namespace", "")};
     LOG_VERBOSE("Checking if node can be treated as plugin: " << node.op_type() << ", plugin_version: " << pluginVersion
-                                                           << ", plugin_namespace: " << pluginNamespace);
+                                                              << ", plugin_namespace: " << pluginNamespace);
     nvinfer1::IPluginCreatorInterface* creator
         = importPluginCreator(ctx, node.op_type(), pluginVersion, pluginNamespace);
     return creator;
@@ -296,10 +307,10 @@ void parseNodeStaticCheck(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
         {
             // Internal error: op has an importer but no checker
             std::string errorMsg = "No static checker was found for " + nodeType;
-            errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
+            ADD_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex, errors);
             return;
         }
-        else if (ctx->localFunctions().count(nodeType))
+        else if (ctx->localFunctions().contains(nodeType))
         {
             LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             checkerFunc = &opCheckers.at("LocalFunctionImporter");
@@ -313,7 +324,7 @@ void parseNodeStaticCheck(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto cons
     if (!checkerFunc)
     {
         std::string errorMsg = "No static checker was found for " + nodeType;
-        errors.push_back(MAKE_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex));
+        ADD_NODE_ERROR(errorMsg, ErrorCode::kINTERNAL_ERROR, node, nodeIndex, errors);
         return;
     }
     (*checkerFunc)(ctx, node, errors, nodeIndex);
@@ -352,12 +363,11 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
         else
         {
             LOG_VERBOSE("Searching for input: " << inputName);
-            ONNXTRT_CHECK_NODE((ctx->tensors().count(inputName)), "Node input was not registered.", node, nodeIdx,
+            ONNXTRT_CHECK_NODE((ctx->tensors().contains(inputName)), "Node input was not registered.", node, nodeIdx,
                 ErrorCode::kINVALID_GRAPH);
             nodeInputs.push_back(ctx->tensors().at(inputName));
             ssInputs << "[" << inputName << " -> " << nodeInputs.back().shape() << "[" << nodeInputs.back().getType()
-                     << "]"
-                     << "], ";
+                     << "]" << "], ";
         }
     }
     LOG_VERBOSE(ssInputs.str());
@@ -412,7 +422,7 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
             importFunc = &opImporters.at(nodeType);
         }
         // To be consistent with operator override, local function will be preferred over plugin if the flag is unset.
-        else if (ctx->localFunctions().count(nodeType))
+        else if (ctx->localFunctions().contains(nodeType))
         {
             LOG_VERBOSE("Found registered local function: " << nodeType << ". Importing as a local function.");
             importFunc = &opImporters.at("LocalFunctionImporter");
@@ -484,8 +494,8 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
         }
     }
 
-    int32_t nonEmptyOutputs
-        = std::count_if(node.output().begin(), node.output().end(), [](std::string const& str) { return !str.empty(); });
+    int32_t nonEmptyOutputs = std::count_if(
+        node.output().begin(), node.output().end(), [](std::string const& str) { return !str.empty(); });
     ONNXTRT_CHECK_NODE(nonEmptyOutputs == static_cast<int32_t>(outputs.size()),
         "Node has more output tensors than TRT expected, expected output size is "
             << outputs.size() << ", actual output size is " << nonEmptyOutputs << ".",
@@ -503,8 +513,8 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
             continue;
         }
         auto& output = outputs.at(trtCnt);
-        ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << output.getType() << "]"
-                  << "], ";
+        std::string const outputType = output.getType();
+        ssOutputs << "[" << outputName << " -> " << output.shape() << "[" << outputType << "]" << "], ";
         // Note: This condition is to allow ONNX outputs to be ignored
         // Always register output weights (even empty ones) as it may be mapped to an unused input
         if ((output || output.is_weights()) && !outputName.empty())
@@ -515,7 +525,7 @@ void parseNode(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, si
         // quantization flag is set. If the UINT8 quantization flag is set, then UINT8 is also permitted as a
         // QuantizeLinear output or Gather output (when they feed into a dequantize node). Other than the cases listed,
         // any non-constant node that produces an UINT8-typed output that is not also a graph output is unsupported.
-        if (output.getType() == "UINT8")
+        if (outputType == "UINT8")
         {
             bool legalUINT8 = node.op_type() == "Constant"
                 || (allowUint8Quantization && (node.op_type() == "Gather" || node.op_type() == "QuantizeLinear"));
@@ -584,27 +594,85 @@ void collectSubgraphOuterScopeRefs(
     }
 }
 
-} // namespace
 
-void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
-    bool deserializingINetwork, int32_t* currentNode, int32_t subgraphParentIdx)
+//! Select top-level parameters and quantized DQ data only when every use accepts a placeholder.
+//! Shared graph outputs, control-flow captures and unsupported consumers retain real values.
+//! \p topLevel is false for nested graphs; \p deserializingINetwork is true when the model was produced
+//! by TensorRT itself (producer name "TensorRT") and is being re-imported verbatim. Neither gets placeholders.
+[[nodiscard]] std::unordered_set<std::string> getAutoPlaceholderNames([[maybe_unused]] ImporterContext* ctx,
+    [[maybe_unused]] ::ONNX_NAMESPACE::GraphProto const& graph, [[maybe_unused]] bool topLevel,
+    [[maybe_unused]] bool deserializingINetwork)
 {
-    // Import initializers.
+    std::unordered_set<std::string> candidates;
+    return candidates;
+}
+
+//! Import a top-level initializer as a weight placeholder: a named network constant whose payload is
+//! never read (the builder receives the values at refit). Also emits the initializer-backed refit record.
+TensorOrWeights importPlaceholder(ImporterContext* ctx, ::ONNX_NAMESPACE::TensorProto const& initializer)
+{
+    nvinfer1::Dims shape{};
+    shape.nbDims = initializer.dims_size();
+    std::ranges::copy(initializer.dims(), shape.d);
+    auto const type = initializer.data_type() == ::ONNX_NAMESPACE::TensorProto::DOUBLE
+        ? ::ONNX_NAMESPACE::TensorProto::FLOAT
+        : initializer.data_type();
+    ShapedWeights weights{type, nullptr, shape};
+    auto* layer = N_CHECK(ctx->network()->addConstant(shape, weights));
+    auto const* name = initializer.name().c_str();
+    ctx->registerLayer(layer, name, nullptr);
+    ONNXTRT_CHECK(ctx->network()->setWeightsName(layer->getWeights(), name),
+        "Failed to name weight placeholder: " << name, ErrorCode::kINVALID_GRAPH);
+    // The placeholder is an initializer by construction, so emit its initializer-backed record here
+    // rather than classifying by initializer-map lookup: not every parse entry point populates that
+    // map, and a miss would fall back to a kCONSTANT_NODE record whose fixedData is this null payload.
+    auto const kind = initializer.data_type() == ::ONNX_NAMESPACE::TensorProto::DOUBLE
+        ? nvonnxparser::RefitTransformKind::kDOUBLE_TO_FLOAT
+        : nvonnxparser::RefitTransformKind::kIDENTITY;
+    char const* const source = name;
+    ctx->notifyRefittableWeight(name, kind, initializer.data_type(), ImporterContext::trtDtypeOf(type),
+        static_cast<int64_t>(weights.count()), std::span<char const* const>{&source, 1});
+    // Keeping the placeholder as a tensor prevents importer-side constant folding/dereferences.
+    return TensorOrWeights{N_CHECK(layer->getOutput(0))};
+}
+
+//! Import every initializer of \p graph: as a weight placeholder when it was selected, otherwise by
+//! loading its payload.
+void importInitializers(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph,
+    std::unordered_set<std::string> const& placeholders)
+{
     try
     {
         for (::ONNX_NAMESPACE::TensorProto const& initializer : graph.initializer())
         {
-            LOG_VERBOSE("Importing initializer: " << initializer.name());
-            ShapedWeights weights;
-            ONNXTRT_CHECK(ctx->getWeightsContext().convertOnnxWeights(initializer, &weights),
-                "Failed to import initializer: " << initializer.name(), ErrorCode::kUNSUPPORTED_NODE);
-            ctx->registerTensor(TensorOrWeights{std::move(weights)}, initializer.name());
+            if (placeholders.contains(initializer.name()))
+            {
+                LOG_VERBOSE("Importing initializer as placeholder: " << initializer.name());
+                ctx->registerTensor(importPlaceholder(ctx, initializer), initializer.name());
+            }
+            else
+            {
+                LOG_VERBOSE("Importing initializer: " << initializer.name());
+                ShapedWeights weights;
+                ONNXTRT_CHECK(ctx->getWeightsContext().convertOnnxWeights(initializer, &weights),
+                    "Failed to import initializer: " << initializer.name(), ErrorCode::kUNSUPPORTED_NODE);
+                ctx->registerTensor(TensorOrWeights{std::move(weights)}, initializer.name());
+            }
         }
     }
     catch (std::exception const& e)
     {
         ONNXTRT_THROW(MAKE_ERROR(std::string("Failed to import initializer: ") + e.what(), ErrorCode::kINVALID_GRAPH));
     }
+}
+
+} // namespace
+
+void parseGraph(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, std::vector<Status>& errors,
+    bool deserializingINetwork, int32_t* currentNode, int32_t subgraphParentIdx)
+{
+    importInitializers(
+        ctx, graph, getAutoPlaceholderNames(ctx, graph, /*topLevel=*/subgraphParentIdx < 0, deserializingINetwork));
 
     // Keep track of graph inputs in the context to validate DLA squeeze / unsqueeze nodes.
     for (auto const& input : graph.input())
@@ -725,22 +793,24 @@ namespace
     if (inputName.size() > 1 && inputName.front() == '-')
     {
         // Use std::all_of to check if all characters after '-' are digits
-        return std::all_of(inputName.begin() + 1, inputName.end(),
-            [](char c) {return std::isdigit(static_cast<unsigned char>(c));});
+        return std::all_of(
+            inputName.begin() + 1, inputName.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); });
     }
     return false;
 }
-} // namespace
 
-static void setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
+void setDimensionNames(ImporterContext* ctx, std::vector<NamedDimension>& namedDims)
 {
     for (auto const& namedDim : namedDims)
     {
-        std::string const name = isNegativeInteger(namedDim.dimParam) ?
-            "trt_dynamic_dim_" + std::to_string(namedDim.index) : namedDim.dimParam;
+        std::string const name = isNegativeInteger(namedDim.dimParam)
+            ? "trt_dynamic_dim_" + std::to_string(namedDim.index)
+            : namedDim.dimParam;
         namedDim.tensor->setDimensionName(namedDim.index, name.c_str());
     }
 }
+
+} // namespace
 
 void importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& graph, StringMap<TensorOrWeights>* tensors,
     std::vector<Status>& errors)
@@ -758,7 +828,7 @@ void importInputs(ImporterContext* ctx, ::ONNX_NAMESPACE::GraphProto const& grap
     for (::ONNX_NAMESPACE::ValueInfoProto const& input : graph.input())
     {
         TensorOrWeights tensor;
-        if (!initializers.count(input.name()))
+        if (!initializers.contains(input.name()))
         {
             nvinfer1::ITensor* tensor_ptr{nullptr};
             std::vector<Status> status = importInput(ctx, input, &tensor_ptr, namedDims);
@@ -849,7 +919,7 @@ bool ModelImporter::supportsOperator(char const* op_name) const noexcept
 {
     ONNXTRT_TRY
     {
-        return _op_importers.contains(op_name);
+        return mOpImporters.contains(op_name);
     }
     ONNXTRT_CATCH_RECORD
 
@@ -895,7 +965,7 @@ bool ModelImporter::parse(
         }
         catch (std::exception& e)
         {
-            mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
+            ADD_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR, mErrors);
         }
 
         logErrors();
@@ -964,7 +1034,7 @@ void ModelImporter::importModel()
     // Mark outputs defined in the ONNX model (unless tensors are user-requested)
     for (::ONNX_NAMESPACE::ValueInfoProto const& output : graph.output())
     {
-        ONNXTRT_CHECK((mImporterCtx.tensors().count(output.name())),
+        ONNXTRT_CHECK((mImporterCtx.tensors().contains(output.name())),
             "The output tensor " << output.name() << " was not registered.", ErrorCode::kINVALID_GRAPH);
         nvinfer1::ITensor* output_tensor_ptr
             = &convertToTensor(mImporterCtx.tensors().at(output.name()), &mImporterCtx);
@@ -1086,6 +1156,15 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity) 
         // Keep track of the absolute path to the ONNX file.
         mImporterCtx.setOnnxFileLocation(onnxModelFile);
 
+        // Populate the initializer map so the parse-time refit observer classifies initializer-backed
+        // weights (kIDENTITY / kDOUBLE_TO_FLOAT) on this entry point too; see parse().
+        auto& initializerMap = mImporterCtx.getWeightsContext().initializerMap();
+        initializerMap.clear();
+        for (::ONNX_NAMESPACE::TensorProto const& initializer : mOnnxModel.graph().initializer())
+        {
+            initializerMap[initializer.name()] = &initializer;
+        }
+
         // Prevent failure of importModel from early-exiting
         try
         {
@@ -1097,7 +1176,7 @@ bool ModelImporter::parseFromFile(char const* onnxModelFile, int32_t verbosity) 
         }
         catch (std::exception& e)
         {
-            mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
+            ADD_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR, mErrors);
         }
 
         logErrors();
@@ -1128,10 +1207,14 @@ bool ModelImporter::loadModelProto(
 
         deserializeOnnxModel(serializedOnnxModel, serializedOnnxModelSize, &mOnnxModel);
 
-        // Populate map of initializers for loadInitializers()
+        // Populate the initializer map for loadInitializer() and the parse-time refit observer. Clear
+        // first and overwrite: the map holds pointers into mOnnxModel, which the deserialization above
+        // replaced, so entries from a previously loaded model would dangle (see parse()).
+        auto& initializerMap = ctx->getWeightsContext().initializerMap();
+        initializerMap.clear();
         for (::ONNX_NAMESPACE::TensorProto const& initializer : mOnnxModel.graph().initializer())
         {
-            ctx->getWeightsContext().initializerMap().insert({initializer.name(), &initializer});
+            initializerMap[initializer.name()] = &initializer;
         }
         return true;
     }
@@ -1178,7 +1261,7 @@ bool ModelImporter::parseModelProto() noexcept
         }
         catch (std::exception& e)
         {
-            mErrors.push_back(MAKE_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR));
+            ADD_ERROR(e.what(), ErrorCode::kINTERNAL_ERROR, mErrors);
         }
         logErrors();
         reportSubgraphs();

@@ -10,8 +10,8 @@
 namespace onnx2trt
 {
 
-nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ILoop* loop,
-    std::vector<TensorOrWeights>& inputs, const std::string& direction)
+nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILoop* loop,
+    std::vector<TensorOrWeights>& inputs, std::string const& direction)
 {
     // In the forward/reverse cases, we only use a single iterator. In the bidirectional case, a forward and reverse
     // iterator must be concatenated.
@@ -19,7 +19,7 @@ nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
     nvinfer1::ITensor* iterationInput{nullptr};
     nvinfer1::ITensor* input = &convertToTensor(inputs.at(0), ctx);
 
-    const int sequenceLenIndex = 4;
+    int const sequenceLenIndex = 4;
     bool isRagged = inputs.size() > sequenceLenIndex && inputs.at(sequenceLenIndex);
 
     if (direction == "forward")
@@ -76,17 +76,17 @@ nvinfer1::ITensor* addRNNInput(ImporterContext* ctx, const ::ONNX_NAMESPACE::Nod
     return iterationInput;
 }
 
-nvinfer1::ITensor* clearMissingSequenceElements(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+nvinfer1::ITensor* clearMissingSequenceElements(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     nvinfer1::ILoop* loop, nvinfer1::ITensor* seqLens, nvinfer1::ITensor* toMask, nvinfer1::ITensor* maxLen,
     bool reverse, nvinfer1::ITensor* counter)
 {
-    nvinfer1::ITensor* zero = addConstantScalar(ctx, 0.f, ::ONNX_NAMESPACE::TensorProto::FLOAT, 3)->getOutput(0);
+    nvinfer1::ITensor* zero = addConstantScalar(ctx, 0.F, ::ONNX_NAMESPACE::TensorProto::FLOAT, 3)->getOutput(0);
     nvinfer1::ITensor* seqMask = getRaggedMask(ctx, node, loop, seqLens, maxLen, reverse, counter);
     auto selectLayer = N_CHECK(ctx->network()->addSelect(*seqMask, *toMask, *zero));
     return N_CHECK(selectLayer->getOutput(0));
 }
 
-nvinfer1::ITensor* maskRNNHidden(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ILoop* loop,
+nvinfer1::ITensor* maskRNNHidden(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILoop* loop,
     nvinfer1::ITensor* seqLens, nvinfer1::ITensor* prevH, nvinfer1::ITensor* Ht, nvinfer1::ITensor* maxLen,
     bool reverse, nvinfer1::ITensor* counter)
 {
@@ -97,7 +97,7 @@ nvinfer1::ITensor* maskRNNHidden(ImporterContext* ctx, const ::ONNX_NAMESPACE::N
     return N_CHECK(selectLayer->getOutput(0));
 }
 
-nvinfer1::ITensor* maskBidirRNNHidden(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node,
+nvinfer1::ITensor* maskBidirRNNHidden(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node,
     nvinfer1::ILoop* loop, nvinfer1::ITensor* seqLens, nvinfer1::ITensor* maxLen, nvinfer1::ITensor* Ht1,
     nvinfer1::ITensor* Ht, nvinfer1::ITensor* singlePassShape)
 {
@@ -110,23 +110,23 @@ nvinfer1::ITensor* maskBidirRNNHidden(ImporterContext* ctx, const ::ONNX_NAMESPA
         ::ONNX_NAMESPACE::TensorProto::INT32,
         nvinfer1::Dims{1, {3}})->getOutput(0);
 
-    nvinfer1::ISliceLayer* HtForwardLayer
-        = N_CHECK(ctx->network()->addSlice(*Ht, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
+    nvinfer1::ISliceLayer* HtForwardLayer = N_CHECK(
+        ctx->network()->addSlice(*Ht, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
     HtForwardLayer->setInput(1, *forwardStart);
     HtForwardLayer->setInput(2, *singlePassShape);
 
-    nvinfer1::ISliceLayer* HtBackwardLayer
-        = N_CHECK(ctx->network()->addSlice(*Ht, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
+    nvinfer1::ISliceLayer* HtBackwardLayer = N_CHECK(
+        ctx->network()->addSlice(*Ht, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
     HtBackwardLayer->setInput(1, *reverseStart);
     HtBackwardLayer->setInput(2, *singlePassShape);
 
-    nvinfer1::ISliceLayer* Ht1ForwardLayer
-        = N_CHECK(ctx->network()->addSlice(*Ht1, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
+    nvinfer1::ISliceLayer* Ht1ForwardLayer = N_CHECK(
+        ctx->network()->addSlice(*Ht1, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
     Ht1ForwardLayer->setInput(1, *forwardStart);
     Ht1ForwardLayer->setInput(2, *singlePassShape);
 
-    nvinfer1::ISliceLayer* Ht1BackwardLayer
-        = N_CHECK(ctx->network()->addSlice(*Ht1, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
+    nvinfer1::ISliceLayer* Ht1BackwardLayer = N_CHECK(
+        ctx->network()->addSlice(*Ht1, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{0, 0, 0}, nvinfer1::Dims3{1, 1, 1}));
     Ht1BackwardLayer->setInput(1, *reverseStart);
     Ht1BackwardLayer->setInput(2, *singlePassShape);
 
@@ -144,7 +144,7 @@ nvinfer1::ITensor* maskBidirRNNHidden(ImporterContext* ctx, const ::ONNX_NAMESPA
     return N_CHECK(concat->getOutput(0));
 }
 
-nvinfer1::ITensor* getRaggedMask(ImporterContext* ctx, const ::ONNX_NAMESPACE::NodeProto& node, nvinfer1::ILoop* loop,
+nvinfer1::ITensor* getRaggedMask(ImporterContext* ctx, ::ONNX_NAMESPACE::NodeProto const& node, nvinfer1::ILoop* loop,
     nvinfer1::ITensor* seqLens, nvinfer1::ITensor* maxLen, bool reverse, nvinfer1::ITensor* counter)
 {
     // Returns a bool tensor which is true where the elements are valid (within the sequence) and false when outside the

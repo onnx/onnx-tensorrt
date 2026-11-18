@@ -9,6 +9,7 @@
 #include "errorHelpers.hpp"
 #include "weightUtils.hpp"
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -21,6 +22,10 @@ using FileHandle =
 #else
     int;
 #endif
+
+//! \return the number of elements implied by \p dims, or std::nullopt if a dimension is negative
+//! or the product overflows size_t.
+[[nodiscard]] std::optional<size_t> getInitializerVol(google::protobuf::RepeatedField<int64_t> const& dims);
 
 // Class responsible for reading, casting, and converting weight values from an ONNX model and into ShapedWeights
 // objects. All temporary weights are stored in a buffer owned by the class so they do not go out of scope.
@@ -116,8 +121,8 @@ public:
     // Helper function to get fp32 representation of fp16, bf16, or fp32 weights.
     float* getFP32Values(ShapedWeights const& w);
 
-    // Register an unique name for the created weights. If the weights are expected to be refittable by the IParserRefitter,
-    // use a different identifier.
+    // Register an unique name for the created weights. If the weights are expected to be refittable by the
+    // IParserRefitter, use a different identifier.
     ShapedWeights createNamedTempWeights(ShapedWeights::DataType type, nvinfer1::Dims const& shape,
         std::set<std::string>& namesSet, int64_t& suffixCounter, bool refittable = false);
 

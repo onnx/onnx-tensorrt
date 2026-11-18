@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <filesystem>
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifndef ENABLE_STD_PLUGIN
@@ -39,16 +41,19 @@
 #define ONNX2TRT_FILENAME (std::filesystem::path(__FILE__).filename().string())
 #endif
 
-// Logging macros
+// Logging macros. msg is a stream-insertion expression, e.g. LOG_VERBOSE("Shape: " << shape), so it cannot be
+// parenthesized.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define LOG(msg, severity)                                                                                             \
     do                                                                                                                 \
     {                                                                                                                  \
         std::stringstream ss{};                                                                                        \
-        if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
+        if ((severity) <= nvinfer1::ILogger::Severity::kWARNING)                                                       \
             ss << ONNX2TRT_FILENAME << ":" << __LINE__ << ": ";                                                        \
         ss << msg;                                                                                                     \
         ctx->logger().log(severity, ss.str().c_str());                                                                 \
     } while (0)
+// NOLINTEND(bugprone-macro-parentheses)
 
 #define LOG_VERBOSE(msg) LOG(msg, nvinfer1::ILogger::Severity::kVERBOSE)
 #define LOG_INFO(msg) LOG(msg, nvinfer1::ILogger::Severity::kINFO)
@@ -56,6 +61,10 @@
 #define LOG_ERROR(msg) LOG(msg, nvinfer1::ILogger::Severity::kERROR)
 
 #define MAKE_ERROR(desc, code) onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__)
+
+// Append a Status built like MAKE_ERROR to error_list, constructing it in place.
+#define ADD_ERROR(desc, code, error_list)                                                                              \
+    (error_list).emplace_back((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__)
 
 #define ASSERT(condition, error_code)                                                                                  \
     do                                                                                                                 \
@@ -67,8 +76,17 @@
     } while (0)
 
 #define MAKE_NODE_ERROR(desc, code, node, index)                                                                       \
-    onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), (node.name()), (node.op_type()))
+    onnx2trt::Status(                                                                                                  \
+        (code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), ((node).name()), ((node).op_type()))
 
+// Append a Status built like MAKE_NODE_ERROR to error_list, constructing it in place.
+#define ADD_NODE_ERROR(desc, code, node, index, error_list)                                                            \
+    (error_list)                                                                                                       \
+        .emplace_back(                                                                                                 \
+            (code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), ((node).name()), ((node).op_type()))
+
+// msg is a stream-insertion expression, so it cannot be parenthesized.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define ASSERT_NODE(condition, msg, node, index, error_code)                                                           \
     do                                                                                                                 \
     {                                                                                                                  \
@@ -79,9 +97,11 @@
             return MAKE_NODE_ERROR((error.str()), (error_code), node, index);                                          \
         }                                                                                                              \
     } while (0)
+// NOLINTEND(bugprone-macro-parentheses)
 
 #define MAKE_STATIC_ERROR(desc, code, node, index)                                                                     \
-    onnx2trt::Status((code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), (node.name()), (node.op_type()))
+    onnx2trt::Status(                                                                                                  \
+        (code), (desc), ONNX2TRT_FILENAME, __LINE__, __func__, (index), ((node).name()), ((node).op_type()))
 
 #define ADD_STATIC_ERROR(desc, code, node, index, error_list)                                                          \
     do                                                                                                                 \
@@ -113,14 +133,12 @@
         }                                                                                                              \
     } while (0)
 
-#define MAKE_INPUT_ERROR(desc, code, name) Status((code), (desc), name, __LINE__, __func__)
-
 #define CHECK_INPUT(condition, error_code, name, error_list)                                                           \
     do                                                                                                                 \
     {                                                                                                                  \
         if (!(condition))                                                                                              \
         {                                                                                                              \
-            error_list.push_back(MAKE_INPUT_ERROR("Assertion failed: " #condition, (error_code), (name)));             \
+            (error_list).emplace_back((error_code), "Assertion failed: " #condition, (name), __LINE__, __func__);      \
         }                                                                                                              \
     } while (0)
 
@@ -143,7 +161,7 @@
         }                                                                                                              \
         else                                                                                                           \
         {                                                                                                              \
-            *result_ptr = value_or_error.value();                                                                      \
+            *(result_ptr) = value_or_error.value();                                                                    \
         }                                                                                                              \
     } while (0)
 
@@ -174,7 +192,7 @@ namespace onnx2trt
 {
 
 template <typename T>
-std::ostream& printSequence(std::ostream& stream, const T* begin, int count);
+std::ostream& printSequence(std::ostream& stream, T const* begin, int count);
 
 std::ostream& operator<<(std::ostream& stream, nvinfer1::Dims const& shape);
 
@@ -186,138 +204,138 @@ using nvonnxparser::ErrorCode;
 
 class Status : public nvonnxparser::IParserError
 {
-    ErrorCode _code;
-    std::string _desc;
-    std::string _file;
-    int _line;
-    std::string _func;
-    int _node;
-    std::string _nodeName;
-    std::string _nodeOperator;
-    std::vector<char const*> _localFunctionStack;
+    ErrorCode mCode;
+    std::string mDesc;
+    std::string mFile;
+    int32_t mLine;
+    std::string mFunc;
+    int32_t mNode;
+    std::string mNodeName;
+    std::string mNodeOperator;
+    std::vector<char const*> mLocalFunctionStack;
 
 public:
     static Status success()
     {
         return Status(ErrorCode::kSUCCESS);
     }
-    Status() {}
-    explicit Status(ErrorCode code, std::string desc = "", std::string file = "", int line = 0, std::string func = "",
-        int node = -1, std::string nodeName = "", std::string nodeOperator = "",
+    Status() = default;
+    explicit Status(ErrorCode code, std::string desc = "", std::string file = "", int32_t line = 0,
+        std::string func = "", int32_t node = -1, std::string nodeName = "", std::string nodeOperator = "",
         std::vector<char const*> localFunctionStack = {})
-        : _code(code)
-        , _desc(desc)
-        , _file(file)
-        , _line(line)
-        , _func(func)
-        , _node(node)
-        , _nodeName(nodeName)
-        , _nodeOperator(nodeOperator)
-        , _localFunctionStack(localFunctionStack)
+        : mCode(code)
+        , mDesc(std::move(desc))
+        , mFile(std::move(file))
+        , mLine(line)
+        , mFunc(std::move(func))
+        , mNode(node)
+        , mNodeName(std::move(nodeName))
+        , mNodeOperator(std::move(nodeOperator))
+        , mLocalFunctionStack(std::move(localFunctionStack))
     {
     }
-    ErrorCode code() const override
+    [[nodiscard]] ErrorCode code() const override
     {
-        return _code;
+        return mCode;
     }
-    char const* desc() const override
+    [[nodiscard]] char const* desc() const override
     {
-        return _desc.c_str();
+        return mDesc.c_str();
     }
-    char const* file() const override
+    [[nodiscard]] char const* file() const override
     {
-        return _file.c_str();
+        return mFile.c_str();
     }
-    int line() const override
+    [[nodiscard]] int line() const override
     {
-        return _line;
+        return mLine;
     }
-    char const* func() const override
+    [[nodiscard]] char const* func() const override
     {
-        return _func.c_str();
+        return mFunc.c_str();
     }
-    int node() const override
+    [[nodiscard]] int node() const override
     {
-        return _node;
+        return mNode;
     }
-    bool is_error() const
+    [[nodiscard]] bool is_error() const
     {
-        return _code != ErrorCode::kSUCCESS;
+        return mCode != ErrorCode::kSUCCESS;
     }
-    bool is_success() const
+    [[nodiscard]] bool is_success() const
     {
-        return _code == ErrorCode::kSUCCESS;
+        return mCode == ErrorCode::kSUCCESS;
     }
-    void setNode(int node)
+    void setNode(int32_t node)
     {
-        _node = node;
+        mNode = node;
     }
-    char const* nodeName() const override
+    [[nodiscard]] char const* nodeName() const override
     {
-        return _nodeName.c_str();
+        return mNodeName.c_str();
     }
-    char const* nodeOperator() const override
+    [[nodiscard]] char const* nodeOperator() const override
     {
-        return _nodeOperator.c_str();
+        return mNodeOperator.c_str();
     }
-    char const* const* localFunctionStack() const override
+    [[nodiscard]] char const* const* localFunctionStack() const override
     {
-        return _localFunctionStack.data();
+        return mLocalFunctionStack.data();
     }
-    int32_t localFunctionStackSize() const override
+    [[nodiscard]] int32_t localFunctionStackSize() const override
     {
-        return _localFunctionStack.size();
+        return mLocalFunctionStack.size();
     }
 };
 
 template <typename T>
 class ValueOrStatus
 {
-    bool _is_error;
-    T _value;
-    Status _error;
+    bool mIsError;
+    T mValue;
+    Status mError;
 
 public:
     ValueOrStatus(T const& value)
-        : _is_error(false)
-        , _value(value)
-        , _error(Status::success())
+        : mIsError(false)
+        , mValue(value)
+        , mError(Status::success())
     {
     }
     ValueOrStatus(T&& value)
-        : _is_error(false)
-        , _value(value)
-        , _error(Status::success())
+        : mIsError(false)
+        , mValue(std::move(value))
+        , mError(Status::success())
     {
     }
     ValueOrStatus(Status const& error)
-        : _is_error(true)
-        , _error(error)
+        : mIsError(true)
+        , mError(error)
     {
     }
     ValueOrStatus(Status&& error)
-        : _is_error(true)
-        , _error(error)
+        : mIsError(true)
+        , mError(std::move(error))
     {
     }
-    bool is_error() const
+    [[nodiscard]] bool is_error() const
     {
-        return _is_error;
+        return mIsError;
     }
     T const& value() const
     {
-        assert(!_is_error);
-        return _value;
+        assert(!mIsError);
+        return mValue;
     }
     T& value()
     {
-        assert(!_is_error);
-        return _value;
+        assert(!mIsError);
+        return mValue;
     }
-    Status const& error() const
+    [[nodiscard]] Status const& error() const
     {
-        assert(_is_error);
-        return _error;
+        assert(mIsError);
+        return mError;
     }
 };
 

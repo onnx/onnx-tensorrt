@@ -2,7 +2,7 @@
 
 # Supported ONNX Operators
 
-TensorRT 11.4 supports operators in the inclusive range of opset 9 to opset 24. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
+TensorRT 11.5 supports operators in the inclusive range of opset 9 to opset 25. Latest information of ONNX operators can be found [here](https://github.com/onnx/onnx/blob/main/docs/Operators.md). More details and limitations are documented in the chart below.
 
 TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOAT16, FP8, FP4, INT32, INT64, INT8, INT4, UINT8, and BOOL
 
@@ -196,7 +196,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Split                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |                                                                                                          |
 | SplitToSequence           | N          |
 | Sqrt                      | Y          | FP32, FP16, BF16 |
-| Squeeze                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be resolvable to a constant.                    |
+| Squeeze                   | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be resolvable to a constant. When `axes` is omitted, only dimensions that are statically 1 are removed; dynamic dimensions are retained and must not be 1 at runtime. |
 | StringConcat              | N          |
 | StringNormalizer          | N          |
 | StringSplit               | N          |

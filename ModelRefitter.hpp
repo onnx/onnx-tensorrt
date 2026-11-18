@@ -8,24 +8,28 @@
 #include "Status.hpp"
 #include "WeightsContext.hpp"
 #include "errorHelpers.hpp"
-#include <onnx/onnx-ml.pb.h>
 #include <cstddef>
+#include <onnx/onnx-ml.pb.h>
 #include <set>
 #include <span>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-// Logging macros
+// Logging macros. msg is a stream-insertion expression, so it cannot be parenthesized.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define LOG_REFITTER(msg, severity)                                                                                    \
     do                                                                                                                 \
     {                                                                                                                  \
         std::ostringstream ss{};                                                                                       \
-        if (severity <= nvinfer1::ILogger::Severity::kWARNING)                                                         \
+        if ((severity) <= nvinfer1::ILogger::Severity::kWARNING)                                                       \
+        {                                                                                                              \
             ss << ONNX2TRT_FILENAME << ":" << __LINE__ << ": ";                                                        \
+        }                                                                                                              \
         ss << msg;                                                                                                     \
         mLogger->log(severity, ss.str().c_str());                                                                      \
     } while (0)
+// NOLINTEND(bugprone-macro-parentheses)
 
 #define LOG_REFITTER_VERBOSE(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kVERBOSE)
 #define LOG_REFITTER_WARNING(msg) LOG_REFITTER(msg, nvinfer1::ILogger::Severity::kWARNING)
@@ -81,8 +85,8 @@ private:
     //! \param fixedData Parser-owned attribute payload for kCONSTANT_NODE / kCONSTANT_OF_SHAPE.
     //!   Empty span for the other kinds. Valid only during the callback.
     void notifyObserver(char const* trtName, nvonnxparser::RefitTransformKind kind, int32_t onnxDtype,
-        nvinfer1::DataType trtDtype, int64_t count, std::span<char const* const> sources,
-        float epsilon = 0.0F, std::span<std::byte const> fixedData = {}) noexcept;
+        nvinfer1::DataType trtDtype, int64_t count, std::span<char const* const> sources, float epsilon = 0.0F,
+        std::span<std::byte const> fixedData = {}) noexcept;
 
     //! T is the working type.
     //! TConvertFunc is a functor for converting ShapedWeights to an array of type T.
