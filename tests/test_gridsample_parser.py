@@ -3,7 +3,7 @@
 """Parser-only regression tests for GridSample padding attributes.
 
 Run against the parser under test with:
-    python -m unittest -v test_gridsample_parser
+    python -m unittest discover -s tests -p test_gridsample_parser.py -v
 """
 
 import unittest
